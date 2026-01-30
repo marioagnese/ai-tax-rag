@@ -1,2 +1,0 @@
-# ai-tax-rag
-TaxAI
