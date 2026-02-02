@@ -22,7 +22,7 @@ export async function GET(req: Request) {
     const OPENAI_API_KEY = requireEnv("OPENAI_API_KEY");
     const PINECONE_API_KEY = requireEnv("PINECONE_API_KEY");
     const PINECONE_INDEX = requireEnv("PINECONE_INDEX");
-    const PINECONE_NAMESPACE = requireEnv("PINECONE_NAMESPACE"); // ✅ required
+    const PINECONE_NAMESPACE = requireEnv("PINECONE_NAMESPACE");
 
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
     const pc = new Pinecone({ apiKey: PINECONE_API_KEY });
@@ -31,13 +31,13 @@ export async function GET(req: Request) {
     const filter: any = {};
     if (country) filter.country = { $eq: country };
 
-    // Embed question
+    // 1) Embed question
     const qEmb = await openai.embeddings.create({
       model: "text-embedding-3-small",
       input: q,
     });
 
-    // Retrieve
+    // 2) Retrieve
     const results = await index.query({
       vector: qEmb.data[0].embedding,
       topK: Math.max(1, Math.min(topK, 10)),
@@ -47,7 +47,7 @@ export async function GET(req: Request) {
 
     const matches = results.matches ?? [];
 
-    // Conservative assistant behavior: no sources => no answer
+    // Conservative: no sources => no answer
     if (matches.length === 0) {
       return NextResponse.json(
         {
@@ -61,11 +61,11 @@ export async function GET(req: Request) {
       );
     }
 
-    const sources = matches.slice(0, 5).map((m, i) => {
-      const cite = `S${i + 1}`;
+    // UI-ready citations
+    const citations = matches.slice(0, 5).map((m, i) => {
       const md: any = m.metadata || {};
       return {
-        cite,
+        cite: `S${i + 1}`,
         id: m.id,
         score: m.score,
         country: md.country ?? null,
@@ -76,23 +76,56 @@ export async function GET(req: Request) {
         citation_label: md.citation_label ?? null,
         source_url: md.source_url ?? null,
         chunk_id: md.chunk_id ?? m.id ?? null,
-        // later (PDF): page_start/page_end for click-to-verify by page
         page_start: md.page_start ?? null,
         page_end: md.page_end ?? null,
-        // short snippet for UI preview
         snippet: typeof md.text === "string" ? md.text.slice(0, 260) : "",
       };
     });
 
-    // Context fed to LLM (include enough for precise citation)
-    const context = sources
-      .map((s) => {
-        const label = s.citation_label || s.law_code || "SOURCE";
-        const art = s.article ? `Art. ${s.article}` : "";
-        const urlLine = s.source_url ? `URL: ${s.source_url}` : "";
-        return `[${s.cite}] ${label} ${art}\n${urlLine}\nTEXT: ${s.snippet}\n`;
+    // Context for LLM
+    const context = citations
+      .map((c) => {
+        const label = c.citation_label || c.law_code || "SOURCE";
+        const art = c.article ? `Art. ${c.article}` : "";
+        const urlLine = c.source_url ? `URL: ${c.source_url}` : "";
+        return `[${c.cite}] ${label} ${art}\n${urlLine}\nTEXT: ${c.snippet}\n`;
       })
       .join("\n");
 
+    // 3) Generate grounded answer
     const completion = await openai.chat.completions.create({
-      mo
+      model: "gpt-4o-mini",
+      temperature: 0.2,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a LATAM tax research assistant. Answer ONLY using the provided sources. " +
+            "If the sources are incomplete, say what is missing. Cite sources like [S1], [S2]. " +
+            "Be concise and professional.",
+        },
+        {
+          role: "user",
+          content: `QUESTION: ${q}\n\nSOURCES:\n${context}`,
+        },
+      ],
+    });
+
+    const answer = completion.choices?.[0]?.message?.content?.trim() ?? "";
+
+    return NextResponse.json({
+      ok: true,
+      question: q,
+      topK,
+      namespace: PINECONE_NAMESPACE,
+      filter: Object.keys(filter).length ? filter : null,
+      answer,
+      citations,
+    });
+  } catch (err: any) {
+    return NextResponse.json(
+      { ok: false, error: err?.message || "Unknown error" },
+      { status: 500 }
+    );
+  }
+}
