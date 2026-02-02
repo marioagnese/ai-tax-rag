@@ -23,12 +23,16 @@ export async function POST(req: Request) {
     const ids = body?.ids;
 
     if (!Array.isArray(ids) || ids.length === 0) {
-      return NextResponse.json({ ok: false, error: "Provide { ids: string[] }" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: "Provide { ids: string[] }" },
+        { status: 400 }
+      );
     }
 
     const pc = new Pinecone({ apiKey: PINECONE_API_KEY });
     const index = pc.index(PINECONE_INDEX).namespace(PINECONE_NAMESPACE);
 
+    // delete by ids
     await index.deleteMany(ids.map((x: any) => String(x)));
 
     return NextResponse.json({
@@ -37,6 +41,9 @@ export async function POST(req: Request) {
       deleted: ids,
     });
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err?.message || "Unknown error" }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: err?.message || "Unknown error" },
+      { status: 500 }
+    );
   }
 }
