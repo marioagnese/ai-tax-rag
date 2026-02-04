@@ -1,21 +1,11 @@
-// src/jobs/ingest.ts
+// app/api/jobs/ingest/route.ts
+import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { Pinecone } from "@pinecone-database/pinecone";
-import type { NormalizedDoc, SourcePlugin, SourceTarget } from "../core/contracts/source";
+import type { NormalizedDoc, SourcePlugin, SourceTarget } from "../../../../src/core/contracts/source";
 
-/**
- * Direct-to-Pinecone ingestion runner.
- * No Next server required. No /api/ingest required.
- *
- * Usage:
- *   set -a; source .env.local; set +a
- *   npx tsx src/jobs/ingest.ts br.planalto
- *
- * Optional env:
- *   MAX_DOCS=50
- *   EMBED_BATCH=48
- *   EMBED_MODEL=text-embedding-3-small
- */
+export const runtime = "nodejs"; // required (uses node libs + pinecone/openai)
+export const dynamic = "force-dynamic"; // don't cache job responses
 
 function requireEnv(name: string) {
   const v = process.env[name];
@@ -42,7 +32,6 @@ function sanitizeMetadata(input: any): Record<string, any> {
       if (strArr.length > 0) out[k] = strArr;
       continue;
     }
-
     // nested objects not allowed → drop
   }
 
@@ -83,41 +72,30 @@ function isPlugin(x: any): x is SourcePlugin {
  *  - export { BrazilPlanaltoPlugin, ... }
  */
 async function loadPlugins(): Promise<SourcePlugin[]> {
-  const mod: any = await import("../sources");
+  const mod: any = await import("../../../../src/sources");
 
-  // 1) Common: named export "plugins"
-  if (Array.isArray(mod.plugins)) {
-    return mod.plugins.filter(isPlugin);
-  }
+  if (Array.isArray(mod.plugins)) return mod.plugins.filter(isPlugin);
+  if (Array.isArray(mod.default)) return mod.default.filter(isPlugin);
 
-  // 2) Common: default export is an array
-  if (Array.isArray(mod.default)) {
-    return mod.default.filter(isPlugin);
-  }
-
-  // 3) Otherwise: scan all exports and keep things that look like plugins
   const found: SourcePlugin[] = [];
   for (const v of Object.values(mod)) {
     if (isPlugin(v)) found.push(v);
-    if (Array.isArray(v)) {
-      for (const item of v) if (isPlugin(item)) found.push(item);
-    }
+    if (Array.isArray(v)) for (const item of v) if (isPlugin(item)) found.push(item);
   }
 
-  // de-dupe by plugin id
   const byId = new Map<string, SourcePlugin>();
   for (const p of found) byId.set(p.id, p);
   return [...byId.values()];
 }
 
-async function main() {
-  const pluginId = process.argv[2];
-  if (!pluginId) {
-    console.error("Usage: npx tsx src/jobs/ingest.ts <pluginId>");
-    console.error("Example: npx tsx src/jobs/ingest.ts br.planalto");
-    process.exit(1);
-  }
+type JobParams = {
+  pluginId: string;
+  maxDocs?: number;
+  embedBatch?: number;
+  dryRun?: boolean;
+};
 
+async function runIngest(params: JobParams) {
   // Env
   const OPENAI_API_KEY = requireEnv("OPENAI_API_KEY");
   const PINECONE_API_KEY = requireEnv("PINECONE_API_KEY");
@@ -133,34 +111,31 @@ async function main() {
   // Plugins
   const plugins = await loadPlugins();
   if (!plugins.length) {
-    throw new Error("No plugins discovered from src/sources. Export a plugin or a plugins array.");
+    throw new Error("No plugins discovered from src/sources. Export a plugin or plugins array.");
   }
 
-  const plugin = plugins.find((p) => p.id === pluginId);
+  const plugin = plugins.find((p) => p.id === params.pluginId);
   if (!plugin) {
-    throw new Error(`Plugin not found: ${pluginId}. Available: ${plugins.map((p) => p.id).join(", ")}`);
+    throw new Error(
+      `Plugin not found: ${params.pluginId}. Available: ${plugins.map((p) => p.id).join(", ")}`
+    );
   }
 
   const targets: SourceTarget[] = await plugin.listTargets();
-  console.log(`Plugin: ${plugin.id} (${plugin.country}) targets=${targets.length}`);
 
   let totalDocs = 0;
   let totalUpserted = 0;
+  const perTarget: Array<{ targetId: string; docs: number; upserted: number; url: string }> = [];
 
   for (const target of targets) {
-    console.log(`Target: ${target.id} -> ${target.source_url}`);
-
     // 1) Crawl + normalize
     const normalized: NormalizedDoc[] = [];
-    const maxDocs = process.env.MAX_DOCS ? Number(process.env.MAX_DOCS) : undefined;
-
-    for await (const raw of plugin.crawl(target, { max_docs: maxDocs })) {
+    for await (const raw of plugin.crawl(target, { max_docs: params.maxDocs })) {
       const doc = await plugin.normalize(raw);
       if (!doc?.id || !doc?.text?.trim()) continue;
       normalized.push(doc);
     }
 
-    console.log(`Fetched+Normalized docs: ${normalized.length}`);
     totalDocs += normalized.length;
 
     // 2) Prepare upsert docs
@@ -171,17 +146,21 @@ async function main() {
         chunk_id: d.id,
         embed_model: embedModel,
         ingested_at: nowIso,
-        // snippet instead of full text (avoid metadata bloat)
         snippet: d.text.slice(0, 800),
       };
 
       return { id: d.id, text: d.text, metadata: meta };
     });
 
-    // 3) Embed + upsert in batches
-    const EMBED_BATCH = process.env.EMBED_BATCH ? Number(process.env.EMBED_BATCH) : 48;
+    if (params.dryRun) {
+      perTarget.push({ targetId: target.id, docs: upsertDocs.length, upserted: 0, url: target.source_url });
+      continue;
+    }
 
+    // 3) Embed + upsert in batches
+    const EMBED_BATCH = params.embedBatch ?? 48;
     let upsertedThisTarget = 0;
+
     for (const batch of chunkArray(upsertDocs, EMBED_BATCH)) {
       const emb = await openai.embeddings.create({
         model: embedModel,
@@ -197,22 +176,78 @@ async function main() {
       await index.upsert(vectors);
       upsertedThisTarget += vectors.length;
       totalUpserted += vectors.length;
+    }
 
-      process.stdout.write(
-        `Upserting ${target.id}: ${upsertedThisTarget}/${upsertDocs.length} (total ${totalUpserted})...\r`
+    perTarget.push({
+      targetId: target.id,
+      docs: upsertDocs.length,
+      upserted: upsertedThisTarget,
+      url: target.source_url,
+    });
+  }
+
+  return {
+    ok: true,
+    plugin: { id: params.pluginId, country: plugin.country, label: plugin.label },
+    index: PINECONE_INDEX,
+    namespace: PINECONE_NAMESPACE,
+    embed_model: embedModel,
+    totals: { docs: totalDocs, upserted: totalUpserted },
+    targets: perTarget,
+    dryRun: !!params.dryRun,
+  };
+}
+
+/**
+ * POST /api/jobs/ingest?plugin=br.planalto&maxDocs=50&embedBatch=32&dryRun=1
+ * Header: x-ingest-key: <INGEST_KEY>
+ */
+export async function POST(req: Request) {
+  try {
+    // Auth
+    const INGEST_KEY = requireEnv("INGEST_KEY");
+    const providedKey = req.headers.get("x-ingest-key") || "";
+    if (providedKey !== INGEST_KEY) {
+      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    }
+
+    const url = new URL(req.url);
+
+    // pluginId: query first, then JSON body
+    let pluginId = url.searchParams.get("plugin") || "";
+    let body: any = null;
+    try {
+      body = await req.json();
+    } catch {
+      // body optional
+    }
+    if (!pluginId && body?.pluginId) pluginId = String(body.pluginId);
+
+    if (!pluginId) {
+      return NextResponse.json(
+        { ok: false, error: "Missing plugin. Use ?plugin=br.planalto or JSON { pluginId: 'br.planalto' }" },
+        { status: 400 }
       );
     }
 
-    process.stdout.write("\n");
-    console.log(`✅ Target done: upserted=${upsertDocs.length}`);
+    const maxDocsRaw = url.searchParams.get("maxDocs") ?? body?.maxDocs;
+    const embedBatchRaw = url.searchParams.get("embedBatch") ?? body?.embedBatch;
+    const dryRunRaw = url.searchParams.get("dryRun") ?? body?.dryRun;
+
+    const maxDocs =
+      maxDocsRaw !== undefined && maxDocsRaw !== null && String(maxDocsRaw).length ? Number(maxDocsRaw) : undefined;
+
+    const embedBatch =
+      embedBatchRaw !== undefined && embedBatchRaw !== null && String(embedBatchRaw).length
+        ? Number(embedBatchRaw)
+        : undefined;
+
+    const dryRun =
+      String(dryRunRaw ?? "").toLowerCase() === "1" || String(dryRunRaw ?? "").toLowerCase() === "true";
+
+    const result = await runIngest({ pluginId, maxDocs, embedBatch, dryRun });
+    return NextResponse.json(result);
+  } catch (err: any) {
+    return NextResponse.json({ ok: false, error: err?.message || "Unknown error" }, { status: 500 });
   }
-
-  console.log("========================================");
-  console.log(`✅ Done. totalDocs=${totalDocs} totalUpserted=${totalUpserted}`);
-  console.log(`Index=${PINECONE_INDEX} Namespace=${PINECONE_NAMESPACE} EmbedModel=${embedModel}`);
 }
-
-main().catch((err) => {
-  console.error("❌ job failed:", err);
-  process.exit(1);
-});
