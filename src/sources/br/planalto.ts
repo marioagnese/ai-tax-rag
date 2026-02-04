@@ -11,11 +11,12 @@ import {
 } from "../../core/contracts/source";
 import { planaltoHtmlToText, splitBrazilArticles, normalizeWhitespace } from "./parsers/html";
 
-/**
- * Default URLs (used only if no env override is provided).
- * Note: www4 portal may render differently. We still try it as fallback.
- */
+// IMPORTANT: import PDF parser in a resilient way (no more "pdfToText is not a function" loops)
+import * as pdfParser from "./parsers/pdf";
+
+// Default candidates (env can override)
 const DEFAULT_CTN_URLS = [
+  "http://www2.senado.leg.br/bdsf/bitstream/handle/id/496301/000958177.pdf",
   "https://www.planalto.gov.br/ccivil_03/leis/l5172compilado.htm",
   "https://www4.planalto.gov.br/legislacao/portal-legis/legislacao-1/leis-ordinarias/lei-no-5-172-de-25-de-outubro-de-1966",
 ];
@@ -46,79 +47,93 @@ function extractArticleFromSection(section?: string): string | undefined {
   return m?.[1];
 }
 
-/**
- * Env overrides:
- *  - PLANALTO_CTN_URL: single URL
- *  - PLANALTO_CTN_URLS: comma-separated URLs (highest priority first)
- */
-function getCtnUrlsFromEnv(): string[] {
-  const single = (process.env.PLANALTO_CTN_URL || "").trim();
-  if (single) return [single];
-
-  const list = (process.env.PLANALTO_CTN_URLS || "")
+function parseUrlList(envVal?: string | null): string[] {
+  if (!envVal) return DEFAULT_CTN_URLS;
+  const parts = envVal
     .split(",")
-    .map((x) => x.trim())
+    .map((s) => s.trim())
     .filter(Boolean);
-
-  return list.length ? list : DEFAULT_CTN_URLS;
+  return parts.length ? parts : DEFAULT_CTN_URLS;
 }
 
-type FetchAttempt = {
-  url: string;
-  ok: boolean;
-  status?: number;
-  error?: string;
-};
-
-async function fetchFirstWorkingUrl(
-  urls: string[],
-  opts: Parameters<typeof fetchWithRetry>[1]
-): Promise<{ res: Response; usedUrl: string; attempts: FetchAttempt[] }> {
-  const attempts: FetchAttempt[] = [];
-  let lastErr: any = null;
+async function fetchFirstWorkingUrl(urls: string[]) {
+  const failures: Array<{ url: string; reason: string }> = [];
 
   for (const url of urls) {
     try {
-      const res = await fetchWithRetry(url, opts);
-      if (res.ok) {
-        attempts.push({ url, ok: true, status: res.status });
-        return { res, usedUrl: url, attempts };
+      const res = await fetchWithRetry(url, {
+        timeoutMs: 60000,
+        retries: 4,
+        retryDelayMs: 800,
+        curlFallback: true,
+        headers: {
+          "user-agent": "ai-tax-rag/1.0 (+https://example.local)",
+          "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+      });
+
+      if (!res.ok) {
+        failures.push({ url, reason: `HTTP ${res.status}` });
+        continue;
       }
-      attempts.push({ url, ok: false, status: res.status, error: `HTTP ${res.status}` });
-      lastErr = new Error(`HTTP ${res.status}`);
+
+      const ct = (res.headers.get("content-type") || "").toLowerCase();
+      const isPdf = ct.includes("application/pdf") || url.toLowerCase().endsWith(".pdf");
+
+      if (isPdf) {
+        const buf = Buffer.from(await res.arrayBuffer());
+        return { url, kind: "pdf" as const, body: buf, contentType: ct };
+      }
+
+      const html = await res.text();
+      return { url, kind: "html" as const, body: html, contentType: ct };
     } catch (e: any) {
-      const msg = String(e?.message || e);
-      attempts.push({ url, ok: false, error: msg });
-      lastErr = e;
+      failures.push({ url, reason: String(e?.message || e) });
     }
   }
 
-  const details = attempts
-    .map((a) => `- ${a.url} -> ${a.ok ? "OK" : "FAIL"}${a.status ? ` (HTTP ${a.status})` : ""}${a.error ? ` :: ${a.error}` : ""}`)
-    .join("\n");
-
-  throw new Error(
-    `Failed to fetch CTN from all candidate URLs.\n${details}\nLast error: ${String(lastErr?.message || lastErr)}`
-  );
+  const details = failures.map((f) => `- ${f.url} -> ${f.reason}`).join("\n");
+  throw new Error(`Failed to fetch CTN from all candidate URLs.\n${details}`);
 }
 
 /**
- * Brazil official law source (Planalto).
- * Starter: CTN consolidated text -> split into per-Article documents.
+ * Resolve a PDF-to-text function from src/sources/br/parsers/pdf.ts no matter how it exports.
+ */
+function resolvePdfToText(): (input: Buffer) => Promise<string> {
+  const fn =
+    (pdfParser as any).pdfToText ||
+    (pdfParser as any).default ||
+    (pdfParser as any).parsePdf ||
+    (pdfParser as any).pdfToString ||
+    (pdfParser as any).extractText;
+
+  if (typeof fn !== "function") {
+    throw new Error(
+      `PDF parser export not found. Expected pdfToText or default export in src/sources/br/parsers/pdf.ts. Found exports: ${Object.keys(
+        pdfParser as any
+      ).join(", ")}`
+    );
+  }
+
+  return fn;
+}
+
+/**
+ * Brazil official law source (multi-url).
+ * CTN -> normalize -> split into per-Article documents.
  */
 export const BrazilPlanaltoPlugin: SourcePlugin = {
   id: "br.planalto",
   country: "Brazil",
-  label: "Brazil — Planalto (CTN consolidated)",
+  label: "Brazil — CTN (multi-source: Senado PDF / Planalto HTML)",
 
   async listTargets(): Promise<SourceTarget[]> {
-    const urls = getCtnUrlsFromEnv();
-    // Put the "primary" (first) URL here for display; crawl() will try all.
+    // Keep the "canonical" URL for metadata; actual fetch uses BR_CTN_URLS override
     return [
       {
         id: "br.planalto.ctn",
-        label: "CTN (Lei 5.172/1966) — texto compilado",
-        source_url: urls[0],
+        label: "CTN (Lei 5.172/1966) — texto base",
+        source_url: "https://www.planalto.gov.br/ccivil_03/leis/l5172compilado.htm",
         format: "html",
         source_type: "Statute",
         law_code: "CTN",
@@ -130,24 +145,19 @@ export const BrazilPlanaltoPlugin: SourcePlugin = {
   },
 
   async *crawl(target: SourceTarget, params: CrawlParams): AsyncGenerator<RawFetchedDoc> {
-    // Candidate URLs = env override list OR defaults.
-    // Also include target.source_url in case it was customized somewhere else.
-    const envUrls = getCtnUrlsFromEnv();
-    const urls = Array.from(new Set([target.source_url, ...envUrls].filter(Boolean)));
+    const urls = parseUrlList(process.env.BR_CTN_URLS);
+    const chosen = await fetchFirstWorkingUrl(urls);
 
-    const { res, usedUrl } = await fetchFirstWorkingUrl(urls, {
-      headers: {
-        "User-Agent": "ai-tax-rag/1.0 (+https://example.local)",
-      },
-      timeoutMs: 60000,
-      retries: 6,
-      curlFallback: true,
-    });
+    // Convert to plain text
+    let plain: string;
+    if (chosen.kind === "pdf") {
+      const pdfToText = resolvePdfToText();
+      plain = await pdfToText(chosen.body);
+    } else {
+      plain = planaltoHtmlToText(chosen.body);
+    }
 
-    const html = await res.text();
-    const plain = planaltoHtmlToText(html);
     const articles = splitBrazilArticles(plain);
-
     const retrieved_at = isoNow();
     const seen = new Set<string>();
 
@@ -161,9 +171,11 @@ export const BrazilPlanaltoPlugin: SourcePlugin = {
 
       const articleNum = (a?.article || "").trim() || extractArticleFromSection(section);
 
-      const idCore = articleNum ? `art_${articleNum}` : `sec_${sha256(section + "|" + rawText).slice(0, 10)}`;
-      let id = `br_ctn_${idCore}_v1_chunk1`;
+      const idCore = articleNum
+        ? `art_${articleNum}`
+        : `sec_${sha256(section + "|" + rawText).slice(0, 10)}`;
 
+      let id = `br_ctn_${idCore}_v1_chunk1`;
       if (seen.has(id)) {
         id = `br_ctn_${idCore}_${sha256(rawText).slice(0, 8)}_v1_chunk1`;
       }
@@ -175,10 +187,9 @@ export const BrazilPlanaltoPlugin: SourcePlugin = {
         law_code: target.law_code,
         citation_label: target.citation_label,
 
-        // IMPORTANT: use the URL that actually worked (for citations)
-        source_url: usedUrl,
-
-        publisher: "Planalto",
+        // IMPORTANT: store the *actual* fetched URL for traceability
+        source_url: chosen.url,
+        publisher: chosen.kind === "pdf" ? "Senado (BDSF)" : "Planalto",
         language: target.language ?? "pt",
         retrieved_at,
         title: target.label,
@@ -189,7 +200,7 @@ export const BrazilPlanaltoPlugin: SourcePlugin = {
 
       yield {
         id,
-        source_url: usedUrl,
+        source_url: chosen.url,
         format: "text",
         body: rawText,
         metadata: baseMeta,
@@ -204,9 +215,7 @@ export const BrazilPlanaltoPlugin: SourcePlugin = {
       typeof raw.body === "string" ? raw.body : raw.body.toString("utf8")
     );
 
-    if (!text.trim()) {
-      throw new Error(`normalize(): empty text for ${raw.id}`);
-    }
+    if (!text.trim()) throw new Error(`normalize(): empty text for ${raw.id}`);
 
     const content_hash = sha256(text);
 
@@ -217,7 +226,7 @@ export const BrazilPlanaltoPlugin: SourcePlugin = {
 
       law_code: raw.metadata?.law_code ?? "CTN",
       citation_label: raw.metadata?.citation_label ?? "CTN",
-      publisher: raw.metadata?.publisher ?? "Planalto",
+      publisher: raw.metadata?.publisher ?? "Unknown",
       language: raw.metadata?.language ?? "pt",
       retrieved_at: raw.metadata?.retrieved_at ?? isoNow(),
       title: raw.metadata?.title,
@@ -229,10 +238,11 @@ export const BrazilPlanaltoPlugin: SourcePlugin = {
       content_hash,
       canonical_id: raw.metadata?.canonical_id ?? raw.id,
 
-      // citations UI
+      // IMPORTANT for citations UI
       snippet: safeSnippet(text, 300),
     };
 
     return { id: raw.id, text, metadata };
   },
 };
+
