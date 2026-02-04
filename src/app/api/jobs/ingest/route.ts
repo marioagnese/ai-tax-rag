@@ -1,11 +1,11 @@
-// app/api/jobs/ingest/route.ts
+// src/app/api/jobs/ingest/route.ts
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { Pinecone } from "@pinecone-database/pinecone";
-import type { NormalizedDoc, SourcePlugin, SourceTarget } from "../../../../src/core/contracts/source";
+import type { NormalizedDoc, SourcePlugin, SourceTarget } from "../../../../core/contracts/source";
 
-export const runtime = "nodejs"; // required (uses node libs + pinecone/openai)
-export const dynamic = "force-dynamic"; // don't cache job responses
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 function requireEnv(name: string) {
   const v = process.env[name];
@@ -32,7 +32,6 @@ function sanitizeMetadata(input: any): Record<string, any> {
       if (strArr.length > 0) out[k] = strArr;
       continue;
     }
-    // nested objects not allowed → drop
   }
 
   return out;
@@ -64,15 +63,14 @@ function isPlugin(x: any): x is SourcePlugin {
 }
 
 /**
- * Load plugins from src/sources/index.ts in a resilient way.
- * Supports ANY of these patterns:
+ * Loads plugins from src/sources (relative to src/app/...).
+ * Supports:
  *  - export const plugins = [...]
  *  - export default [...]
- *  - export const BrazilPlanaltoPlugin = {...}
- *  - export { BrazilPlanaltoPlugin, ... }
+ *  - named exports of plugins
  */
 async function loadPlugins(): Promise<SourcePlugin[]> {
-  const mod: any = await import("../../../../src/sources");
+  const mod: any = await import("../../../../sources");
 
   if (Array.isArray(mod.plugins)) return mod.plugins.filter(isPlugin);
   if (Array.isArray(mod.default)) return mod.default.filter(isPlugin);
@@ -128,8 +126,8 @@ async function runIngest(params: JobParams) {
   const perTarget: Array<{ targetId: string; docs: number; upserted: number; url: string }> = [];
 
   for (const target of targets) {
-    // 1) Crawl + normalize
     const normalized: NormalizedDoc[] = [];
+
     for await (const raw of plugin.crawl(target, { max_docs: params.maxDocs })) {
       const doc = await plugin.normalize(raw);
       if (!doc?.id || !doc?.text?.trim()) continue;
@@ -138,7 +136,6 @@ async function runIngest(params: JobParams) {
 
     totalDocs += normalized.length;
 
-    // 2) Prepare upsert docs
     const nowIso = new Date().toISOString();
     const upsertDocs: UpsertDoc[] = normalized.map((d) => {
       const meta = {
@@ -148,7 +145,6 @@ async function runIngest(params: JobParams) {
         ingested_at: nowIso,
         snippet: d.text.slice(0, 800),
       };
-
       return { id: d.id, text: d.text, metadata: meta };
     });
 
@@ -157,7 +153,6 @@ async function runIngest(params: JobParams) {
       continue;
     }
 
-    // 3) Embed + upsert in batches
     const EMBED_BATCH = params.embedBatch ?? 48;
     let upsertedThisTarget = 0;
 
@@ -204,7 +199,6 @@ async function runIngest(params: JobParams) {
  */
 export async function POST(req: Request) {
   try {
-    // Auth
     const INGEST_KEY = requireEnv("INGEST_KEY");
     const providedKey = req.headers.get("x-ingest-key") || "";
     if (providedKey !== INGEST_KEY) {
@@ -235,7 +229,9 @@ export async function POST(req: Request) {
     const dryRunRaw = url.searchParams.get("dryRun") ?? body?.dryRun;
 
     const maxDocs =
-      maxDocsRaw !== undefined && maxDocsRaw !== null && String(maxDocsRaw).length ? Number(maxDocsRaw) : undefined;
+      maxDocsRaw !== undefined && maxDocsRaw !== null && String(maxDocsRaw).length
+        ? Number(maxDocsRaw)
+        : undefined;
 
     const embedBatch =
       embedBatchRaw !== undefined && embedBatchRaw !== null && String(embedBatchRaw).length
