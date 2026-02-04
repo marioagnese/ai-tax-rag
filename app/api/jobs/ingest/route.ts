@@ -64,7 +64,7 @@ function isPlugin(x: any): x is SourcePlugin {
 }
 
 async function loadPlugins(): Promise<SourcePlugin[]> {
-  const mod: any = await import("../../../../sources");
+  const mod: any = await import("../../../../src/sources");
 
   if (Array.isArray(mod.plugins)) return mod.plugins.filter(isPlugin);
   if (Array.isArray(mod.default)) return mod.default.filter(isPlugin);
