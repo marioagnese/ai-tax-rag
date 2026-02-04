@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { Pinecone } from "@pinecone-database/pinecone";
-import type { NormalizedDoc, SourcePlugin, SourceTarget } from "../../../../core/contracts/source";
+import type { NormalizedDoc, SourcePlugin, SourceTarget } from "../../../../src/core/contracts/source";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
