@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runCrosscheck } from "@/src/core/crosscheck/orchestrator";
+import { runCrosscheck } from "../../../src/core/crosscheck/orchestrator";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
