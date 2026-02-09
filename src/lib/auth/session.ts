@@ -17,10 +17,7 @@ function requireEnv(name: string) {
   return v;
 }
 
-/**
- * Very small, dependency-free signed token:
- * token = base64url(payloadJson) + "." + base64url(hmacSha256(payloadB64))
- */
+// token = base64url(payloadJson) + "." + base64url(hmacSha256(payloadB64))
 function b64urlEncode(buf: Buffer) {
   return buf
     .toString("base64")
@@ -51,11 +48,7 @@ function safeEq(a: string, b: string) {
 
 export function createSessionToken(user: SessionUser, maxAgeSeconds = 60 * 60 * 24 * 7) {
   const now = Math.floor(Date.now() / 1000);
-  const payload = {
-    ...user,
-    iat: now,
-    exp: now + maxAgeSeconds,
-  };
+  const payload = { ...user, iat: now, exp: now + maxAgeSeconds };
   const payloadB64 = b64urlEncode(Buffer.from(JSON.stringify(payload), "utf8"));
   const sig = sign(payloadB64);
   return `${payloadB64}.${sig}`;
@@ -91,10 +84,6 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   return verifySessionToken(token);
 }
 
-/**
- * Convenience helper for API routes.
- * Throws "UNAUTHORIZED" if not logged in.
- */
 export async function requireSessionUser(): Promise<SessionUser> {
   const u = await getSessionUser();
   if (!u) throw new Error("UNAUTHORIZED");

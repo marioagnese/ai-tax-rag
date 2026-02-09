@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { requireSessionUser } from "../../../src/lib/auth/session";
+import { requireSessionUser } from "../../../../src/lib/auth/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,15 +12,12 @@ function requireEnv(name: string) {
 
 export async function POST(req: NextRequest) {
   try {
-    // Require login
     await requireSessionUser();
 
-    // Read client payload
     const body = await req.json().catch(() => ({}));
-
     const key = requireEnv("CROSSCHECK_KEY");
-    const url = new URL("/api/crosscheck", req.nextUrl.origin);
 
+    const url = new URL("/api/crosscheck", req.nextUrl.origin);
     const upstream = await fetch(url.toString(), {
       method: "POST",
       headers: {
