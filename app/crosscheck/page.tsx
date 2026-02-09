@@ -43,7 +43,9 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 export default function CrosscheckPage() {
   const [jurisdiction, setJurisdiction] = useState("Panama");
   const [facts, setFacts] = useState("");
-  const [constraints, setConstraints] = useState("Answer like a specialist. Be conservative. List assumptions + missing facts.");
+  const [constraints, setConstraints] = useState(
+    "Answer like a specialist. Be conservative. List assumptions + missing facts."
+  );
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [resp, setResp] = useState<CrosscheckResponse | null>(null);
@@ -54,8 +56,8 @@ export default function CrosscheckPage() {
   const runtimeMs = resp?.meta?.runtime_ms ?? null;
 
   const providerBadges = useMemo(() => {
-    const ok = succeeded.map(x => `${x.provider}:${x.model}`);
-    const bad = failed.map(x => `${x.provider}:${x.model}`);
+    const ok = succeeded.map((x) => `${x.provider}:${x.model}`);
+    const bad = failed.map((x) => `${x.provider}:${x.model}`);
     return { ok, bad };
   }, [succeeded, failed]);
 
@@ -123,7 +125,9 @@ export default function CrosscheckPage() {
             </div>
             <div>
               <div className="text-sm font-semibold">Tax Crosscheck</div>
-              <div className="text-xs text-white/60">Multi-model answer validation for fast, conservative tax triage</div>
+              <div className="text-xs text-white/60">
+                Multi-model answer validation for fast, conservative tax triage
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -199,12 +203,18 @@ export default function CrosscheckPage() {
               <SectionTitle>Models</SectionTitle>
               <div className="mt-2 flex flex-wrap gap-2">
                 {providerBadges.ok.map((x) => (
-                  <span key={x} className="rounded-full bg-emerald-500/15 border border-emerald-500/25 px-2.5 py-1 text-xs text-emerald-100">
+                  <span
+                    key={x}
+                    className="rounded-full bg-emerald-500/15 border border-emerald-500/25 px-2.5 py-1 text-xs text-emerald-100"
+                  >
                     ✓ {x}
                   </span>
                 ))}
                 {providerBadges.bad.map((x) => (
-                  <span key={x} className="rounded-full bg-amber-500/15 border border-amber-500/25 px-2.5 py-1 text-xs text-amber-100">
+                  <span
+                    key={x}
+                    className="rounded-full bg-amber-500/15 border border-amber-500/25 px-2.5 py-1 text-xs text-amber-100"
+                  >
                     ! {x}
                   </span>
                 ))}
