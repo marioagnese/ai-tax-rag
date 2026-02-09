@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import { requireSessionUser } from "@/src/lib/auth/session";
+import { NextResponse, type NextRequest } from "next/server";
+import { requireSessionUser } from "../../../src/lib/auth/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,25 +10,24 @@ function requireEnv(name: string) {
   return v;
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     // Require login
     await requireSessionUser();
 
-    // Inject CROSSCHECK_KEY server-side (never expose to browser)
-    const CROSSCHECK_KEY = requireEnv("CROSSCHECK_KEY");
+    // Read client payload
+    const body = await req.json().catch(() => ({}));
 
-    const body = await req.text();
-    const url = new URL(req.url);
-    const target = new URL("/api/crosscheck", url.origin);
+    const key = requireEnv("CROSSCHECK_KEY");
+    const url = new URL("/api/crosscheck", req.nextUrl.origin);
 
-    const upstream = await fetch(target.toString(), {
+    const upstream = await fetch(url.toString(), {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-crosscheck-key": CROSSCHECK_KEY,
+        "x-crosscheck-key": key,
       },
-      body,
+      body: JSON.stringify(body),
     });
 
     const text = await upstream.text();
@@ -39,6 +38,10 @@ export async function POST(req: Request) {
       },
     });
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err?.message || "Proxy error" }, { status: 401 });
+    const msg = err?.message || "Unknown error";
+    if (msg === "UNAUTHORIZED") {
+      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    }
+    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
 }

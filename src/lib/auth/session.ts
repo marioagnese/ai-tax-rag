@@ -85,8 +85,18 @@ export function verifySessionToken(token: string): SessionUser | null {
 }
 
 export async function getSessionUser(): Promise<SessionUser | null> {
-  const jar = await cookies(); // ✅ Next 16: cookies() is async
+  const jar = await cookies(); // Next 16: cookies() is async
   const token = jar.get(SESSION_COOKIE_NAME)?.value;
   if (!token) return null;
   return verifySessionToken(token);
+}
+
+/**
+ * Convenience helper for API routes.
+ * Throws "UNAUTHORIZED" if not logged in.
+ */
+export async function requireSessionUser(): Promise<SessionUser> {
+  const u = await getSessionUser();
+  if (!u) throw new Error("UNAUTHORIZED");
+  return u;
 }
