@@ -18,6 +18,7 @@ export async function POST(req: NextRequest) {
     const key = requireEnv("CROSSCHECK_KEY");
 
     const url = new URL("/api/crosscheck", req.nextUrl.origin);
+
     const upstream = await fetch(url.toString(), {
       method: "POST",
       headers: {

@@ -19,11 +19,7 @@ function requireEnv(name: string) {
 
 // token = base64url(payloadJson) + "." + base64url(hmacSha256(payloadB64))
 function b64urlEncode(buf: Buffer) {
-  return buf
-    .toString("base64")
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replaceAll("=", "");
+  return buf.toString("base64").replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
 function b64urlDecodeToBuffer(s: string) {
