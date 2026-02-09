@@ -1,35 +1,92 @@
 import "server-only";
 import { cookies } from "next/headers";
-import { adminAuth } from "@/src/lib/firebase/admin";
+import { createHmac, timingSafeEqual } from "crypto";
 
-export const SESSION_COOKIE_NAME = "__tx_session";
+export const SESSION_COOKIE_NAME = "ai_tax_rag_session";
 
 export type SessionUser = {
   uid: string;
-  email?: string | null;
-  name?: string | null;
-  picture?: string | null;
+  email?: string;
+  name?: string;
+  picture?: string;
 };
 
-export async function getSessionUser(): Promise<SessionUser | null> {
-  const token = cookies().get(SESSION_COOKIE_NAME)?.value;
-  if (!token) return null;
+function requireEnv(name: string) {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing env var: ${name}`);
+  return v;
+}
 
+/**
+ * Very small, dependency-free signed token:
+ * token = base64url(payloadJson) + "." + base64url(hmacSha256(payloadB64))
+ */
+function b64urlEncode(buf: Buffer) {
+  return buf
+    .toString("base64")
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replaceAll("=", "");
+}
+
+function b64urlDecodeToBuffer(s: string) {
+  const pad = 4 - (s.length % 4 || 4);
+  const padded = s + "=".repeat(pad === 4 ? 0 : pad);
+  const b64 = padded.replaceAll("-", "+").replaceAll("_", "/");
+  return Buffer.from(b64, "base64");
+}
+
+function sign(payloadB64: string) {
+  const secret = requireEnv("SESSION_SECRET");
+  const sig = createHmac("sha256", secret).update(payloadB64).digest();
+  return b64urlEncode(sig);
+}
+
+function safeEq(a: string, b: string) {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
+
+export function createSessionToken(user: SessionUser, maxAgeSeconds = 60 * 60 * 24 * 7) {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    ...user,
+    iat: now,
+    exp: now + maxAgeSeconds,
+  };
+  const payloadB64 = b64urlEncode(Buffer.from(JSON.stringify(payload), "utf8"));
+  const sig = sign(payloadB64);
+  return `${payloadB64}.${sig}`;
+}
+
+export function verifySessionToken(token: string): SessionUser | null {
   try {
-    const decoded = await adminAuth().verifySessionCookie(token, true);
-    return {
-      uid: decoded.uid,
-      email: (decoded.email as string) || null,
-      name: (decoded.name as string) || null,
-      picture: (decoded.picture as string) || null,
-    };
+    const [payloadB64, sig] = token.split(".");
+    if (!payloadB64 || !sig) return null;
+
+    const expected = sign(payloadB64);
+    if (!safeEq(sig, expected)) return null;
+
+    const payloadJson = b64urlDecodeToBuffer(payloadB64).toString("utf8");
+    const payload = JSON.parse(payloadJson) as any;
+
+    const now = Math.floor(Date.now() / 1000);
+    if (typeof payload.exp === "number" && payload.exp < now) return null;
+
+    const { uid, email, name, picture } = payload;
+    if (!uid) return null;
+
+    return { uid, email, name, picture };
   } catch {
     return null;
   }
 }
 
-export async function requireSessionUser(): Promise<SessionUser> {
-  const u = await getSessionUser();
-  if (!u) throw new Error("Unauthorized");
-  return u;
+export async function getSessionUser(): Promise<SessionUser | null> {
+  const jar = await cookies(); // ✅ Next 16: cookies() is async
+  const token = jar.get(SESSION_COOKIE_NAME)?.value;
+  if (!token) return null;
+  return verifySessionToken(token);
 }
