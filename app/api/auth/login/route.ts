@@ -1,19 +1,21 @@
-import { NextResponse } from "next/server";
-import { adminAuth } from "@/src/lib/firebase/admin";
-import { SESSION_COOKIE_NAME } from "@/src/lib/auth/session";
+import { NextResponse, type NextRequest } from "next/server";
+import { getAdminAuth, firebaseAdminConfigured } from "../../../../src/lib/firebase/admin";
+import { SESSION_COOKIE_NAME, mintSessionToken } from "../../../../src/lib/auth/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function requireEnv(name: string) {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env var: ${name}`);
-  return v;
-}
-
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const { idToken } = (await req.json()) as { idToken?: string };
+    if (!firebaseAdminConfigured()) {
+      return NextResponse.json(
+        { ok: false, error: "Firebase Admin not configured (missing FIREBASE_* env vars)." },
+        { status: 501 }
+      );
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const idToken = String(body?.idToken || "");
     if (!idToken) {
       return NextResponse.json({ ok: false, error: "Missing idToken" }, { status: 400 });
     }
@@ -22,7 +24,8 @@ export async function POST(req: Request) {
     const allowedDomainsRaw = process.env.ALLOWED_EMAIL_DOMAINS || "";
     const allowedDomains = allowedDomainsRaw.split(",").map(s => s.trim()).filter(Boolean);
 
-    const decoded = await adminAuth().verifyIdToken(idToken);
+    const decoded = await getAdminAuth().verifyIdToken(idToken);
+
     if (allowedDomains.length && decoded.email) {
       const domain = decoded.email.split("@")[1]?.toLowerCase();
       if (!domain || !allowedDomains.includes(domain)) {
@@ -30,25 +33,23 @@ export async function POST(req: Request) {
       }
     }
 
-    const expiresInDays = Number(process.env.SESSION_DAYS || "7");
-    const expiresIn = Math.max(1, Math.min(expiresInDays, 30)) * 24 * 60 * 60 * 1000;
-
-    const sessionCookie = await adminAuth().createSessionCookie(idToken, { expiresIn });
-
-    const res = NextResponse.json({ ok: true });
-    res.cookies.set(SESSION_COOKIE_NAME, sessionCookie, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: Math.floor(expiresIn / 1000),
+    const sessionToken = mintSessionToken({
+      uid: decoded.uid,
+      email: decoded.email,
+      name: decoded.name,
+      picture: decoded.picture,
     });
 
-    // sanity: ensure cookie secret exists (not used here, but helps validate env)
-    if (process.env.NODE_ENV === "production") requireEnv("CROSSCHECK_KEY");
-
+    const res = NextResponse.json({ ok: true });
+    res.cookies.set(SESSION_COOKIE_NAME, sessionToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 7,
+    });
     return res;
-  } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err?.message || "Login failed" }, { status: 500 });
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: e?.message || "Login failed" }, { status: 500 });
   }
 }
