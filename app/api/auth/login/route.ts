@@ -20,7 +20,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Missing idToken" }, { status: 400 });
     }
 
-    // Optional: restrict to allowlist domain(s)
     const allowedDomainsRaw = process.env.ALLOWED_EMAIL_DOMAINS || "";
     const allowedDomains = allowedDomainsRaw.split(",").map(s => s.trim()).filter(Boolean);
 

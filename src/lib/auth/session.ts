@@ -35,39 +35,44 @@ function sign(payloadB64: string) {
   return b64urlEncode(sig);
 }
 
-function safeEq(a: string, b: string) {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ab.length !== bb.length) return false;
-  return timingSafeEqual(ab, bb);
-}
-
-export function createSessionToken(user: SessionUser, maxAgeSeconds = 60 * 60 * 24 * 7) {
+export function mintSessionToken(user: SessionUser, maxAgeSeconds = 60 * 60 * 24 * 7) {
   const now = Math.floor(Date.now() / 1000);
-  const payload = { ...user, iat: now, exp: now + maxAgeSeconds };
+  const payload = {
+    ...user,
+    iat: now,
+    exp: now + maxAgeSeconds,
+  };
   const payloadB64 = b64urlEncode(Buffer.from(JSON.stringify(payload), "utf8"));
-  const sig = sign(payloadB64);
-  return `${payloadB64}.${sig}`;
+  const sigB64 = sign(payloadB64);
+  return `${payloadB64}.${sigB64}`;
 }
 
 export function verifySessionToken(token: string): SessionUser | null {
   try {
-    const [payloadB64, sig] = token.split(".");
-    if (!payloadB64 || !sig) return null;
+    const [payloadB64, sigB64] = token.split(".");
+    if (!payloadB64 || !sigB64) return null;
 
     const expected = sign(payloadB64);
-    if (!safeEq(sig, expected)) return null;
+    const a = b64urlDecodeToBuffer(sigB64);
+    const b = b64urlDecodeToBuffer(expected);
+
+    // Constant-time compare (handle length mismatch)
+    if (a.length !== b.length) return null;
+    if (!timingSafeEqual(a, b)) return null;
 
     const payloadJson = b64urlDecodeToBuffer(payloadB64).toString("utf8");
     const payload = JSON.parse(payloadJson) as any;
 
     const now = Math.floor(Date.now() / 1000);
+    if (!payload?.uid) return null;
     if (typeof payload.exp === "number" && payload.exp < now) return null;
 
-    const { uid, email, name, picture } = payload;
-    if (!uid) return null;
-
-    return { uid, email, name, picture };
+    return {
+      uid: String(payload.uid),
+      email: payload.email ? String(payload.email) : undefined,
+      name: payload.name ? String(payload.name) : undefined,
+      picture: payload.picture ? String(payload.picture) : undefined,
+    };
   } catch {
     return null;
   }
