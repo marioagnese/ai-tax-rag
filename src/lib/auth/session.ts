@@ -37,12 +37,7 @@ function sign(payloadB64: string) {
 
 export function mintSessionToken(user: SessionUser, ttlSeconds = 60 * 60 * 24 * 7) {
   const now = Math.floor(Date.now() / 1000);
-  const payload = {
-    ...user,
-    iat: now,
-    exp: now + ttlSeconds,
-  };
-
+  const payload = { ...user, iat: now, exp: now + ttlSeconds };
   const payloadJson = JSON.stringify(payload);
   const payloadB64 = b64urlEncode(Buffer.from(payloadJson, "utf8"));
   const sigB64 = sign(payloadB64);
@@ -57,7 +52,6 @@ export function verifySessionToken(token: string): SessionUser | null {
 
   const expectedSig = sign(payloadB64);
 
-  // constant-time compare
   const a = b64urlDecodeToBuffer(sigB64);
   const b = b64urlDecodeToBuffer(expectedSig);
   if (a.length !== b.length) return null;
@@ -71,13 +65,12 @@ export function verifySessionToken(token: string): SessionUser | null {
     if (!payload?.uid) return null;
     if (typeof payload?.exp === "number" && payload.exp < now) return null;
 
-    const user: SessionUser = {
+    return {
       uid: String(payload.uid),
       email: payload.email ? String(payload.email) : undefined,
       name: payload.name ? String(payload.name) : undefined,
       picture: payload.picture ? String(payload.picture) : undefined,
     };
-    return user;
   } catch {
     return null;
   }
