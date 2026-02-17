@@ -80,7 +80,7 @@ export default function SignInPage() {
 
   async function loginWithGoogle() {
     try {
-      if (!auth) throw new Error("Firebase client is not configured (.env.local).");
+      if (!auth) throw new Error("Firebase client is not configured (.env.local / Vercel env).");
       setBusy(true);
       setError("");
 
@@ -102,7 +102,7 @@ export default function SignInPage() {
   async function loginWithEmail(e: React.FormEvent) {
     e.preventDefault();
     try {
-      if (!auth) throw new Error("Firebase client is not configured (.env.local).");
+      if (!auth) throw new Error("Firebase client is not configured (.env.local / Vercel env).");
       setBusy(true);
       setError("");
 
@@ -125,22 +125,26 @@ export default function SignInPage() {
       <div className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Left card */}
         <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-          <div className="flex flex-col items-start gap-3 mb-6">
-            <div className="h-24 w-24 rounded-xl bg-white/10 border border-white/10 flex items-center justify-center overflow-hidden">
-              <Image
-                src="/taxaipro-logo.png"
-                alt="TaxAiPro"
-                width={96}
-                height={96}
-                className="h-full w-full object-contain p-0"
-                priority
-              />
-            </div>
+          {/* BIG brand header */}
+          <div className="mb-6">
+            <div className="flex flex-col items-start gap-3">
+              {/* Big logo on top */}
+              <div className="w-[140px] h-[140px] rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden">
+                <Image
+                  src="/taxaipro-logo.png"
+                  alt="TaxAiPro"
+                  width={140}
+                  height={140}
+                  className="h-full w-full object-contain"
+                  priority
+                />
+              </div>
 
-            <div>
-              <div className="text-2xl font-semibold">TaxAiPro</div>
-              <div className="text-sm text-white/60">
-                Multi-model tax crosscheck + conservative synthesis.
+              <div>
+                <div className="text-3xl font-semibold leading-tight">TaxAiPro</div>
+                <div className="text-sm text-white/60">
+                  Multi-model tax crosscheck + conservative synthesis.
+                </div>
               </div>
             </div>
           </div>
@@ -152,10 +156,12 @@ export default function SignInPage() {
 
           {!configured ? (
             <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
-              Firebase isn’t configured. Check your <code>.env.local</code> for:
+              Firebase isn’t configured for this deployment build. Check Vercel env vars for:
               <div className="mt-2 text-xs text-amber-100/80">
-                NEXT_PUBLIC_FIREBASE_API_KEY, NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-                NEXT_PUBLIC_FIREBASE_PROJECT_ID, NEXT_PUBLIC_FIREBASE_APP_ID
+                NEXT_PUBLIC_FIREBASE_API_KEY, NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN, NEXT_PUBLIC_FIREBASE_PROJECT_ID, NEXT_PUBLIC_FIREBASE_APP_ID
+              </div>
+              <div className="mt-2 text-[11px] text-amber-100/70">
+                Tip: these must exist at build time (Production/Preview) → then redeploy.
               </div>
             </div>
           ) : null}
@@ -170,8 +176,7 @@ export default function SignInPage() {
 
           <div className="mt-4 text-xs text-white/50">
             New here? Use the{" "}
-            <span className="text-white/70">2–3 run method</span>: run once → add
-            missing facts → re-run.
+            <span className="text-white/70">2–3 run method</span>: run once → add missing facts → re-run.
           </div>
 
           <button
@@ -224,8 +229,7 @@ export default function SignInPage() {
           ) : null}
 
           <p className="mt-4 text-xs text-white/40">
-            By continuing, you agree this is informational and not legal or tax
-            advice.
+            By continuing, you agree this is informational and not legal or tax advice.
           </p>
         </div>
 
@@ -239,8 +243,7 @@ export default function SignInPage() {
           </ul>
 
           <div className="mt-6 rounded-xl border border-white/10 bg-black/30 p-4 text-sm text-white/70">
-            Tip: better facts → better output. Entity type, residency,
-            thresholds, timing, and who does what in-country.
+            Tip: better facts → better output. Entity type, residency, thresholds, timing, and who does what in-country.
           </div>
 
           <div className="mt-4 text-xs text-white/50">
