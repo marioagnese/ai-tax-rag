@@ -14,7 +14,7 @@ type FirebasePublicConfig = {
 
 function env(name: string): string {
   // In Next.js client bundles, only NEXT_PUBLIC_* are inlined.
-  // This helper keeps access consistent and centralized.
+  // On the server during build/prerender, process.env is still available.
   return process.env[name] || "";
 }
 
@@ -46,29 +46,28 @@ function getFirebaseConfig(): FirebasePublicConfig {
 export function getFirebaseClientApp(): FirebaseApp {
   if (_app) return _app;
 
-  // If an app already exists (HMR / multi-import), reuse it.
   const existing = getApps();
   if (existing.length) {
     _app = existing[0]!;
     return _app;
   }
 
-  // Allow creating the app only when configured. This throws a clear error
-  // (and avoids weird Firebase internals errors).
-  const cfg = getFirebaseConfig();
-  _app = initializeApp(cfg);
+  _app = initializeApp(getFirebaseConfig());
   return _app;
 }
 
 export function getFirebaseAuth(): Auth {
   if (_auth) return _auth;
 
-  // Auth should only be used in the browser. If someone accidentally imports
-  // this helper in a server context, fail with a clear message.
-  if (typeof window === "undefined") {
-    throw new Error("getFirebaseAuth() called on the server (client-only).");
-  }
-
+  /**
+   * IMPORTANT (Next.js build/prerender):
+   * Next may evaluate client modules during build and prerender pipelines.
+   * Throwing on `typeof window === "undefined"` can break `next build`.
+   *
+   * This helper remains safe because:
+   * - config validation is lazy
+   * - callers still should only *use* auth interactions in client components
+   */
   _auth = getAuth(getFirebaseClientApp());
   return _auth;
 }
