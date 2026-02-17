@@ -126,13 +126,13 @@ export default function SignInPage() {
         {/* Left card */}
         <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
           <div className="flex items-center gap-3 mb-6">
-            <div className="h-10 w-10 rounded-xl bg-white/10 border border-white/10 flex items-center justify-center overflow-hidden">
+            <div className="h-24 w-24 rounded-xl bg-white/10 border border-white/10 flex items-center justify-center overflow-hidden">
               <Image
                 src="/taxaipro-logo.png"
                 alt="TaxAiPro"
-                width={40}
-                height={40}
-                className="h-full w-full object-contain p-1"
+                width={96}
+                height={96}
+                className="h-full w-full object-contain p-0"
                 priority
               />
             </div>
