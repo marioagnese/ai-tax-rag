@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   firebaseClientConfigured,
@@ -128,7 +128,7 @@ export default function SignInPage() {
           <div className="flex items-center gap-3 mb-6">
             <div className="h-10 w-10 rounded-xl bg-white/10 border border-white/10 flex items-center justify-center overflow-hidden">
               <Image
-                src="/ChatGPT Image Feb 14, 2026, 04_09_11 PM.png"
+                src="/taxaipro-logo.png"
                 alt="TaxAiPro"
                 width={40}
                 height={40}
@@ -154,7 +154,8 @@ export default function SignInPage() {
             <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
               Firebase isn’t configured. Check your <code>.env.local</code> for:
               <div className="mt-2 text-xs text-amber-100/80">
-                NEXT_PUBLIC_FIREBASE_API_KEY, NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN, NEXT_PUBLIC_FIREBASE_PROJECT_ID, NEXT_PUBLIC_FIREBASE_APP_ID
+                NEXT_PUBLIC_FIREBASE_API_KEY, NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+                NEXT_PUBLIC_FIREBASE_PROJECT_ID, NEXT_PUBLIC_FIREBASE_APP_ID
               </div>
             </div>
           ) : null}
@@ -168,8 +169,9 @@ export default function SignInPage() {
           </button>
 
           <div className="mt-4 text-xs text-white/50">
-            New here? Use the <span className="text-white/70">2–3 run method</span>:
-            run once → add missing facts → re-run.
+            New here? Use the{" "}
+            <span className="text-white/70">2–3 run method</span>: run once → add
+            missing facts → re-run.
           </div>
 
           <button
@@ -222,7 +224,8 @@ export default function SignInPage() {
           ) : null}
 
           <p className="mt-4 text-xs text-white/40">
-            By continuing, you agree this is informational and not legal or tax advice.
+            By continuing, you agree this is informational and not legal or tax
+            advice.
           </p>
         </div>
 
@@ -236,8 +239,8 @@ export default function SignInPage() {
           </ul>
 
           <div className="mt-6 rounded-xl border border-white/10 bg-black/30 p-4 text-sm text-white/70">
-            Tip: better facts → better output. Entity type, residency, thresholds, timing, and
-            who does what in-country.
+            Tip: better facts → better output. Entity type, residency,
+            thresholds, timing, and who does what in-country.
           </div>
 
           <div className="mt-4 text-xs text-white/50">
