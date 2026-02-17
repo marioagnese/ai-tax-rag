@@ -7,7 +7,6 @@ import {
   firebaseClientConfigured,
   getFirebaseAuth,
 } from "@/src/lib/firebase/client";
-import type { Auth } from "firebase/auth";
 import {
   GoogleAuthProvider,
   signInWithPopup,
@@ -31,6 +30,19 @@ async function mintSession(idToken: string) {
   }
 }
 
+// ✅ Safe debug: shows only booleans, never prints secrets
+function envPresence() {
+  // In the browser, NEXT_PUBLIC_* are baked into the JS bundle at build time.
+  // If these are false on the deployed page, that deployment was built without them.
+  return {
+    host: typeof window !== "undefined" ? window.location.host : "(server)",
+    apiKey: !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+    authDomain: !!process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+    projectId: !!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    appId: !!process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  };
+}
+
 export default function SignInPage() {
   const router = useRouter();
 
@@ -41,26 +53,21 @@ export default function SignInPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  // IMPORTANT: This is computed from NEXT_PUBLIC_* values at BUILD TIME.
+  // IMPORTANT: this is purely from client bundle vars (build-time baked).
   const configured = useMemo(() => firebaseClientConfigured(), []);
+  const debug = useMemo(() => envPresence(), []);
 
-  // IMPORTANT: auth must only be created in the browser (prevents server/prerender crashes).
-  const [auth, setAuth] = useState<Auth | null>(null);
-
-  useEffect(() => {
-    if (!configured) {
-      setAuth(null);
-      return;
-    }
-    // hard guard for any weird edge runtime
-    if (typeof window === "undefined") return;
-
+  const auth = useMemo(() => {
+    // Avoid import-time crashes and show a nice message instead.
+    if (!configured) return null;
     try {
-      setAuth(getFirebaseAuth());
+      return getFirebaseAuth();
     } catch (e: any) {
-      setAuth(null);
+      // If init throws for any reason, show the error.
       setError(e?.message || "Firebase init failed");
+      return null;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configured]);
 
   // Guard against duplicate onAuthStateChanged firing (dev/refresh)
@@ -95,7 +102,11 @@ export default function SignInPage() {
 
   async function loginWithGoogle() {
     try {
-      if (!auth) throw new Error("Firebase client is not configured for this deployment build.");
+      if (!auth) {
+        throw new Error(
+          "Firebase client is not configured for this deployment build. Fix Vercel NEXT_PUBLIC_FIREBASE_* env vars, then redeploy."
+        );
+      }
       setBusy(true);
       setError("");
 
@@ -116,7 +127,11 @@ export default function SignInPage() {
   async function loginWithEmail(e: React.FormEvent) {
     e.preventDefault();
     try {
-      if (!auth) throw new Error("Firebase client is not configured for this deployment build.");
+      if (!auth) {
+        throw new Error(
+          "Firebase client is not configured for this deployment build. Fix Vercel NEXT_PUBLIC_FIREBASE_* env vars, then redeploy."
+        );
+      }
       setBusy(true);
       setError("");
 
@@ -132,31 +147,28 @@ export default function SignInPage() {
     }
   }
 
-  const disableButtons = busy || !configured || !auth;
+  const disableButtons = busy || !configured;
 
   return (
     <div className="min-h-screen bg-black text-white flex items-center justify-center px-6">
       <div className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Left card */}
         <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-          {/* BIG BRAND HEADER */}
-          <div className="mb-6">
-            <div className="flex justify-center md:justify-start">
-              <div className="h-[140px] w-[140px] rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden shadow-[0_0_0_1px_rgba(255,255,255,0.06)]">
-                <Image
-                  src="/taxaipro-logo.png"
-                  alt="TaxAiPro"
-                  width={140}
-                  height={140}
-                  className="h-full w-full object-contain p-0"
-                  priority
-                />
-              </div>
+          <div className="flex flex-col items-start gap-3 mb-6">
+            <div className="h-24 w-24 rounded-xl bg-white/10 border border-white/10 flex items-center justify-center overflow-hidden">
+              <Image
+                src="/taxaipro-logo.png"
+                alt="TaxAiPro"
+                width={96}
+                height={96}
+                className="h-full w-full object-contain p-0"
+                priority
+              />
             </div>
 
-            <div className="mt-4">
-              <div className="text-3xl font-semibold tracking-tight">TaxAiPro</div>
-              <div className="mt-1 text-sm text-white/60">
+            <div>
+              <div className="text-2xl font-semibold">TaxAiPro</div>
+              <div className="text-sm text-white/60">
                 Multi-model tax crosscheck + conservative synthesis.
               </div>
             </div>
@@ -169,13 +181,25 @@ export default function SignInPage() {
 
           {!configured ? (
             <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
-              Firebase isn’t configured for this deployment build. Check Vercel env vars for:
+              <div className="font-medium">
+                Firebase isn’t configured for this deployment build.
+              </div>
               <div className="mt-2 text-xs text-amber-100/80">
-                NEXT_PUBLIC_FIREBASE_API_KEY, NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-                NEXT_PUBLIC_FIREBASE_PROJECT_ID, NEXT_PUBLIC_FIREBASE_APP_ID
-                <div className="mt-2 text-amber-100/70">
-                  Tip: these must exist at <b>build time</b> (Production/Preview) → then redeploy.
+                Needed in Vercel <b>Production</b> env vars:
+                <div className="mt-2">
+                  NEXT_PUBLIC_FIREBASE_API_KEY, NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+                  NEXT_PUBLIC_FIREBASE_PROJECT_ID, NEXT_PUBLIC_FIREBASE_APP_ID
                 </div>
+              </div>
+
+              {/* ✅ debug booleans so we can prove what the browser sees */}
+              <div className="mt-3 rounded-lg border border-white/10 bg-black/30 p-2 text-[11px] text-white/70">
+                <div className="font-medium text-white/80">Debug (safe)</div>
+                <div>host: {debug.host}</div>
+                <div>apiKey: {String(debug.apiKey)}</div>
+                <div>authDomain: {String(debug.authDomain)}</div>
+                <div>projectId: {String(debug.projectId)}</div>
+                <div>appId: {String(debug.appId)}</div>
               </div>
             </div>
           ) : null}
@@ -189,8 +213,9 @@ export default function SignInPage() {
           </button>
 
           <div className="mt-4 text-xs text-white/50">
-            New here? Use the <span className="text-white/70">2–3 run method</span>:
-            run once → add missing facts → re-run.
+            New here? Use the{" "}
+            <span className="text-white/70">2–3 run method</span>: run once → add
+            missing facts → re-run.
           </div>
 
           <button
@@ -243,7 +268,8 @@ export default function SignInPage() {
           ) : null}
 
           <p className="mt-4 text-xs text-white/40">
-            By continuing, you agree this is informational and not legal or tax advice.
+            By continuing, you agree this is informational and not legal or tax
+            advice.
           </p>
         </div>
 
@@ -257,8 +283,8 @@ export default function SignInPage() {
           </ul>
 
           <div className="mt-6 rounded-xl border border-white/10 bg-black/30 p-4 text-sm text-white/70">
-            Tip: better facts → better output. Entity type, residency, thresholds, timing, and
-            who does what in-country.
+            Tip: better facts → better output. Entity type, residency,
+            thresholds, timing, and who does what in-country.
           </div>
 
           <div className="mt-4 text-xs text-white/50">
