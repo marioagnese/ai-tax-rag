@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 type CrosscheckResponse = {
   ok: boolean;
@@ -36,7 +36,8 @@ type SavedRun = {
   title: string;
   jurisdiction?: string;
   facts?: string;
-  answerStyle?: string;
+  globalDefaults?: string;
+  runOverrides?: string;
   question: string;
   answer?: string;
   caveats?: string[];
@@ -225,7 +226,8 @@ function safeParseRuns(): SavedRun[] {
         title: String(x.title || "Untitled"),
         jurisdiction: x.jurisdiction ? String(x.jurisdiction) : undefined,
         facts: x.facts ? String(x.facts) : undefined,
-        answerStyle: x.answerStyle ? String(x.answerStyle) : undefined,
+        globalDefaults: x.globalDefaults ? String(x.globalDefaults) : undefined,
+        runOverrides: x.runOverrides ? String(x.runOverrides) : undefined,
         question: String(x.question || ""),
         answer: x.answer ? String(x.answer) : undefined,
         caveats: Array.isArray(x.caveats) ? x.caveats.map(String) : [],
@@ -234,7 +236,9 @@ function safeParseRuns(): SavedRun[] {
           ? x.disagreements.map(String)
           : [],
         confidence:
-          x.confidence === "low" || x.confidence === "medium" || x.confidence === "high"
+          x.confidence === "low" ||
+          x.confidence === "medium" ||
+          x.confidence === "high"
             ? x.confidence
             : undefined,
       }))
@@ -248,10 +252,32 @@ function persistRuns(runs: SavedRun[]) {
   localStorage.setItem(LS_KEY, JSON.stringify(runs.slice(0, 50)));
 }
 
+function buildConstraints(globalDefaults: string, runOverrides: string) {
+  const g = (globalDefaults || "").trim();
+  const r = (runOverrides || "").trim();
+
+  if (g && r) {
+    return [
+      "GLOBAL DEFAULTS:",
+      g,
+      "",
+      "RUN OVERRIDES (ONLY FOR THIS RUN):",
+      r,
+    ].join("\n");
+  }
+  if (g) return g;
+  if (r) return r;
+  return undefined;
+}
+
+function clampTitleFromQuestion(q: string) {
+  return (q.trim().slice(0, 60) || "Untitled").replace(/\s+/g, " ");
+}
+
 export default function CrosscheckPage() {
   const [jurisdiction, setJurisdiction] = useState("Panama");
   const [facts, setFacts] = useState("");
-  const [answerStyle, setAnswerStyle] = useState(
+  const [globalDefaults, setGlobalDefaults] = useState(
     [
       "Act like a senior tax specialist.",
       "Be conservative; avoid overclaiming.",
@@ -260,7 +286,9 @@ export default function CrosscheckPage() {
       "If multiple outcomes exist, show decision tree / thresholds.",
     ].join("\n")
   );
+  const [runOverrides, setRunOverrides] = useState("");
   const [question, setQuestion] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [resp, setResp] = useState<CrosscheckResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -269,6 +297,9 @@ export default function CrosscheckPage() {
 
   const [history, setHistory] = useState<SavedRun[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const runFnRef = useRef<() => void>(() => {});
+  const mintedOnceKeyRef = useRef(0);
 
   // Load history once (client-only)
   useEffect(() => {
@@ -284,6 +315,11 @@ export default function CrosscheckPage() {
     const bad = failed.map((x) => `${x.provider}:${x.model}`);
     return { ok, bad };
   }, [succeeded, failed]);
+
+  const constraints = useMemo(
+    () => buildConstraints(globalDefaults, runOverrides),
+    [globalDefaults, runOverrides]
+  );
 
   const displayText = useMemo(() => {
     const base = {
@@ -303,12 +339,14 @@ export default function CrosscheckPage() {
   }, [outputStyle, resp, jurisdiction, facts, question]);
 
   const canSave = !!resp?.consensus?.answer?.trim();
+  const confidence = resp?.consensus?.confidence;
 
   function loadRun(r: SavedRun) {
     setSelectedId(r.id);
     setJurisdiction(r.jurisdiction || "");
     setFacts(r.facts || "");
-    setAnswerStyle(r.answerStyle || answerStyle);
+    setGlobalDefaults(r.globalDefaults || globalDefaults);
+    setRunOverrides(r.runOverrides || "");
     setQuestion(r.question || "");
     setResp({
       ok: true,
@@ -340,16 +378,15 @@ export default function CrosscheckPage() {
   function saveCurrentRun() {
     if (!canSave) return;
 
-    const title = (question.trim().slice(0, 60) || "Untitled").replace(/\s+/g, " ");
     const now = Date.now();
-
     const run: SavedRun = {
       id: crypto.randomUUID(),
       createdAt: now,
-      title,
+      title: clampTitleFromQuestion(question),
       jurisdiction: jurisdiction.trim() || undefined,
       facts: facts.trim() || undefined,
-      answerStyle: answerStyle.trim() || undefined,
+      globalDefaults: globalDefaults.trim() || undefined,
+      runOverrides: runOverrides.trim() || undefined,
       question: question.trim(),
       answer: resp?.consensus?.answer || "",
       caveats: resp?.consensus?.caveats || [],
@@ -362,6 +399,15 @@ export default function CrosscheckPage() {
     setHistory(next);
     persistRuns(next);
     setSelectedId(run.id);
+  }
+
+  function applyMissingFactsToFacts() {
+    const followups = resp?.consensus?.followups ?? [];
+    if (!followups.length) return;
+
+    const block = followups.map((f) => `• ${f}`).join("\n");
+    const prefix = facts.trim() ? `${facts.trim()}\n\n` : "";
+    setFacts(`${prefix}Missing facts to confirm:\n${block}\n`);
   }
 
   async function run() {
@@ -382,7 +428,7 @@ export default function CrosscheckPage() {
         body: JSON.stringify({
           jurisdiction: jurisdiction.trim() || undefined,
           facts: facts.trim() || undefined,
-          constraints: answerStyle.trim() || undefined,
+          constraints,
           question: q,
         }),
       });
@@ -408,16 +454,22 @@ export default function CrosscheckPage() {
     }
   }
 
+  // stable key handler
+  runFnRef.current = run;
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
-      if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") run();
+      if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") {
+        runFnRef.current?.();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [question, facts, answerStyle, jurisdiction]);
+  }, []);
 
-  const confidence = resp?.consensus?.confidence;
+  // minor: prevent any “double-mint” style issues if this page ever triggers side-effects
+  useEffect(() => {
+    mintedOnceKeyRef.current += 1;
+  }, []);
 
   return (
     <div className="min-h-screen text-white bg-[#070A12]">
@@ -430,7 +482,7 @@ export default function CrosscheckPage() {
         {/* Top bar */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
-            {/* Replace with your logo in /public, e.g. /taxaipro-logo.png */}
+            {/* If you have /public/taxaipro-logo.png, you can swap the block below for an <img>. */}
             <div className="h-10 w-10 rounded-xl bg-white/10 border border-white/10 flex items-center justify-center font-bold">
               AI
             </div>
@@ -463,7 +515,7 @@ export default function CrosscheckPage() {
               <div className="rounded-xl border border-white/10 bg-black/30 p-3">
                 <div className="text-xs font-semibold text-white/80">Run 1</div>
                 <div className="mt-1">
-                  Ask the question with minimal facts. Expect the result to include{" "}
+                  Ask the question with minimal facts. Expect{" "}
                   <span className="text-white/90">Missing facts</span> and{" "}
                   <span className="text-white/90">Caveats</span>.
                 </div>
@@ -471,15 +523,19 @@ export default function CrosscheckPage() {
               <div className="rounded-xl border border-white/10 bg-black/30 p-3">
                 <div className="text-xs font-semibold text-white/80">Run 2</div>
                 <div className="mt-1">
-                  Paste the requested items into <span className="text-white/90">Facts</span> and re-run.
-                  You’ll usually get a much tighter answer.
+                  Paste requested items into <span className="text-white/90">Facts</span> and re-run
+                  for a tighter answer.
                 </div>
               </div>
               <div className="rounded-xl border border-white/10 bg-black/30 p-3">
-                <div className="text-xs font-semibold text-white/80">Run 3 (optional)</div>
+                <div className="text-xs font-semibold text-white/80">
+                  Run 3 (optional)
+                </div>
                 <div className="mt-1">
-                  If confidence is low or there are disagreements, add clarifying facts or constraints,
-                  then export as <span className="text-white/90">Memo</span> or <span className="text-white/90">Email</span>.
+                  If confidence is low or models disagree, add clarifying facts or{" "}
+                  <span className="text-white/90">Run overrides</span>, then export as{" "}
+                  <span className="text-white/90">Memo</span> or{" "}
+                  <span className="text-white/90">Email</span>.
                 </div>
               </div>
             </div>
@@ -493,7 +549,7 @@ export default function CrosscheckPage() {
             <SectionTitle hint="Saved on this device">Case history</SectionTitle>
 
             <div className="mt-3 text-xs text-white/50">
-              This is local for now. Next step: tie to Firebase UID + Firestore.
+              Local for now. Next: tie to Firebase UID + Firestore.
             </div>
 
             <div className="mt-3 space-y-2">
@@ -542,7 +598,7 @@ export default function CrosscheckPage() {
 
           {/* Intake */}
           <Card className="lg:col-span-3 p-4">
-            <SectionTitle hint="Context used by every run">Intake</SectionTitle>
+            <SectionTitle hint="Used by every run">Intake</SectionTitle>
 
             <label className="mt-3 block text-xs text-white/70">
               Jurisdiction
@@ -560,7 +616,7 @@ export default function CrosscheckPage() {
             <label className="mt-3 block text-xs text-white/70">
               Facts
               <span className="ml-2 text-[11px] text-white/40">
-                (paste bullets; after Run 1, paste “missing facts” here)
+                (paste bullets; after Run 1, paste “Missing facts” here)
               </span>
             </label>
             <textarea
@@ -576,22 +632,40 @@ export default function CrosscheckPage() {
             />
 
             <label className="mt-3 block text-xs text-white/70">
-              Answer style (global guidance)
+              Global defaults (style + posture)
               <span className="ml-2 text-[11px] text-white/40">
-                (used as constraints; keep stable across runs)
+                (stable across runs — how the model should behave)
               </span>
             </label>
             <textarea
-              value={answerStyle}
-              onChange={(e) => setAnswerStyle(e.target.value)}
+              value={globalDefaults}
+              onChange={(e) => setGlobalDefaults(e.target.value)}
               className="mt-1 min-h-[140px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-white/20"
-              placeholder="Tone, format, conservative posture…"
+              placeholder="Conservative posture, format, what to include…"
+            />
+
+            <label className="mt-3 block text-xs text-white/70">
+              Run overrides (optional)
+              <span className="ml-2 text-[11px] text-white/40">
+                (only for this run — e.g., “assume invoice is issued from X”)
+              </span>
+            </label>
+            <textarea
+              value={runOverrides}
+              onChange={(e) => setRunOverrides(e.target.value)}
+              className="mt-1 min-h-[90px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-white/20"
+              placeholder={[
+                "Examples:",
+                "• Focus only on withholding + treaty relief",
+                "• Provide a simple decision tree + next steps",
+                "• Assume the payer is resident in [country]",
+              ].join("\n")}
             />
           </Card>
 
           {/* Ask */}
           <Card className="lg:col-span-4 p-4">
-            <SectionTitle hint="Keep the question short; move details to Facts">
+            <SectionTitle hint="Keep question short; put details in Facts">
               Ask
             </SectionTitle>
 
@@ -605,7 +679,7 @@ export default function CrosscheckPage() {
 
               <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-xs text-white/50">
-                  Tip: Run 1 is exploratory. Then paste “Missing facts” into Facts and re-run.
+                  Tip: Run 1 is exploratory. Then click “Paste missing facts into Facts” and re-run.
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -635,32 +709,57 @@ export default function CrosscheckPage() {
               </div>
             )}
 
-            <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.02] p-3">
-              <SectionTitle hint="Useful to debug outages / model failures">
-                Models
-              </SectionTitle>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {providerBadges.ok.map((x) => (
-                  <span
-                    key={x}
-                    className="rounded-full bg-emerald-500/15 border border-emerald-500/25 px-2.5 py-1 text-xs text-emerald-100"
+            <div className="mt-4 grid grid-cols-1 gap-3">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-3">
+                <SectionTitle hint="Quick helper">Next action</SectionTitle>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    onClick={applyMissingFactsToFacts}
+                    disabled={!(resp?.consensus?.followups ?? []).length}
+                    className="rounded-xl border border-white/15 px-3 py-2 text-xs text-white/85 hover:bg-white/5 disabled:opacity-40 disabled:hover:bg-transparent"
                   >
-                    ✓ {x}
-                  </span>
-                ))}
-                {providerBadges.bad.map((x) => (
-                  <span
-                    key={x}
-                    className="rounded-full bg-amber-500/15 border border-amber-500/25 px-2.5 py-1 text-xs text-amber-100"
+                    Paste missing facts into Facts
+                  </button>
+                  <button
+                    onClick={() => setRunOverrides("")}
+                    disabled={!runOverrides.trim()}
+                    className="rounded-xl border border-white/15 px-3 py-2 text-xs text-white/85 hover:bg-white/5 disabled:opacity-40 disabled:hover:bg-transparent"
                   >
-                    ! {x}
-                  </span>
-                ))}
-                {!resp && (
-                  <span className="text-xs text-white/50">
-                    Run once to see status.
-                  </span>
-                )}
+                    Clear run overrides
+                  </button>
+                </div>
+                <div className="mt-2 text-[11px] text-white/45">
+                  Run overrides are great for “assume X” or “focus on Y” without changing your global defaults.
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-3">
+                <SectionTitle hint="Useful to debug outages / model failures">
+                  Models
+                </SectionTitle>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {providerBadges.ok.map((x) => (
+                    <span
+                      key={x}
+                      className="rounded-full bg-emerald-500/15 border border-emerald-500/25 px-2.5 py-1 text-xs text-emerald-100"
+                    >
+                      ✓ {x}
+                    </span>
+                  ))}
+                  {providerBadges.bad.map((x) => (
+                    <span
+                      key={x}
+                      className="rounded-full bg-amber-500/15 border border-amber-500/25 px-2.5 py-1 text-xs text-amber-100"
+                    >
+                      ! {x}
+                    </span>
+                  ))}
+                  {!resp && (
+                    <span className="text-xs text-white/50">
+                      Run once to see status.
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           </Card>
@@ -740,14 +839,10 @@ export default function CrosscheckPage() {
 
             <div className="mt-3 grid grid-cols-1 gap-3">
               <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-3">
-                <SectionTitle hint="Assumptions + edge cases">
-                  Caveats
-                </SectionTitle>
+                <SectionTitle hint="Assumptions + edge cases">Caveats</SectionTitle>
                 <ul className="mt-2 list-disc pl-5 text-sm text-white/80 space-y-1">
                   {(resp?.consensus?.caveats ?? []).length ? (
-                    (resp?.consensus?.caveats ?? []).map((c, i) => (
-                      <li key={i}>{c}</li>
-                    ))
+                    (resp?.consensus?.caveats ?? []).map((c, i) => <li key={i}>{c}</li>)
                   ) : (
                     <li className="list-none text-white/50">None yet.</li>
                   )}
@@ -758,15 +853,23 @@ export default function CrosscheckPage() {
                 <SectionTitle hint="Paste these into Facts, then re-run">
                   Missing facts
                 </SectionTitle>
+
                 <ul className="mt-2 list-disc pl-5 text-sm text-white/80 space-y-1">
                   {(resp?.consensus?.followups ?? []).length ? (
-                    (resp?.consensus?.followups ?? []).map((c, i) => (
-                      <li key={i}>{c}</li>
-                    ))
+                    (resp?.consensus?.followups ?? []).map((c, i) => <li key={i}>{c}</li>)
                   ) : (
                     <li className="list-none text-white/50">None yet.</li>
                   )}
                 </ul>
+
+                {(resp?.consensus?.followups ?? []).length ? (
+                  <button
+                    onClick={applyMissingFactsToFacts}
+                    className="mt-3 w-full rounded-xl border border-white/15 px-3 py-2 text-xs text-white/85 hover:bg-white/5"
+                  >
+                    Paste into Facts
+                  </button>
+                ) : null}
               </div>
             </div>
 
