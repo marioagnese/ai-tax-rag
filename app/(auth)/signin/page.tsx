@@ -7,6 +7,7 @@ import {
   firebaseClientConfigured,
   getFirebaseAuth,
 } from "@/src/lib/firebase/client";
+import type { Auth } from "firebase/auth";
 import {
   GoogleAuthProvider,
   signInWithPopup,
@@ -40,12 +41,26 @@ export default function SignInPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
+  // IMPORTANT: This is computed from NEXT_PUBLIC_* values at BUILD TIME.
   const configured = useMemo(() => firebaseClientConfigured(), []);
 
-  const auth = useMemo(() => {
-    // Avoid import-time crashes and show a nice message instead.
-    if (!configured) return null;
-    return getFirebaseAuth();
+  // IMPORTANT: auth must only be created in the browser (prevents server/prerender crashes).
+  const [auth, setAuth] = useState<Auth | null>(null);
+
+  useEffect(() => {
+    if (!configured) {
+      setAuth(null);
+      return;
+    }
+    // hard guard for any weird edge runtime
+    if (typeof window === "undefined") return;
+
+    try {
+      setAuth(getFirebaseAuth());
+    } catch (e: any) {
+      setAuth(null);
+      setError(e?.message || "Firebase init failed");
+    }
   }, [configured]);
 
   // Guard against duplicate onAuthStateChanged firing (dev/refresh)
@@ -80,14 +95,13 @@ export default function SignInPage() {
 
   async function loginWithGoogle() {
     try {
-      if (!auth) throw new Error("Firebase client is not configured (.env.local / Vercel env).");
+      if (!auth) throw new Error("Firebase client is not configured for this deployment build.");
       setBusy(true);
       setError("");
 
       const provider = new GoogleAuthProvider();
       const cred = await signInWithPopup(auth, provider);
 
-      // Firebase ID token (aud == firebase project)
       const idToken = await cred.user.getIdToken(true);
       await mintSession(idToken);
 
@@ -102,7 +116,7 @@ export default function SignInPage() {
   async function loginWithEmail(e: React.FormEvent) {
     e.preventDefault();
     try {
-      if (!auth) throw new Error("Firebase client is not configured (.env.local / Vercel env).");
+      if (!auth) throw new Error("Firebase client is not configured for this deployment build.");
       setBusy(true);
       setError("");
 
@@ -118,33 +132,32 @@ export default function SignInPage() {
     }
   }
 
-  const disableButtons = busy || !configured;
+  const disableButtons = busy || !configured || !auth;
 
   return (
     <div className="min-h-screen bg-black text-white flex items-center justify-center px-6">
       <div className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Left card */}
         <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-          {/* BIG brand header */}
+          {/* BIG BRAND HEADER */}
           <div className="mb-6">
-            <div className="flex flex-col items-start gap-3">
-              {/* Big logo on top */}
-              <div className="w-[140px] h-[140px] rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden">
+            <div className="flex justify-center md:justify-start">
+              <div className="h-[140px] w-[140px] rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden shadow-[0_0_0_1px_rgba(255,255,255,0.06)]">
                 <Image
                   src="/taxaipro-logo.png"
                   alt="TaxAiPro"
                   width={140}
                   height={140}
-                  className="h-full w-full object-contain"
+                  className="h-full w-full object-contain p-0"
                   priority
                 />
               </div>
+            </div>
 
-              <div>
-                <div className="text-3xl font-semibold leading-tight">TaxAiPro</div>
-                <div className="text-sm text-white/60">
-                  Multi-model tax crosscheck + conservative synthesis.
-                </div>
+            <div className="mt-4">
+              <div className="text-3xl font-semibold tracking-tight">TaxAiPro</div>
+              <div className="mt-1 text-sm text-white/60">
+                Multi-model tax crosscheck + conservative synthesis.
               </div>
             </div>
           </div>
@@ -158,10 +171,11 @@ export default function SignInPage() {
             <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
               Firebase isn’t configured for this deployment build. Check Vercel env vars for:
               <div className="mt-2 text-xs text-amber-100/80">
-                NEXT_PUBLIC_FIREBASE_API_KEY, NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN, NEXT_PUBLIC_FIREBASE_PROJECT_ID, NEXT_PUBLIC_FIREBASE_APP_ID
-              </div>
-              <div className="mt-2 text-[11px] text-amber-100/70">
-                Tip: these must exist at build time (Production/Preview) → then redeploy.
+                NEXT_PUBLIC_FIREBASE_API_KEY, NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+                NEXT_PUBLIC_FIREBASE_PROJECT_ID, NEXT_PUBLIC_FIREBASE_APP_ID
+                <div className="mt-2 text-amber-100/70">
+                  Tip: these must exist at <b>build time</b> (Production/Preview) → then redeploy.
+                </div>
               </div>
             </div>
           ) : null}
@@ -175,8 +189,8 @@ export default function SignInPage() {
           </button>
 
           <div className="mt-4 text-xs text-white/50">
-            New here? Use the{" "}
-            <span className="text-white/70">2–3 run method</span>: run once → add missing facts → re-run.
+            New here? Use the <span className="text-white/70">2–3 run method</span>:
+            run once → add missing facts → re-run.
           </div>
 
           <button
@@ -243,7 +257,8 @@ export default function SignInPage() {
           </ul>
 
           <div className="mt-6 rounded-xl border border-white/10 bg-black/30 p-4 text-sm text-white/70">
-            Tip: better facts → better output. Entity type, residency, thresholds, timing, and who does what in-country.
+            Tip: better facts → better output. Entity type, residency, thresholds, timing, and
+            who does what in-country.
           </div>
 
           <div className="mt-4 text-xs text-white/50">
