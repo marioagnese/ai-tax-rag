@@ -1,4 +1,3 @@
-// src/lib/firebase/client.ts
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
 
@@ -12,34 +11,39 @@ type FirebasePublicConfig = {
   appId: string;
 };
 
-function env(name: string): string {
-  // In Next.js client bundles, only NEXT_PUBLIC_* are inlined.
-  // On the server during build/prerender, process.env is still available.
-  return process.env[name] || "";
+/**
+ * IMPORTANT:
+ * In Next.js, NEXT_PUBLIC_* values are statically inlined into the client bundle
+ * at build time. Dynamic access like process.env[name] can fail/return empty.
+ * So we must reference them directly as literals.
+ */
+function getPublicEnv() {
+  return {
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "",
+    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "",
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "",
+    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "",
+  };
 }
 
 export function firebaseClientConfigured(): boolean {
-  return !!(
-    env("NEXT_PUBLIC_FIREBASE_API_KEY") &&
-    env("NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN") &&
-    env("NEXT_PUBLIC_FIREBASE_PROJECT_ID") &&
-    env("NEXT_PUBLIC_FIREBASE_APP_ID")
-  );
+  const e = getPublicEnv();
+  return !!(e.apiKey && e.authDomain && e.projectId && e.appId);
 }
 
-function requirePublicEnv(name: string): string {
-  const v = env(name);
-  if (!v) throw new Error(`Missing env var: ${name}`);
+function requirePublicEnv(name: keyof ReturnType<typeof getPublicEnv>): string {
+  const v = getPublicEnv()[name];
+  if (!v) throw new Error(`Missing env var: NEXT_PUBLIC_FIREBASE_${name.toUpperCase()}`);
   return v;
 }
 
 function getFirebaseConfig(): FirebasePublicConfig {
-  // IMPORTANT: validate lazily (prevents import-time crashes)
+  // validate lazily (prevents import-time crashes)
   return {
-    apiKey: requirePublicEnv("NEXT_PUBLIC_FIREBASE_API_KEY"),
-    authDomain: requirePublicEnv("NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN"),
-    projectId: requirePublicEnv("NEXT_PUBLIC_FIREBASE_PROJECT_ID"),
-    appId: requirePublicEnv("NEXT_PUBLIC_FIREBASE_APP_ID"),
+    apiKey: requirePublicEnv("apiKey"),
+    authDomain: requirePublicEnv("authDomain"),
+    projectId: requirePublicEnv("projectId"),
+    appId: requirePublicEnv("appId"),
   };
 }
 
@@ -62,11 +66,9 @@ export function getFirebaseAuth(): Auth {
   /**
    * IMPORTANT (Next.js build/prerender):
    * Next may evaluate client modules during build and prerender pipelines.
-   * Throwing on `typeof window === "undefined"` can break `next build`.
-   *
    * This helper remains safe because:
    * - config validation is lazy
-   * - callers still should only *use* auth interactions in client components
+   * - callers should only use auth interactions in client components
    */
   _auth = getAuth(getFirebaseClientApp());
   return _auth;
