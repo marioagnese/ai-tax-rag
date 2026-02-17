@@ -125,7 +125,7 @@ export default function SignInPage() {
       <div className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Left card */}
         <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-          <div className="flex items-center gap-3 mb-6">
+          <div className="flex flex-col items-start gap-3 mb-6">
             <div className="h-24 w-24 rounded-xl bg-white/10 border border-white/10 flex items-center justify-center overflow-hidden">
               <Image
                 src="/taxaipro-logo.png"
@@ -138,7 +138,7 @@ export default function SignInPage() {
             </div>
 
             <div>
-              <div className="text-xl font-semibold">TaxAiPro</div>
+              <div className="text-2xl font-semibold">TaxAiPro</div>
               <div className="text-sm text-white/60">
                 Multi-model tax crosscheck + conservative synthesis.
               </div>
