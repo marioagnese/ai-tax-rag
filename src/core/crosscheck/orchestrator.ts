@@ -9,14 +9,24 @@ import { callOpenAI } from "./providers/openai";
 import { callOpenRouter } from "./providers/openrouter";
 import OpenAI from "openai";
 
+function env(name: string): string {
+  return process.env[name] || "";
+}
+
 function requireEnv(name: string) {
-  const v = process.env[name];
+  const v = env(name);
   if (!v) throw new Error(`Missing env var: ${name}`);
   return v;
 }
 
 function uniq(xs: string[]) {
-  return Array.from(new Set(xs.map((x) => x.trim()).filter(Boolean)));
+  return Array.from(new Set(xs.map((x) => String(x).trim()).filter(Boolean)));
+}
+
+function clampInt(n: unknown, min: number, max: number, fallback: number) {
+  const v =
+    typeof n === "number" && Number.isFinite(n) ? Math.floor(n) : fallback;
+  return Math.max(min, Math.min(max, v));
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -28,13 +38,14 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 function defaultOpenRouterModels(): string[] {
-  // put Claude/DeepSeek/Grok through OpenRouter by listing models here
   // Example: OPENROUTER_MODELS="anthropic/claude-3.5-sonnet,deepseek/deepseek-chat,x-ai/grok-4.1-fast"
-  const raw = process.env.OPENROUTER_MODELS || process.env.OPENROUTER_MODEL || "";
-  const models = raw
+  const raw = env("OPENROUTER_MODELS") || env("OPENROUTER_MODEL");
+  const models = (raw || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+
+  // Keep a conservative, stable default
   return models.length ? models : ["anthropic/claude-3.5-sonnet"];
 }
 
@@ -44,7 +55,7 @@ function pickBest(outputs: ProviderOutput[]): ProviderOutput | null {
   );
   if (!ok.length) return null;
 
-  // crude scoring: longer + fewer obvious error words
+  // crude scoring: longer + fewer obvious refusal/error words
   const scored = ok.map((o) => {
     const text = (o.text || "").toLowerCase();
     const bad = ["i don't know", "cannot", "unable", "no information"].some((k) =>
@@ -61,9 +72,98 @@ function pickBest(outputs: ProviderOutput[]): ProviderOutput | null {
   return scored[0].o;
 }
 
-async function synthesizeWithOpenAI(input: CrosscheckInput, outputs: ProviderOutput[]) {
-  const apiKey = requireEnv("OPENAI_API_KEY");
-  const model = process.env.OPENAI_SYNTH_MODEL || process.env.OPENAI_MODEL || "gpt-4.1-mini";
+function safeJsonParse<T>(s: string): T | null {
+  try {
+    return JSON.parse(s) as T;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Many models wrap JSON in ```json ... ``` fences. Strip those safely.
+ */
+function extractJsonObject(raw: string): string {
+  const s = (raw || "").trim();
+  if (!s) return "{}";
+
+  // fenced block
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fence?.[1]) return fence[1].trim();
+
+  // try to pull the first {...} block
+  const firstBrace = s.indexOf("{");
+  const lastBrace = s.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    return s.slice(firstBrace, lastBrace + 1).trim();
+  }
+
+  return s;
+}
+
+function normalizeConsensus(parsed: any) {
+  const answer = String(parsed?.answer || "").trim();
+
+  const caveats = Array.isArray(parsed?.caveats)
+    ? parsed.caveats.map(String)
+    : [];
+  const followups = Array.isArray(parsed?.followups)
+    ? parsed.followups.map(String)
+    : [];
+  const disagreements = Array.isArray(parsed?.disagreements)
+    ? parsed.disagreements.map(String)
+    : [];
+
+  const confidenceRaw = String(parsed?.confidence || "").toLowerCase();
+  const confidence =
+    confidenceRaw === "high" || confidenceRaw === "medium" || confidenceRaw === "low"
+      ? (confidenceRaw as "low" | "medium" | "high")
+      : "low";
+
+  return {
+    answer,
+    caveats: uniq(caveats),
+    followups: uniq(followups),
+    disagreements: uniq(disagreements),
+    confidence,
+  };
+}
+
+function summarizeProviderForMeta(p: ProviderOutput): ProviderCall {
+  return { provider: p.provider, model: p.model };
+}
+
+function classifyProviderError(e: any): { status: "timeout" | "error"; error: string } {
+  const msg = e?.message ? String(e.message) : String(e);
+  const status = msg.toLowerCase().includes("timeout") ? "timeout" : "error";
+  return { status, error: msg };
+}
+
+async function synthesizeWithOpenAI(
+  input: CrosscheckInput,
+  outputs: ProviderOutput[]
+) {
+  // If no OpenAI key, degrade gracefully: synthesize from best provider.
+  const apiKey = env("OPENAI_API_KEY");
+  if (!apiKey) {
+    const best = pickBest(outputs);
+    return normalizeConsensus({
+      answer: best?.text || "",
+      caveats: best?.text
+        ? [
+            "Synthesis model unavailable (missing OPENAI_API_KEY). Returned best single-provider output.",
+          ]
+        : [
+            "Synthesis model unavailable (missing OPENAI_API_KEY). No successful provider output.",
+          ],
+      followups: [],
+      disagreements: [],
+      confidence: "low",
+    });
+  }
+
+  const model =
+    env("OPENAI_SYNTH_MODEL") || env("OPENAI_MODEL") || "gpt-4.1-mini";
   const client = new OpenAI({ apiKey });
 
   const packed = outputs
@@ -76,10 +176,12 @@ async function synthesizeWithOpenAI(input: CrosscheckInput, outputs: ProviderOut
 
   const sys = [
     "You are the Crosscheck Orchestrator for a tax AI product.",
-    "You must: (1) extract consensus, (2) flag contradictions, (3) list missing facts needed, (4) provide a conservative best answer.",
-    "Do NOT invent citations. If you reference an authority, name it only if it was mentioned by providers or is truly standard/common (e.g., 'Panama territorial taxation' as a concept).",
-    "Write clearly, like a tax partner doing a rapid triage email.",
-    "Return strict JSON with keys: answer, caveats, followups, disagreements, confidence.",
+    "Your job: synthesize a conservative consensus answer from multiple model outputs.",
+    "Do NOT invent citations. If you reference an authority, name it only if it was mentioned by providers or is truly standard/common doctrine.",
+    "Be explicit about assumptions, caveats, and missing facts needed to confirm.",
+    "If providers disagree, summarize the disagreement in plain language.",
+    "Return STRICT JSON ONLY with keys: answer, caveats, followups, disagreements, confidence.",
+    "caveats/followups/disagreements must be arrays of strings. confidence must be one of: low, medium, high.",
   ].join("\n");
 
   const user = [
@@ -94,6 +196,9 @@ async function synthesizeWithOpenAI(input: CrosscheckInput, outputs: ProviderOut
     .filter(Boolean)
     .join("\n\n");
 
+  // Keep synth reasonably bounded
+  const max_tokens = clampInt((input as any)?.maxTokens, 256, 1200, 900);
+
   const resp = await client.chat.completions.create({
     model,
     temperature: 0.1,
@@ -101,87 +206,87 @@ async function synthesizeWithOpenAI(input: CrosscheckInput, outputs: ProviderOut
       { role: "system", content: sys },
       { role: "user", content: user },
     ],
-    max_tokens: 900,
+    max_tokens,
   });
 
   const raw = resp.choices?.[0]?.message?.content || "{}";
+  const extracted = extractJsonObject(raw);
+  const parsed = safeJsonParse<any>(extracted);
 
-  // best-effort JSON parse
-  let parsed: any = {};
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
+  if (!parsed) {
     // fallback: keep raw in answer
-    parsed = {
+    return normalizeConsensus({
       answer: raw,
-      caveats: [],
+      caveats: ["Synthesis did not return valid JSON; returning raw output."],
       followups: [],
       disagreements: [],
       confidence: "low",
-    };
+    });
   }
 
-  return {
-    answer: String(parsed.answer || "").trim(),
-    caveats: Array.isArray(parsed.caveats) ? parsed.caveats.map(String) : [],
-    followups: Array.isArray(parsed.followups) ? parsed.followups.map(String) : [],
-    disagreements: Array.isArray(parsed.disagreements)
-      ? parsed.disagreements.map(String)
-      : [],
-    confidence: (["low", "medium", "high"].includes(parsed.confidence)
-      ? parsed.confidence
-      : "low") as "low" | "medium" | "high",
-  };
+  return normalizeConsensus(parsed);
 }
 
-export async function runCrosscheck(input: CrosscheckInput): Promise<CrosscheckResult> {
+export async function runCrosscheck(
+  input: CrosscheckInput
+): Promise<CrosscheckResult> {
   const t0 = Date.now();
-  const timeoutMs = Math.min(Math.max(input.timeoutMs ?? 45000, 8000), 120000);
+
+  const timeoutMs = clampInt(input.timeoutMs, 8_000, 120_000, 45_000);
 
   const attempted: ProviderCall[] = [];
-  const tasks: Promise<ProviderOutput>[] = [];
+  const tasks: Array<Promise<ProviderOutput>> = [];
 
-  // OpenAI
-  attempted.push({ provider: "openai", model: process.env.OPENAI_MODEL || "gpt-4.1-mini" });
-  tasks.push(withTimeout(callOpenAI(input), timeoutMs));
+  // We need to preserve provider/model labeling even when a task errors.
+  // Wrap each call so we always return a ProviderOutput tagged correctly.
+  const wrap = (
+    call: ProviderCall,
+    fn: () => Promise<ProviderOutput>
+  ): Promise<ProviderOutput> => {
+    attempted.push(call);
+    return withTimeout(fn(), timeoutMs).catch((e: any) => {
+      const { status, error } = classifyProviderError(e);
+      return {
+        provider: call.provider,
+        model: call.model,
+        status,
+        ms: timeoutMs,
+        error,
+      } satisfies ProviderOutput;
+    });
+  };
 
-  // NOTE: Gemini disabled for now to stabilize deployment (model naming / API format mismatch).
-  // We can re-enable later behind a GEMINI_ENABLED flag once provider is stable.
+  // OpenAI provider call (if configured, callOpenAI should handle missing key gracefully,
+  // but we still attempt so meta shows it)
+  const openaiModel = env("OPENAI_MODEL") || "gpt-4.1-mini";
+  tasks.push(
+    wrap({ provider: "openai", model: openaiModel }, () => callOpenAI(input))
+  );
+
+  // NOTE: Gemini disabled for now to stabilize deployment.
+  // Re-enable later behind a GEMINI_ENABLED flag once provider is stable.
 
   // OpenRouter fan-out
   for (const m of defaultOpenRouterModels()) {
-    attempted.push({ provider: "openrouter", model: m });
-    tasks.push(withTimeout(callOpenRouter(input, m), timeoutMs));
+    tasks.push(
+      wrap({ provider: "openrouter", model: m }, () => callOpenRouter(input, m))
+    );
   }
 
-  const providers = await Promise.all(
-    tasks.map((p) =>
-      p.catch((e: any) => {
-        const msg = e?.message || String(e);
-        // we don't know which provider it was here, so tag as openrouter generic if message mentions it; else unknown.
-        return {
-          provider: "openrouter",
-          model: "unknown",
-          status: (msg.includes("timeout") ? "timeout" : "error") as any,
-          ms: timeoutMs,
-          error: msg,
-        } satisfies ProviderOutput;
-      })
-    )
-  );
+  const providers = await Promise.all(tasks);
 
   const succeededCalls: ProviderCall[] = [];
   const failedCalls: ProviderCall[] = [];
   for (const p of providers) {
-    const call: ProviderCall = { provider: p.provider, model: p.model };
+    const call = summarizeProviderForMeta(p);
     if (p.status === "ok") succeededCalls.push(call);
     else failedCalls.push(call);
   }
 
-  const best = pickBest(providers);
   const synth = await synthesizeWithOpenAI(input, providers);
 
-  // If synth came back empty, degrade gracefully
+  // Degrade gracefully if synth came back empty
+  const best = pickBest(providers);
   const answer =
     synth.answer ||
     (best?.text?.trim() ||
@@ -192,7 +297,9 @@ export async function runCrosscheck(input: CrosscheckInput): Promise<CrosscheckR
   const caveats = uniq([
     ...synth.caveats,
     ...(!succeededCalls.length
-      ? ["No providers returned a successful answer. Check API keys, model names, and network access."]
+      ? [
+          "No providers returned a successful answer. Check API keys, model names, and network access.",
+        ]
       : []),
   ]);
 
