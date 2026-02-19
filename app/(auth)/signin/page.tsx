@@ -56,10 +56,11 @@ export default function SignInPage() {
   const [password, setPassword] = useState("");
 
   // DEBUG: prove which deployment is live
-  const commit =
-    (process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ||
-      process.env.NEXT_PUBLIC_GIT_COMMIT_SHA ||
-      "no-commit-env")?.slice(0, 7);
+  const commit = (
+    process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ||
+    process.env.NEXT_PUBLIC_GIT_COMMIT_SHA ||
+    "no-commit-env"
+  )?.slice(0, 7);
 
   // DEBUG: prove if background loads
   const [bgStatus, setBgStatus] = useState<"loading" | "ok" | "fail">("loading");
@@ -197,15 +198,14 @@ export default function SignInPage() {
           alt="TaxAiPro background"
           className="h-full w-full object-cover object-center"
           style={{
-            // Make it CLEARLY visible (Harvey-ish)
-            filter: "contrast(1.12) saturate(1.10) brightness(0.95)",
+            // Make it CLEARLY visible
+            filter: "contrast(1.10) saturate(1.08) brightness(1.0)",
             transform: "scale(1.03)",
           }}
         />
 
-        {/* Readability overlay (strong left fade, light elsewhere) */}
-        <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/35 to-black/10" />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-black/10" />
+        {/* OVERLAY: make it basically transparent (so image shows) */}
+        <div className="absolute inset-0 bg-black/0" />
       </div>
 
       {/* Top bar: BIG logo left, Login right (no tiny “TaxAiPro” text) */}
@@ -259,7 +259,7 @@ export default function SignInPage() {
         </section>
       </main>
 
-      {/* DEBUG badge (you can remove later) */}
+      {/* DEBUG badge (remove later) */}
       <div className="fixed bottom-3 right-3 z-50 rounded-full border border-white/10 bg-black/60 px-3 py-1 text-[11px] text-white/70 backdrop-blur">
         commit:{commit} • bg:{bgStatus}
       </div>
