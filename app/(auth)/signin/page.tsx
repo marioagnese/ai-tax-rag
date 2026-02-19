@@ -4,10 +4,7 @@
 import Image from "next/image";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  firebaseClientConfigured,
-  getFirebaseAuth,
-} from "@/src/lib/firebase/client";
+import { firebaseClientConfigured, getFirebaseAuth } from "@/src/lib/firebase/client";
 import {
   GoogleAuthProvider,
   signInWithPopup,
@@ -53,18 +50,16 @@ export default function SignInPage() {
   const [error, setError] = useState<string>("");
   const [info, setInfo] = useState<string>("");
 
-  const [emailEnabled, setEmailEnabled] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   const configured = useMemo(() => firebaseClientConfigured(), []);
+  const auth = useMemo(() => (configured ? getFirebaseAuth() : null), [configured]);
 
-  const auth = useMemo(() => {
-    if (!configured) return null;
-    return getFirebaseAuth();
-  }, [configured]);
-
+  // Guard against duplicate onAuthStateChanged firing (dev/refresh)
   const mintedOnceRef = useRef(false);
 
   useEffect(() => {
@@ -125,9 +120,7 @@ export default function SignInPage() {
       setInfo("");
 
       if (!email.trim()) throw new Error("Please enter your email.");
-      if (!password || password.length < 6) {
-        throw new Error("Password must be at least 6 characters.");
-      }
+      if (!password || password.length < 6) throw new Error("Password must be at least 6 characters.");
 
       let userCred: any;
 
@@ -139,7 +132,7 @@ export default function SignInPage() {
             setMode("signup");
             throw new Error("No account found for this email. Switch to “Create” to continue.");
           }
-          if (isWrongPassword(err)) throw new Error("Incorrect password. Try again or reset.");
+          if (isWrongPassword(err)) throw new Error("Incorrect password. Try again or reset your password.");
           if (isInvalidEmail(err)) throw new Error("Invalid email format.");
           throw err;
         }
@@ -165,7 +158,7 @@ export default function SignInPage() {
       setError("");
       setInfo("");
 
-      if (!email.trim()) throw new Error("Enter your email first.");
+      if (!email.trim()) throw new Error("Enter your email first, then click “Reset password”.");
       await sendPasswordResetEmail(auth, email.trim());
 
       setInfo("Password reset email sent. Check your inbox.");
@@ -179,93 +172,128 @@ export default function SignInPage() {
   const disableButtons = busy || !configured;
 
   return (
-    <div className="relative min-h-screen text-white bg-black overflow-hidden">
-      {/* BACKGROUND: make it MUCH more visible (less dark overlay, boost contrast/sat) */}
-      <div className="fixed inset-0 z-0 pointer-events-none">
+    <div className="min-h-screen text-white bg-black">
+      {/* Background (make it visible like Harvey: less dark overlay, less blur, cinematic gradient) */}
+      <div className="fixed inset-0 -z-10">
         <Image
           src="/landing-bg.png"
           alt="TaxAiPro background"
           fill
           priority
-          unoptimized
-          className="object-cover opacity-95 contrast-125 saturate-125 brightness-110"
+          className="object-cover"
         />
-
-        {/* Keep readability: lighter overall dim, plus stronger vignette edges */}
-        <div className="absolute inset-0 bg-black/20" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0.00)_0%,rgba(0,0,0,0.25)_55%,rgba(0,0,0,0.70)_100%)]" />
-
-        {/* Subtle top fade so headline stays readable */}
-        <div className="absolute inset-0 bg-gradient-to-b from-black/35 via-transparent to-black/30" />
+        {/* Slight blur (keep the photo visible) */}
+        <div className="absolute inset-0 backdrop-blur-[2px]" />
+        {/* Darken edges + keep center readable */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0.15),rgba(0,0,0,0.75)_70%,rgba(0,0,0,0.92)_100%)]" />
+        {/* Left-side readability + bottom fade for CTA */}
+        <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/35 to-black/15" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
       </div>
 
-      {/* CONTENT */}
-      <div className="relative z-10 mx-auto max-w-6xl px-6 py-10">
-        {/* Removed separate logo block (background image already has branding) */}
+      {/* Minimal top bar (clean, Harvey-like) */}
+      <header className="mx-auto max-w-6xl px-6 pt-8">
+        <div className="flex items-center justify-between">
+          <div className="text-sm tracking-wide text-white/80">TaxAiPro</div>
+          <button
+            type="button"
+            onClick={() => setAuthOpen(true)}
+            className="text-sm text-white/80 hover:text-white"
+          >
+            Login
+          </button>
+        </div>
+      </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start pt-10">
-          {/* LEFT */}
-          <section className="lg:col-span-7">
-            {/* Optional small pill can stay, but you said remove small txt — so removed */}
-            <h1 className="text-4xl md:text-5xl font-semibold tracking-tight drop-shadow-[0_12px_40px_rgba(0,0,0,0.75)]">
+      {/* Hero */}
+      <main className="mx-auto max-w-6xl px-6">
+        <section className="pt-16 md:pt-24 pb-28 md:pb-36">
+          <div className="max-w-2xl">
+            <h1 className="text-5xl md:text-6xl font-semibold tracking-tight leading-[1.02]">
               Multi-model tax analysis,
-              <span className="block text-white/80">built to reduce uncertainty.</span>
+              <span className="block text-white/65">built to reduce uncertainty.</span>
             </h1>
 
-            <p className="mt-5 text-base md:text-lg text-white/85 max-w-2xl leading-relaxed drop-shadow-[0_10px_30px_rgba(0,0,0,0.75)]">
-              LLMs often give different answers to the same prompt. TaxAiPro runs multiple models in parallel,
-              compares where they agree and disagree, then rewrites a single conservative answer with explicit
-              assumptions, caveats, and missing facts.
+            <p className="mt-6 text-base md:text-lg text-white/72 leading-relaxed">
+              LLMs often answer the <span className="text-white/90 font-medium">same prompt</span> in different ways.
+              TaxAiPro runs multiple models in parallel, crosschecks where they agree and disagree, then rewrites
+              <span className="text-white/90 font-medium"> one conservative answer</span> with explicit assumptions,
+              caveats, and missing facts.
             </p>
 
-            <div className="mt-7 grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl">
-              <div className="rounded-2xl border border-white/18 bg-black/35 p-4 backdrop-blur-md shadow-[0_18px_60px_rgba(0,0,0,0.45)]">
-                <div className="text-sm font-medium">Crosscheck</div>
-                <div className="mt-1 text-sm text-white/75">
-                  See conflicts before you rely on an answer.
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-white/18 bg-black/35 p-4 backdrop-blur-md shadow-[0_18px_60px_rgba(0,0,0,0.45)]">
-                <div className="text-sm font-medium">Conservative synthesis</div>
-                <div className="mt-1 text-sm text-white/75">
-                  One consistent output + caveats + missing facts.
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-white/18 bg-black/35 p-4 backdrop-blur-md shadow-[0_18px_60px_rgba(0,0,0,0.45)]">
-                <div className="text-sm font-medium">Memo / email ready</div>
-                <div className="mt-1 text-sm text-white/75">
-                  Clean formatting for review and client comms.
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-white/18 bg-black/35 p-4 backdrop-blur-md shadow-[0_18px_60px_rgba(0,0,0,0.45)]">
-                <div className="text-sm font-medium">Built for tax work</div>
-                <div className="mt-1 text-sm text-white/75">
-                  Assumptions, thresholds, and documentation focus are explicit.
-                </div>
+            {/* CTA row like Harvey */}
+            <div className="mt-9 flex flex-col sm:flex-row gap-3 sm:items-center">
+              <button
+                type="button"
+                onClick={() => setAuthOpen(true)}
+                className="h-12 px-6 rounded-xl bg-white text-black font-medium hover:bg-white/90"
+              >
+                Sign in to try it
+              </button>
+              <div className="text-sm text-white/55">
+                Export memo/email-ready outputs in one click.
               </div>
             </div>
-          </section>
+          </div>
 
-          {/* RIGHT */}
-          <aside className="lg:col-span-5">
-            <div className="rounded-3xl border border-white/18 bg-white/[0.07] p-6 shadow-2xl shadow-black/50 backdrop-blur-xl">
+          {/* Bottom “logo under CTA” (no floating center logo) */}
+          <div className="mt-14">
+            <div className="relative h-[110px] w-[320px] sm:h-[120px] sm:w-[360px] md:h-[130px] md:w-[420px]">
+              <Image src="/taxaipro-logo.png" alt="TaxAiPro" fill className="object-contain" priority />
+            </div>
+            <div className="mt-3 text-xs text-white/45">
+              TaxAiPro generates drafts for triage only — not legal or tax advice.
+            </div>
+          </div>
+        </section>
+      </main>
+
+      {/* Auth Modal (replaces big card on the page) */}
+      {authOpen ? (
+        <div
+          className="fixed inset-0 z-50"
+          aria-modal="true"
+          role="dialog"
+          onMouseDown={() => {
+            // click outside closes
+            if (!busy) setAuthOpen(false);
+          }}
+        >
+          {/* overlay */}
+          <div className="absolute inset-0 bg-black/65 backdrop-blur-sm" />
+
+          {/* modal */}
+          <div
+            className="absolute left-1/2 top-1/2 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="rounded-3xl border border-white/10 bg-black/55 shadow-2xl shadow-black/40 backdrop-blur-xl p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-semibold">Sign in</h2>
+                  <p className="mt-1 text-sm text-white/60">
+                    Continue with Google or email.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => (!busy ? setAuthOpen(false) : null)}
+                  className="text-white/60 hover:text-white"
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
+              </div>
+
               {!configured ? (
-                <div className="mb-4 rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-100">
-                  Firebase isn’t configured. Check Vercel env vars:
+                <div className="mt-4 rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-100">
+                  Firebase isn’t configured. Check Vercel env vars for:
                   <div className="mt-2 text-xs text-amber-100/80">
                     NEXT_PUBLIC_FIREBASE_API_KEY, NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN, NEXT_PUBLIC_FIREBASE_PROJECT_ID,
                     NEXT_PUBLIC_FIREBASE_APP_ID
                   </div>
                 </div>
               ) : null}
-
-              <div>
-                <h2 className="text-lg font-semibold">Sign in</h2>
-                <p className="mt-1 text-sm text-white/75">Continue with Google or email.</p>
-              </div>
 
               <button
                 onClick={loginWithGoogle}
@@ -275,84 +303,77 @@ export default function SignInPage() {
                 {busy ? "Signing in..." : "Continue with Google"}
               </button>
 
-              <button
-                type="button"
-                onClick={() => setEmailEnabled((v) => !v)}
-                disabled={disableButtons}
-                className="mt-3 w-full h-12 rounded-2xl border border-white/20 bg-black/25 hover:bg-white/5 disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                Continue with email
-              </button>
+              <div className="mt-5 flex items-center gap-3 text-white/30">
+                <div className="h-px flex-1 bg-white/10" />
+                <span className="text-xs">or</span>
+                <div className="h-px flex-1 bg-white/10" />
+              </div>
 
-              {emailEnabled ? (
-                <div className="mt-5">
-                  <div className="flex items-center justify-between">
-                    <div className="text-xs text-white/75">
-                      {mode === "signin" ? "Email sign-in" : "Create account"}
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setMode("signin")}
-                        className={`text-xs px-2 py-1 rounded-full border ${
-                          mode === "signin"
-                            ? "border-white/35 bg-white/12 text-white"
-                            : "border-white/14 text-white/75 hover:text-white"
-                        }`}
-                      >
-                        Sign in
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setMode("signup")}
-                        className={`text-xs px-2 py-1 rounded-full border ${
-                          mode === "signup"
-                            ? "border-white/35 bg-white/12 text-white"
-                            : "border-white/14 text-white/75 hover:text-white"
-                        }`}
-                      >
-                        Create
-                      </button>
-                    </div>
-                  </div>
-
-                  <form onSubmit={submitEmailAuth} className="mt-3 space-y-3">
-                    <input
-                      className="w-full h-11 rounded-2xl bg-black/35 border border-white/14 px-4 outline-none focus:border-white/40"
-                      placeholder="Email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      autoComplete="email"
-                      inputMode="email"
-                    />
-                    <input
-                      className="w-full h-11 rounded-2xl bg-black/35 border border-white/14 px-4 outline-none focus:border-white/40"
-                      placeholder="Password"
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      autoComplete={mode === "signin" ? "current-password" : "new-password"}
-                    />
-
-                    <button
-                      type="submit"
-                      disabled={disableButtons}
-                      className="w-full h-11 rounded-2xl border border-white/20 bg-white/6 hover:bg-white/12 disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                      {busy ? "Working..." : mode === "signin" ? "Sign in" : "Create account"}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={resetPassword}
-                      disabled={disableButtons}
-                      className="w-full text-xs text-white/75 hover:text-white py-1"
-                    >
-                      Reset password
-                    </button>
-                  </form>
+              <div className="mt-4 flex items-center justify-between">
+                <div className="text-xs text-white/60">
+                  {mode === "signin" ? "Email sign-in" : "Create account"}
                 </div>
-              ) : null}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMode("signin")}
+                    className={`text-xs px-2.5 py-1 rounded-full border ${
+                      mode === "signin"
+                        ? "border-white/25 bg-white/10 text-white"
+                        : "border-white/10 text-white/60 hover:text-white"
+                    }`}
+                  >
+                    Sign in
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode("signup")}
+                    className={`text-xs px-2.5 py-1 rounded-full border ${
+                      mode === "signup"
+                        ? "border-white/25 bg-white/10 text-white"
+                        : "border-white/10 text-white/60 hover:text-white"
+                    }`}
+                  >
+                    Create
+                  </button>
+                </div>
+              </div>
+
+              <form onSubmit={submitEmailAuth} className="mt-3 space-y-3">
+                <input
+                  className="w-full h-11 rounded-2xl bg-black/35 border border-white/10 px-4 outline-none focus:border-white/30"
+                  placeholder="Email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                  inputMode="email"
+                />
+                <input
+                  className="w-full h-11 rounded-2xl bg-black/35 border border-white/10 px-4 outline-none focus:border-white/30"
+                  placeholder="Password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete={mode === "signin" ? "current-password" : "new-password"}
+                />
+
+                <button
+                  type="submit"
+                  disabled={disableButtons}
+                  className="w-full h-11 rounded-2xl border border-white/15 bg-white/5 hover:bg-white/10 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {busy ? "Working..." : mode === "signin" ? "Sign in" : "Create account"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={resetPassword}
+                  disabled={disableButtons}
+                  className="w-full text-xs text-white/60 hover:text-white py-1"
+                >
+                  Reset password
+                </button>
+              </form>
 
               {error ? (
                 <div className="mt-4 rounded-2xl border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-200">
@@ -365,10 +386,14 @@ export default function SignInPage() {
                   {info}
                 </div>
               ) : null}
+
+              <p className="mt-5 text-[11px] leading-relaxed text-white/45">
+                By continuing, you agree this is informational and not legal or tax advice.
+              </p>
             </div>
-          </aside>
+          </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }
