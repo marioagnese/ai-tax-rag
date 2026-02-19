@@ -1,8 +1,8 @@
 // app/(auth)/signin/page.tsx
 "use client";
 
-import Image from "next/image";
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { firebaseClientConfigured, getFirebaseAuth } from "@/src/lib/firebase/client";
 import {
@@ -49,7 +49,6 @@ export default function SignInPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>("");
   const [info, setInfo] = useState<string>("");
-
   const [authOpen, setAuthOpen] = useState(false);
 
   const [mode, setMode] = useState<"signin" | "signup">("signin");
@@ -173,36 +172,47 @@ export default function SignInPage() {
 
   return (
     <div className="min-h-screen text-white bg-black">
-      {/* Background — Harvey-style cinematic (NO blur / NO radial) */}
-      <div className="fixed inset-0 -z-10">
-        <Image
-          src="/landing-bg.png"
-          alt="TaxAiPro background"
-          fill
-          priority
-          className="object-cover object-center contrast-110 brightness-95"
-        />
-        {/* Left-side readability gradient */}
-        <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/55 to-transparent" />
-        {/* Subtle bottom fade */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+      {/* BACKGROUND: use CSS background-image so it ALWAYS shows (no Next/Image dependency). */}
+      <div
+        className="fixed inset-0 -z-10 bg-black"
+        style={{
+          backgroundImage: "url(/landing-bg.png)",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          backgroundRepeat: "no-repeat",
+        }}
+      >
+        {/* Harvey-style readability: heavy LEFT gradient, light RIGHT so image stays visible */}
+        <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/55 to-black/10" />
+        {/* Slight top/bottom shaping without killing the photo */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-black/25" />
       </div>
 
-      {/* Minimal top bar (clean, Harvey-like) */}
+      {/* TOP BAR: Big logo left, Login right (NO small TaxAiPro text). */}
       <header className="mx-auto max-w-6xl px-6 pt-8">
         <div className="flex items-center justify-between">
-          <div className="text-sm tracking-wide text-white/80">TaxAiPro</div>
+          {/* Big logo */}
+          <div className="relative h-12 w-56 sm:h-14 sm:w-72 md:h-16 md:w-80">
+            <Image
+              src="/taxaipro-logo.png"
+              alt="TaxAiPro"
+              fill
+              priority
+              className="object-contain"
+            />
+          </div>
+
           <button
             type="button"
             onClick={() => setAuthOpen(true)}
-            className="text-sm text-white/80 hover:text-white"
+            className="text-sm text-white/85 hover:text-white"
           >
             Login
           </button>
         </div>
       </header>
 
-      {/* Hero */}
+      {/* HERO */}
       <main className="mx-auto max-w-6xl px-6">
         <section className="pt-16 md:pt-24 pb-28 md:pb-36">
           <div className="max-w-2xl">
@@ -211,14 +221,13 @@ export default function SignInPage() {
               <span className="block text-white/65">built to reduce uncertainty.</span>
             </h1>
 
-            <p className="mt-6 text-base md:text-lg text-white/72 leading-relaxed">
-              LLMs often answer the <span className="text-white/90 font-medium">same prompt</span> in different ways.
-              TaxAiPro runs multiple models in parallel, crosschecks where they agree and disagree, then rewrites
-              <span className="text-white/90 font-medium"> one conservative answer</span> with explicit assumptions,
+            <p className="mt-6 text-base md:text-lg text-white/75 leading-relaxed">
+              LLMs often answer the <span className="text-white font-medium">same prompt</span> in different ways.
+              TaxAiPro runs multiple models in parallel, crosschecks where they agree and disagree, then rewrites{" "}
+              <span className="text-white font-medium">one conservative answer</span> with explicit assumptions,
               caveats, and missing facts.
             </p>
 
-            {/* CTA row like Harvey */}
             <div className="mt-9 flex flex-col sm:flex-row gap-3 sm:items-center">
               <button
                 type="button"
@@ -227,23 +236,21 @@ export default function SignInPage() {
               >
                 Sign in to try it
               </button>
-              <div className="text-sm text-white/55">Export memo/email-ready outputs in one click.</div>
-            </div>
-          </div>
 
-          {/* Bottom logo */}
-          <div className="mt-14">
-            <div className="relative h-[110px] w-[320px] sm:h-[120px] sm:w-[360px] md:h-[130px] md:w-[420px]">
-              <Image src="/taxaipro-logo.png" alt="TaxAiPro" fill className="object-contain" priority />
+              {/* keep minimal, not clutter */}
+              <div className="text-sm text-white/60">
+                Export memo/email-ready outputs in one click.
+              </div>
             </div>
-            <div className="mt-3 text-xs text-white/45">
+
+            <div className="mt-10 text-xs text-white/45">
               TaxAiPro generates drafts for triage only — not legal or tax advice.
             </div>
           </div>
         </section>
       </main>
 
-      {/* Auth Modal */}
+      {/* AUTH MODAL */}
       {authOpen ? (
         <div
           className="fixed inset-0 z-50"
