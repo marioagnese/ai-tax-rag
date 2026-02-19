@@ -34,12 +34,10 @@ function isUserNotFound(err: any) {
   const code = err?.code || err?.error?.code || "";
   return code === "auth/user-not-found";
 }
-
 function isWrongPassword(err: any) {
   const code = err?.code || err?.error?.code || "";
   return code === "auth/wrong-password";
 }
-
 function isInvalidEmail(err: any) {
   const code = err?.code || err?.error?.code || "";
   return code === "auth/invalid-email";
@@ -124,11 +122,8 @@ export default function SignInPage() {
       setError("");
       setInfo("");
 
-      // Basic guardrails
       if (!email.trim()) throw new Error("Please enter your email.");
-      if (!password || password.length < 6) {
-        throw new Error("Password must be at least 6 characters.");
-      }
+      if (!password || password.length < 6) throw new Error("Password must be at least 6 characters.");
 
       let userCred: any;
 
@@ -136,28 +131,21 @@ export default function SignInPage() {
         try {
           userCred = await signInWithEmailAndPassword(auth, email.trim(), password);
         } catch (err: any) {
-          // Optional “any email” flow: if user doesn't exist, offer one-click create
           if (isUserNotFound(err)) {
             setMode("signup");
             throw new Error("No account found for this email. Click “Create account” to continue.");
           }
-          if (isWrongPassword(err)) {
-            throw new Error("Incorrect password. Try again or reset your password.");
-          }
-          if (isInvalidEmail(err)) {
-            throw new Error("Invalid email format.");
-          }
+          if (isWrongPassword(err)) throw new Error("Incorrect password. Try again or reset your password.");
+          if (isInvalidEmail(err)) throw new Error("Invalid email format.");
           throw err;
         }
       } else {
-        // signup
         userCred = await createUserWithEmailAndPassword(auth, email.trim(), password);
       }
 
       const idToken = await userCred.user.getIdToken(true);
       await mintSession(idToken);
 
-      // Next step later: route to onboarding/profile capture page
       router.replace("/crosscheck");
     } catch (e: any) {
       setError(e?.message || "Email sign-in failed");
@@ -188,11 +176,10 @@ export default function SignInPage() {
 
   return (
     <div className="min-h-screen text-white bg-black">
-      {/* Background */}
+      {/* Background (you said: public/landing-bg.png) */}
       <div className="fixed inset-0 -z-10">
-        {/* Put your background image in: /public/landing-bg.jpg */}
         <Image
-          src="/landing-bg.jpg"
+          src="/landing-bg.png"
           alt="TaxAiPro background"
           fill
           priority
@@ -200,44 +187,58 @@ export default function SignInPage() {
         />
         {/* Blur + dark overlay */}
         <div className="absolute inset-0 backdrop-blur-2xl bg-black/70" />
-        {/* Soft gradient for depth */}
-        <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/70 to-black/90" />
+        {/* Vignette / depth */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.06),transparent_55%)]" />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/65 to-black/90" />
       </div>
 
-      {/* Top bar */}
-      <header className="mx-auto max-w-6xl px-6 pt-8">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="relative h-10 w-10">
-              {/* Put your logo in: /public/taxaipro-logo.png (or adjust path) */}
-              <Image
-                src="/taxaipro-logo.png"
-                alt="TaxAiPro"
-                fill
-                className="object-contain"
-                priority
-              />
+      {/* BIG FIXED LOGO (emphasis) */}
+      <div className="fixed top-0 left-0 right-0 z-20 pointer-events-none">
+        <div className="mx-auto max-w-6xl px-6 pt-6">
+          <div className="flex items-center justify-between">
+            {/* Left: big logo block */}
+            <div className="pointer-events-auto">
+              <div className="relative">
+                {/* glow */}
+                <div className="absolute -inset-6 rounded-3xl bg-white/5 blur-2xl" />
+                <div className="relative flex items-center gap-4 rounded-3xl border border-white/10 bg-black/35 px-4 py-3 backdrop-blur-xl">
+                  <div className="relative h-14 w-52 sm:h-16 sm:w-60 md:h-18 md:w-72">
+                    <Image
+                      src="/taxaipro-logo.png"
+                      alt="TaxAiPro"
+                      fill
+                      priority
+                      className="object-contain"
+                    />
+                  </div>
+                  <div className="hidden md:block leading-tight">
+                    <div className="text-sm font-semibold tracking-wide">TaxAiPro</div>
+                    <div className="text-xs text-white/60">
+                      Your AI tax engine — crosschecks multiple LLMs into one conservative answer.
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="leading-tight">
-              <div className="text-sm font-semibold tracking-wide">TaxAiPro</div>
-              <div className="text-xs text-white/55">Multi-model crosscheck for conservative tax outputs</div>
-            </div>
-          </div>
 
-          <div className="text-xs text-white/50">
-            Brand: <span className="text-white/70">TaxAiPro.com</span>
+            {/* Right: brand */}
+            <div className="hidden sm:block text-xs text-white/55">
+              Brand: <span className="text-white/75">TaxAiPro.com</span>
+            </div>
           </div>
         </div>
-      </header>
+        {/* subtle divider */}
+        <div className="mt-4 h-px w-full bg-white/5" />
+      </div>
 
       {/* Main */}
-      <main className="mx-auto max-w-6xl px-6 pb-16 pt-12">
+      <main className="mx-auto max-w-6xl px-6 pb-16 pt-40 sm:pt-44">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
           {/* Left: hero */}
           <section className="lg:col-span-7">
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70">
-              <span className="h-1.5 w-1.5 rounded-full bg-white/60" />
-              Same prompt. Different model outputs. One conservative synthesis.
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/75">
+              <span className="h-1.5 w-1.5 rounded-full bg-white/70" />
+              Same prompt. Different outputs. One conservative synthesis.
             </div>
 
             <h1 className="mt-5 text-4xl md:text-5xl font-semibold tracking-tight">
@@ -246,9 +247,9 @@ export default function SignInPage() {
             </h1>
 
             <p className="mt-5 text-base md:text-lg text-white/70 max-w-2xl leading-relaxed">
-              Have you ever asked the same tax question to different AI tools and gotten different answers?
-              TaxAiPro runs multiple models in parallel, compares results, flags conflicts, and synthesizes a more
-              consistent output you can actually triage.
+              <span className="text-white/85 font-medium">Have you been frustrated</span> that the same prompt gets
+              different answers across AI tools? TaxAiPro runs several models in parallel, compares what they say,
+              flags conflicts, and rewrites one consistent, conservative output you can actually triage.
             </p>
 
             <div className="mt-7 grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl">
@@ -258,18 +259,21 @@ export default function SignInPage() {
                   See where models agree vs. disagree — before you rely on an answer.
                 </div>
               </div>
+
               <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
                 <div className="text-sm font-medium">Conservative synthesis</div>
                 <div className="mt-1 text-sm text-white/60">
                   A “best answer” with caveats + missing facts, written in one consistent voice.
                 </div>
               </div>
+
               <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
                 <div className="text-sm font-medium">Memo / email ready</div>
                 <div className="mt-1 text-sm text-white/60">
                   Export outputs in a clean format for internal review and client comms.
                 </div>
               </div>
+
               <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
                 <div className="text-sm font-medium">Designed for tax reality</div>
                 <div className="mt-1 text-sm text-white/60">
@@ -285,7 +289,7 @@ export default function SignInPage() {
 
           {/* Right: sign-in card */}
           <aside className="lg:col-span-5">
-            <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-black/30">
+            <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-black/30 backdrop-blur-xl">
               {!configured ? (
                 <div className="mb-4 rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-100">
                   Firebase isn’t configured. Check Vercel env vars for:
@@ -299,10 +303,10 @@ export default function SignInPage() {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className="text-lg font-semibold">Sign in</h2>
-                  <p className="mt-1 text-sm text-white/60">
-                    Start with Google, or use email.
-                  </p>
+                  <p className="mt-1 text-sm text-white/60">Start with Google, or use email.</p>
                 </div>
+
+                {/* small mark inside card (keep subtle) */}
                 <div className="relative h-12 w-12 opacity-90">
                   <Image src="/taxaipro-logo.png" alt="TaxAiPro" fill className="object-contain" />
                 </div>
@@ -328,9 +332,7 @@ export default function SignInPage() {
               {emailEnabled ? (
                 <div className="mt-5">
                   <div className="flex items-center justify-between">
-                    <div className="text-xs text-white/60">
-                      {mode === "signin" ? "Email sign-in" : "Create account"}
-                    </div>
+                    <div className="text-xs text-white/60">{mode === "signin" ? "Email sign-in" : "Create account"}</div>
                     <div className="flex gap-2">
                       <button
                         type="button"
