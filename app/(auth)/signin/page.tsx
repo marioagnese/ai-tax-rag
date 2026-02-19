@@ -3,14 +3,12 @@
 import Image from "next/image";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  firebaseClientConfigured,
-  getFirebaseAuth,
-} from "@/src/lib/firebase/client";
+import { firebaseClientConfigured, getFirebaseAuth } from "@/src/lib/firebase/client";
 import {
   GoogleAuthProvider,
   signInWithPopup,
   signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   onAuthStateChanged,
 } from "firebase/auth";
 
@@ -37,6 +35,7 @@ export default function SignInPage() {
   const [error, setError] = useState<string>("");
 
   const [emailEnabled, setEmailEnabled] = useState(false);
+  const [isCreate, setIsCreate] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -79,7 +78,7 @@ export default function SignInPage() {
 
   async function loginWithGoogle() {
     try {
-      if (!auth) throw new Error("Firebase client is not configured (.env.local).");
+      if (!auth) throw new Error("Firebase client is not configured.");
       setBusy(true);
       setError("");
 
@@ -97,20 +96,36 @@ export default function SignInPage() {
     }
   }
 
-  async function loginWithEmail(e: React.FormEvent) {
+  async function loginOrCreateWithEmail(e: React.FormEvent) {
     e.preventDefault();
+
     try {
-      if (!auth) throw new Error("Firebase client is not configured (.env.local).");
+      if (!auth) throw new Error("Firebase client is not configured.");
       setBusy(true);
       setError("");
 
-      const cred = await signInWithEmailAndPassword(auth, email, password);
+      const trimmedEmail = email.trim();
+
+      const cred = isCreate
+        ? await createUserWithEmailAndPassword(auth, trimmedEmail, password)
+        : await signInWithEmailAndPassword(auth, trimmedEmail, password);
+
       const idToken = await cred.user.getIdToken(true);
       await mintSession(idToken);
 
       router.replace("/crosscheck");
     } catch (e: any) {
-      setError(e?.message || "Email sign-in failed");
+      // Friendly-ish errors without being noisy
+      const msg =
+        e?.code === "auth/user-not-found"
+          ? "No account found for that email. Switch to “Create account”."
+          : e?.code === "auth/wrong-password"
+          ? "Incorrect password."
+          : e?.code === "auth/email-already-in-use"
+          ? "That email already has an account. Switch to “Sign in”."
+          : e?.message || "Email sign-in failed";
+
+      setError(msg);
     } finally {
       setBusy(false);
     }
@@ -119,131 +134,189 @@ export default function SignInPage() {
   const disableButtons = busy || !configured;
 
   return (
-    <div className="min-h-screen bg-black text-white px-6">
-      {/* BIG TOP LOGO (what you marked “LOGO”) */}
-      <header className="mx-auto max-w-5xl pt-10 pb-6 flex flex-col items-center text-center">
-        <div className="relative w-[260px] h-[90px]">
-          <Image
-            src="/taxaipro-logo.png"
-            alt="TaxAiPro"
-            fill
-            priority
-            className="object-contain"
-          />
-        </div>
-        <div className="mt-2 text-sm text-white/60">
-          Multi-model tax crosscheck + conservative synthesis.
-        </div>
-      </header>
+    <div className="min-h-screen text-white">
+      {/* Background */}
+      <div className="fixed inset-0 -z-10">
+        {/* If you want to use the image you uploaded, put it in /public and change the src here. */}
+        {/* Example: src="/landing-bg.jpg" */}
+        <div className="absolute inset-0 bg-black" />
+        <div className="absolute inset-0 bg-[radial-gradient(70%_60%_at_50%_0%,rgba(0,160,255,0.18),rgba(0,0,0,0)_60%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(60%_50%_at_10%_10%,rgba(255,255,255,0.06),rgba(0,0,0,0)_55%)]" />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black to-black" />
+      </div>
 
-      <main className="mx-auto max-w-5xl pb-12 flex items-center justify-center">
-        <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Left card */}
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-            <h2 className="text-lg font-semibold mb-2">Sign in</h2>
-            <p className="text-sm text-white/60 mb-4">
-              Use Google to start. (Email login can be enabled later.)
-            </p>
-
-            {!configured ? (
-              <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
-                Firebase isn’t configured. Check Vercel env vars for:
-                <div className="mt-2 text-xs text-amber-100/80">
-                  NEXT_PUBLIC_FIREBASE_API_KEY, NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-                  NEXT_PUBLIC_FIREBASE_PROJECT_ID, NEXT_PUBLIC_FIREBASE_APP_ID
-                </div>
-              </div>
-            ) : null}
-
-            <button
-              onClick={loginWithGoogle}
-              disabled={disableButtons}
-              className="w-full h-12 rounded-full bg-white text-black font-medium hover:bg-white/90 disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {busy ? "Signing in..." : "Continue with Google"}
-            </button>
-
-            <div className="mt-4 text-xs text-white/50">
-              New here? Use the{" "}
-              <span className="text-white/70">2–3 run method</span>: run once → add
-              missing facts → re-run.
+      <div className="mx-auto max-w-6xl px-6">
+        {/* Top bar */}
+        <header className="pt-10 pb-8 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="relative w-[140px] h-[42px]">
+              <Image
+                src="/taxaipro-logo.png"
+                alt="TaxAiPro"
+                fill
+                priority
+                className="object-contain"
+              />
             </div>
-
-            <button
-              type="button"
-              onClick={() => setEmailEnabled((v) => !v)}
-              className="mt-5 text-xs text-white/60 hover:text-white"
-            >
-              {emailEnabled ? "Hide email sign-in" : "Show email sign-in"}
-            </button>
-
-            {emailEnabled ? (
-              <>
-                <div className="my-4 flex items-center gap-3 text-white/30">
-                  <div className="h-px flex-1 bg-white/10" />
-                  <span className="text-xs">or</span>
-                  <div className="h-px flex-1 bg-white/10" />
-                </div>
-
-                <form onSubmit={loginWithEmail} className="space-y-3">
-                  <input
-                    className="w-full h-11 rounded-xl bg-black/40 border border-white/10 px-4 outline-none focus:border-white/30"
-                    placeholder="Email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    autoComplete="email"
-                  />
-                  <input
-                    className="w-full h-11 rounded-xl bg-black/40 border border-white/10 px-4 outline-none focus:border-white/30"
-                    placeholder="Password"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    autoComplete="current-password"
-                  />
-                  <button
-                    type="submit"
-                    disabled={disableButtons}
-                    className="w-full h-11 rounded-xl border border-white/15 hover:bg-white/5 disabled:opacity-60 disabled:cursor-not-allowed"
-                  >
-                    {busy ? "Signing in..." : "Continue with email"}
-                  </button>
-                </form>
-              </>
-            ) : null}
-
-            {error ? (
-              <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
-                {error}
-              </div>
-            ) : null}
-
-            <p className="mt-4 text-xs text-white/40">
-              By continuing, you agree this is informational and not legal or tax
-              advice.
-            </p>
-          </div>
-
-          {/* Right card */}
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-            <h2 className="text-lg font-semibold mb-3">What you get</h2>
-            <ul className="space-y-2 text-sm text-white/70">
-              <li>• Triangulation across multiple models.</li>
-              <li>• Conservative “best answer” + caveats + missing facts.</li>
-              <li>• Save runs + convert to memo/email (in Crosscheck).</li>
-            </ul>
-
-            <div className="mt-6 rounded-xl border border-white/10 bg-black/30 p-4 text-sm text-white/70">
-              Tip: better facts → better output. Entity type, residency,
-              thresholds, timing, and who does what in-country.
-            </div>
-
-            <div className="mt-4 text-xs text-white/50">
-              Brand: <span className="text-white/70">TaxAiPro.com</span>
+            <div className="hidden sm:block text-xs text-white/50">
+              Tax crosscheck + conservative synthesis
             </div>
           </div>
-        </div>
-      </main>
+
+          <div className="text-xs text-white/50">
+            <span className="hidden sm:inline">Brand:</span>{" "}
+            <span className="text-white/70">TaxAiPro.com</span>
+          </div>
+        </header>
+
+        {/* Content */}
+        <main className="pb-14">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
+            {/* Left: Hero */}
+            <div className="lg:col-span-7">
+              <h1 className="text-3xl sm:text-5xl font-semibold tracking-tight leading-tight">
+                Multi-model tax analysis,
+                <span className="text-white/70"> built to be conservative.</span>
+              </h1>
+
+              <p className="mt-4 text-base sm:text-lg text-white/60 max-w-xl">
+                Ask a tax question, get a consensus answer, and see caveats + missing facts
+                before you rely on it. Export to memo or email in one click.
+              </p>
+
+              <div className="mt-7 flex flex-wrap gap-2 text-xs text-white/60">
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
+                  Triangulation across models
+                </span>
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
+                  Caveats + assumptions
+                </span>
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
+                  Missing facts checklist
+                </span>
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
+                  Memo / email export
+                </span>
+              </div>
+
+              <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-5 max-w-xl">
+                <div className="text-sm text-white/70">
+                  Tip: Better facts → better output.
+                </div>
+                <div className="mt-2 text-xs text-white/55">
+                  Entity type, residency, thresholds, timing, and who does what in-country
+                  typically drive the answer.
+                </div>
+              </div>
+
+              <p className="mt-6 text-xs text-white/40 max-w-xl">
+                TaxAiPro generates drafts for triage only — not legal or tax advice.
+              </p>
+            </div>
+
+            {/* Right: Sign in card */}
+            <div className="lg:col-span-5">
+              <div className="rounded-2xl border border-white/10 bg-black/30 backdrop-blur-md p-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-semibold">Sign in</h2>
+                    <p className="mt-1 text-sm text-white/60">
+                      Start with Google, or use email.
+                    </p>
+                  </div>
+                </div>
+
+                {!configured ? (
+                  <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
+                    Firebase isn’t configured. Check Vercel env vars for:
+                    <div className="mt-2 text-xs text-amber-100/80">
+                      NEXT_PUBLIC_FIREBASE_API_KEY, NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+                      NEXT_PUBLIC_FIREBASE_PROJECT_ID, NEXT_PUBLIC_FIREBASE_APP_ID
+                    </div>
+                  </div>
+                ) : null}
+
+                <button
+                  onClick={loginWithGoogle}
+                  disabled={disableButtons}
+                  className="mt-5 w-full h-12 rounded-full bg-white text-black font-medium hover:bg-white/90 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {busy ? "Signing in..." : "Continue with Google"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setEmailEnabled((v) => !v)}
+                  className="mt-4 w-full h-11 rounded-xl border border-white/12 bg-white/5 hover:bg-white/10 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                  disabled={!configured || busy}
+                >
+                  {emailEnabled ? "Hide email options" : "Continue with email"}
+                </button>
+
+                {emailEnabled ? (
+                  <div className="mt-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="text-xs text-white/60">
+                        {isCreate ? "Create account" : "Sign in with email"}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsCreate((v) => !v);
+                          setError("");
+                        }}
+                        className="text-xs text-white/60 hover:text-white"
+                        disabled={busy}
+                      >
+                        Switch to {isCreate ? "Sign in" : "Create account"}
+                      </button>
+                    </div>
+
+                    <form onSubmit={loginOrCreateWithEmail} className="space-y-3">
+                      <input
+                        className="w-full h-11 rounded-xl bg-black/40 border border-white/10 px-4 outline-none focus:border-white/30"
+                        placeholder="Email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        autoComplete="email"
+                      />
+                      <input
+                        className="w-full h-11 rounded-xl bg-black/40 border border-white/10 px-4 outline-none focus:border-white/30"
+                        placeholder="Password"
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        autoComplete={isCreate ? "new-password" : "current-password"}
+                      />
+                      <button
+                        type="submit"
+                        disabled={disableButtons}
+                        className="w-full h-11 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 disabled:opacity-60 disabled:cursor-not-allowed text-sm"
+                      >
+                        {busy ? "Please wait..." : isCreate ? "Create account" : "Sign in"}
+                      </button>
+                    </form>
+                  </div>
+                ) : null}
+
+                {error ? (
+                  <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
+                    {error}
+                  </div>
+                ) : null}
+
+                <p className="mt-5 text-xs text-white/40">
+                  By continuing, you agree this is informational and not legal or tax advice.
+                </p>
+              </div>
+
+              <div className="mt-4 text-xs text-white/45">
+                New here? Use the 2–3 run method: run once → add missing facts → re-run.
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
     </div>
   );
 }
