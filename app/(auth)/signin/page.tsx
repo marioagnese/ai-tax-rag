@@ -173,22 +173,19 @@ export default function SignInPage() {
 
   return (
     <div className="min-h-screen text-white bg-black">
-      {/* Background (make it visible like Harvey: less dark overlay, less blur, cinematic gradient) */}
+      {/* Background — Harvey-style cinematic (NO blur / NO radial) */}
       <div className="fixed inset-0 -z-10">
         <Image
           src="/landing-bg.png"
           alt="TaxAiPro background"
           fill
           priority
-          className="object-cover"
+          className="object-cover object-center contrast-110 brightness-95"
         />
-        {/* Slight blur (keep the photo visible) */}
-        <div className="absolute inset-0 backdrop-blur-[2px]" />
-        {/* Darken edges + keep center readable */}
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0.15),rgba(0,0,0,0.75)_70%,rgba(0,0,0,0.92)_100%)]" />
-        {/* Left-side readability + bottom fade for CTA */}
-        <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/35 to-black/15" />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+        {/* Left-side readability gradient */}
+        <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/55 to-transparent" />
+        {/* Subtle bottom fade */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
       </div>
 
       {/* Minimal top bar (clean, Harvey-like) */}
@@ -230,13 +227,11 @@ export default function SignInPage() {
               >
                 Sign in to try it
               </button>
-              <div className="text-sm text-white/55">
-                Export memo/email-ready outputs in one click.
-              </div>
+              <div className="text-sm text-white/55">Export memo/email-ready outputs in one click.</div>
             </div>
           </div>
 
-          {/* Bottom “logo under CTA” (no floating center logo) */}
+          {/* Bottom logo */}
           <div className="mt-14">
             <div className="relative h-[110px] w-[320px] sm:h-[120px] sm:w-[360px] md:h-[130px] md:w-[420px]">
               <Image src="/taxaipro-logo.png" alt="TaxAiPro" fill className="object-contain" priority />
@@ -248,21 +243,18 @@ export default function SignInPage() {
         </section>
       </main>
 
-      {/* Auth Modal (replaces big card on the page) */}
+      {/* Auth Modal */}
       {authOpen ? (
         <div
           className="fixed inset-0 z-50"
           aria-modal="true"
           role="dialog"
           onMouseDown={() => {
-            // click outside closes
             if (!busy) setAuthOpen(false);
           }}
         >
-          {/* overlay */}
           <div className="absolute inset-0 bg-black/65 backdrop-blur-sm" />
 
-          {/* modal */}
           <div
             className="absolute left-1/2 top-1/2 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2"
             onMouseDown={(e) => e.stopPropagation()}
@@ -271,9 +263,7 @@ export default function SignInPage() {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className="text-lg font-semibold">Sign in</h2>
-                  <p className="mt-1 text-sm text-white/60">
-                    Continue with Google or email.
-                  </p>
+                  <p className="mt-1 text-sm text-white/60">Continue with Google or email.</p>
                 </div>
                 <button
                   type="button"
@@ -310,9 +300,7 @@ export default function SignInPage() {
               </div>
 
               <div className="mt-4 flex items-center justify-between">
-                <div className="text-xs text-white/60">
-                  {mode === "signin" ? "Email sign-in" : "Create account"}
-                </div>
+                <div className="text-xs text-white/60">{mode === "signin" ? "Email sign-in" : "Create account"}</div>
                 <div className="flex gap-2">
                   <button
                     type="button"
