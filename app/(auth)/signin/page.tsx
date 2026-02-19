@@ -65,7 +65,6 @@ export default function SignInPage() {
     return getFirebaseAuth();
   }, [configured]);
 
-  // Guard against duplicate onAuthStateChanged firing (dev/refresh)
   const mintedOnceRef = useRef(false);
 
   useEffect(() => {
@@ -181,9 +180,7 @@ export default function SignInPage() {
 
   return (
     <div className="relative min-h-screen text-white bg-black overflow-hidden">
-      {/* BACKGROUND (public/landing-bg.png)
-          If you still “don’t see it”, it was likely being crushed by overlays/z-index.
-          This version forces it behind everything and increases visibility. */}
+      {/* BACKGROUND: make it MUCH more visible (less dark overlay, boost contrast/sat) */}
       <div className="fixed inset-0 z-0 pointer-events-none">
         <Image
           src="/landing-bg.png"
@@ -191,80 +188,70 @@ export default function SignInPage() {
           fill
           priority
           unoptimized
-          className="object-cover opacity-55"
+          className="object-cover opacity-95 contrast-125 saturate-125 brightness-110"
         />
-        {/* Darken + vignette (lighter than before so image is visible) */}
-        <div className="absolute inset-0 bg-black/55" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_0%,rgba(0,0,0,0.35)_45%,rgba(0,0,0,0.85)_100%)]" />
-        {/* Subtle top glow */}
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.10),transparent_55%)]" />
+
+        {/* Keep readability: lighter overall dim, plus stronger vignette edges */}
+        <div className="absolute inset-0 bg-black/20" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0.00)_0%,rgba(0,0,0,0.25)_55%,rgba(0,0,0,0.70)_100%)]" />
+
+        {/* Subtle top fade so headline stays readable */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/35 via-transparent to-black/30" />
       </div>
 
       {/* CONTENT */}
       <div className="relative z-10 mx-auto max-w-6xl px-6 py-10">
-        {/* VERY LARGE LOGO (top + centered) */}
-        <div className="flex justify-center">
-          <div className="relative w-[320px] h-[120px] sm:w-[440px] sm:h-[160px] md:w-[520px] md:h-[190px]">
-            {/* Soft glow behind logo */}
-            <div className="absolute -inset-10 rounded-[48px] bg-white/10 blur-3xl" />
-            <Image
-              src="/taxaipro-logo.png"
-              alt="TaxAiPro"
-              fill
-              priority
-              className="object-contain drop-shadow-[0_20px_60px_rgba(0,0,0,0.75)]"
-            />
-          </div>
-        </div>
+        {/* Removed separate logo block (background image already has branding) */}
 
-        <div className="mt-8 grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
-          {/* LEFT: message (remove small “flying” text; keep clean + punchy) */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start pt-10">
+          {/* LEFT */}
           <section className="lg:col-span-7">
-            <h1 className="text-4xl md:text-5xl font-semibold tracking-tight">
+            {/* Optional small pill can stay, but you said remove small txt — so removed */}
+            <h1 className="text-4xl md:text-5xl font-semibold tracking-tight drop-shadow-[0_12px_40px_rgba(0,0,0,0.75)]">
               Multi-model tax analysis,
-              <span className="block text-white/70">built to reduce uncertainty.</span>
+              <span className="block text-white/80">built to reduce uncertainty.</span>
             </h1>
 
-            <p className="mt-5 text-base md:text-lg text-white/75 max-w-2xl leading-relaxed">
-              LLMs often give <span className="text-white font-medium">different answers to the same prompt</span>.
-              TaxAiPro runs multiple models in parallel, compares where they agree and disagree, then rewrites a single
-              conservative output with explicit assumptions, caveats, and missing facts.
+            <p className="mt-5 text-base md:text-lg text-white/85 max-w-2xl leading-relaxed drop-shadow-[0_10px_30px_rgba(0,0,0,0.75)]">
+              LLMs often give different answers to the same prompt. TaxAiPro runs multiple models in parallel,
+              compares where they agree and disagree, then rewrites a single conservative answer with explicit
+              assumptions, caveats, and missing facts.
             </p>
 
             <div className="mt-7 grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl">
-              <div className="rounded-2xl border border-white/12 bg-black/35 p-4 backdrop-blur-md">
+              <div className="rounded-2xl border border-white/18 bg-black/35 p-4 backdrop-blur-md shadow-[0_18px_60px_rgba(0,0,0,0.45)]">
                 <div className="text-sm font-medium">Crosscheck</div>
-                <div className="mt-1 text-sm text-white/65">
+                <div className="mt-1 text-sm text-white/75">
                   See conflicts before you rely on an answer.
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-white/12 bg-black/35 p-4 backdrop-blur-md">
+              <div className="rounded-2xl border border-white/18 bg-black/35 p-4 backdrop-blur-md shadow-[0_18px_60px_rgba(0,0,0,0.45)]">
                 <div className="text-sm font-medium">Conservative synthesis</div>
-                <div className="mt-1 text-sm text-white/65">
+                <div className="mt-1 text-sm text-white/75">
                   One consistent output + caveats + missing facts.
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-white/12 bg-black/35 p-4 backdrop-blur-md">
+              <div className="rounded-2xl border border-white/18 bg-black/35 p-4 backdrop-blur-md shadow-[0_18px_60px_rgba(0,0,0,0.45)]">
                 <div className="text-sm font-medium">Memo / email ready</div>
-                <div className="mt-1 text-sm text-white/65">
+                <div className="mt-1 text-sm text-white/75">
                   Clean formatting for review and client comms.
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-white/12 bg-black/35 p-4 backdrop-blur-md">
+              <div className="rounded-2xl border border-white/18 bg-black/35 p-4 backdrop-blur-md shadow-[0_18px_60px_rgba(0,0,0,0.45)]">
                 <div className="text-sm font-medium">Built for tax work</div>
-                <div className="mt-1 text-sm text-white/65">
+                <div className="mt-1 text-sm text-white/75">
                   Assumptions, thresholds, and documentation focus are explicit.
                 </div>
               </div>
             </div>
           </section>
 
-          {/* RIGHT: sign-in card (remove extra tiny text) */}
+          {/* RIGHT */}
           <aside className="lg:col-span-5">
-            <div className="rounded-3xl border border-white/12 bg-white/[0.07] p-6 shadow-2xl shadow-black/40 backdrop-blur-xl">
+            <div className="rounded-3xl border border-white/18 bg-white/[0.07] p-6 shadow-2xl shadow-black/50 backdrop-blur-xl">
               {!configured ? (
                 <div className="mb-4 rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-100">
                   Firebase isn’t configured. Check Vercel env vars:
@@ -275,13 +262,9 @@ export default function SignInPage() {
                 </div>
               ) : null}
 
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-lg font-semibold">Sign in</h2>
-                  <p className="mt-1 text-sm text-white/65">
-                    Continue with Google or email.
-                  </p>
-                </div>
+              <div>
+                <h2 className="text-lg font-semibold">Sign in</h2>
+                <p className="mt-1 text-sm text-white/75">Continue with Google or email.</p>
               </div>
 
               <button
@@ -296,7 +279,7 @@ export default function SignInPage() {
                 type="button"
                 onClick={() => setEmailEnabled((v) => !v)}
                 disabled={disableButtons}
-                className="mt-3 w-full h-12 rounded-2xl border border-white/18 bg-black/25 hover:bg-white/5 disabled:opacity-60 disabled:cursor-not-allowed"
+                className="mt-3 w-full h-12 rounded-2xl border border-white/20 bg-black/25 hover:bg-white/5 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 Continue with email
               </button>
@@ -304,7 +287,7 @@ export default function SignInPage() {
               {emailEnabled ? (
                 <div className="mt-5">
                   <div className="flex items-center justify-between">
-                    <div className="text-xs text-white/65">
+                    <div className="text-xs text-white/75">
                       {mode === "signin" ? "Email sign-in" : "Create account"}
                     </div>
                     <div className="flex gap-2">
@@ -313,8 +296,8 @@ export default function SignInPage() {
                         onClick={() => setMode("signin")}
                         className={`text-xs px-2 py-1 rounded-full border ${
                           mode === "signin"
-                            ? "border-white/30 bg-white/10 text-white"
-                            : "border-white/12 text-white/65 hover:text-white"
+                            ? "border-white/35 bg-white/12 text-white"
+                            : "border-white/14 text-white/75 hover:text-white"
                         }`}
                       >
                         Sign in
@@ -324,8 +307,8 @@ export default function SignInPage() {
                         onClick={() => setMode("signup")}
                         className={`text-xs px-2 py-1 rounded-full border ${
                           mode === "signup"
-                            ? "border-white/30 bg-white/10 text-white"
-                            : "border-white/12 text-white/65 hover:text-white"
+                            ? "border-white/35 bg-white/12 text-white"
+                            : "border-white/14 text-white/75 hover:text-white"
                         }`}
                       >
                         Create
@@ -335,7 +318,7 @@ export default function SignInPage() {
 
                   <form onSubmit={submitEmailAuth} className="mt-3 space-y-3">
                     <input
-                      className="w-full h-11 rounded-2xl bg-black/35 border border-white/12 px-4 outline-none focus:border-white/35"
+                      className="w-full h-11 rounded-2xl bg-black/35 border border-white/14 px-4 outline-none focus:border-white/40"
                       placeholder="Email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
@@ -343,7 +326,7 @@ export default function SignInPage() {
                       inputMode="email"
                     />
                     <input
-                      className="w-full h-11 rounded-2xl bg-black/35 border border-white/12 px-4 outline-none focus:border-white/35"
+                      className="w-full h-11 rounded-2xl bg-black/35 border border-white/14 px-4 outline-none focus:border-white/40"
                       placeholder="Password"
                       type="password"
                       value={password}
@@ -354,7 +337,7 @@ export default function SignInPage() {
                     <button
                       type="submit"
                       disabled={disableButtons}
-                      className="w-full h-11 rounded-2xl border border-white/18 bg-white/5 hover:bg-white/10 disabled:opacity-60 disabled:cursor-not-allowed"
+                      className="w-full h-11 rounded-2xl border border-white/20 bg-white/6 hover:bg-white/12 disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       {busy ? "Working..." : mode === "signin" ? "Sign in" : "Create account"}
                     </button>
@@ -363,7 +346,7 @@ export default function SignInPage() {
                       type="button"
                       onClick={resetPassword}
                       disabled={disableButtons}
-                      className="w-full text-xs text-white/65 hover:text-white py-1"
+                      className="w-full text-xs text-white/75 hover:text-white py-1"
                     >
                       Reset password
                     </button>
