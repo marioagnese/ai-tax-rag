@@ -4,7 +4,10 @@
 import Image from "next/image";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { firebaseClientConfigured, getFirebaseAuth } from "@/src/lib/firebase/client";
+import {
+  firebaseClientConfigured,
+  getFirebaseAuth,
+} from "@/src/lib/firebase/client";
 import {
   GoogleAuthProvider,
   signInWithPopup,
@@ -123,7 +126,9 @@ export default function SignInPage() {
       setInfo("");
 
       if (!email.trim()) throw new Error("Please enter your email.");
-      if (!password || password.length < 6) throw new Error("Password must be at least 6 characters.");
+      if (!password || password.length < 6) {
+        throw new Error("Password must be at least 6 characters.");
+      }
 
       let userCred: any;
 
@@ -135,8 +140,12 @@ export default function SignInPage() {
             setMode("signup");
             throw new Error("No account found for this email. Click “Create account” to continue.");
           }
-          if (isWrongPassword(err)) throw new Error("Incorrect password. Try again or reset your password.");
-          if (isInvalidEmail(err)) throw new Error("Invalid email format.");
+          if (isWrongPassword(err)) {
+            throw new Error("Incorrect password. Try again or reset your password.");
+          }
+          if (isInvalidEmail(err)) {
+            throw new Error("Invalid email format.");
+          }
           throw err;
         }
       } else {
@@ -163,7 +172,6 @@ export default function SignInPage() {
 
       if (!email.trim()) throw new Error("Enter your email first, then click “Reset password”.");
       await sendPasswordResetEmail(auth, email.trim());
-
       setInfo("Password reset email sent. Check your inbox.");
     } catch (e: any) {
       setError(e?.message || "Password reset failed");
@@ -175,109 +183,87 @@ export default function SignInPage() {
   const disableButtons = busy || !configured;
 
   return (
-    <div className="min-h-screen text-white bg-black">
-      {/* Background (you said: public/landing-bg.png) */}
-      <div className="fixed inset-0 -z-10">
-        <Image
-          src="/landing-bg.png"
-          alt="TaxAiPro background"
-          fill
-          priority
-          className="object-cover"
+    <div className="relative min-h-screen text-white bg-black overflow-x-hidden">
+      {/* BACKGROUND (CSS background so it ALWAYS shows) */}
+      <div className="fixed inset-0 -z-10 pointer-events-none">
+        <div
+          className="absolute inset-0 bg-center bg-cover"
+          style={{ backgroundImage: "url('/landing-bg.png')" }}
         />
-        {/* Blur + dark overlay */}
-        <div className="absolute inset-0 backdrop-blur-2xl bg-black/70" />
-        {/* Vignette / depth */}
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.06),transparent_55%)]" />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/65 to-black/90" />
+        {/* Slight blur + dark overlay (not too heavy so you can actually see it) */}
+        <div className="absolute inset-0 backdrop-blur-xl bg-black/45" />
+        {/* Soft vignette */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.10),transparent_55%)]" />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/15 via-black/45 to-black/85" />
       </div>
 
-      {/* BIG FIXED LOGO (emphasis) */}
-      <div className="fixed top-0 left-0 right-0 z-20 pointer-events-none">
-        <div className="mx-auto max-w-6xl px-6 pt-6">
-          <div className="flex items-center justify-between">
-            {/* Left: big logo block */}
-            <div className="pointer-events-auto">
-              <div className="relative">
-                {/* glow */}
-                <div className="absolute -inset-6 rounded-3xl bg-white/5 blur-2xl" />
-                <div className="relative flex items-center gap-4 rounded-3xl border border-white/10 bg-black/35 px-4 py-3 backdrop-blur-xl">
-                  <div className="relative h-14 w-52 sm:h-16 sm:w-60 md:h-18 md:w-72">
-                    <Image
-                      src="/taxaipro-logo.png"
-                      alt="TaxAiPro"
-                      fill
-                      priority
-                      className="object-contain"
-                    />
-                  </div>
-                  <div className="hidden md:block leading-tight">
-                    <div className="text-sm font-semibold tracking-wide">TaxAiPro</div>
-                    <div className="text-xs text-white/60">
-                      Your AI tax engine — crosschecks multiple LLMs into one conservative answer.
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Right: brand */}
-            <div className="hidden sm:block text-xs text-white/55">
-              Brand: <span className="text-white/75">TaxAiPro.com</span>
+      {/* VERY VERY LARGE LOGO (fixed, centered, no duplicate text) */}
+      <div className="fixed top-5 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+        <div className="relative">
+          {/* glow behind logo */}
+          <div className="absolute -inset-10 rounded-[48px] bg-white/10 blur-3xl" />
+          <div className="relative rounded-[40px] border border-white/10 bg-black/25 backdrop-blur-xl px-6 py-4">
+            <div className="relative w-[360px] h-[120px] sm:w-[480px] sm:h-[150px] md:w-[620px] md:h-[190px]">
+              <Image
+                src="/taxaipro-logo.png"
+                alt="TaxAiPro"
+                fill
+                priority
+                className="object-contain drop-shadow-[0_10px_40px_rgba(0,0,0,0.7)]"
+              />
             </div>
           </div>
         </div>
-        {/* subtle divider */}
-        <div className="mt-4 h-px w-full bg-white/5" />
       </div>
 
-      {/* Main */}
-      <main className="mx-auto max-w-6xl px-6 pb-16 pt-40 sm:pt-44">
+      {/* Push content below the fixed big logo */}
+      <main className="mx-auto max-w-6xl px-6 pb-16 pt-[210px] sm:pt-[250px] md:pt-[300px]">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
-          {/* Left: hero */}
+          {/* LEFT: cleaner, less “flying” info */}
           <section className="lg:col-span-7">
             <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/75">
               <span className="h-1.5 w-1.5 rounded-full bg-white/70" />
-              Same prompt. Different outputs. One conservative synthesis.
+              Same prompt → different LLM outputs → one conservative synthesis.
             </div>
 
             <h1 className="mt-5 text-4xl md:text-5xl font-semibold tracking-tight">
               Multi-model tax analysis,
-              <span className="block text-white/70">built to be conservative.</span>
+              <span className="block text-white/70">built to reduce uncertainty.</span>
             </h1>
 
             <p className="mt-5 text-base md:text-lg text-white/70 max-w-2xl leading-relaxed">
-              <span className="text-white/85 font-medium">Have you been frustrated</span> that the same prompt gets
-              different answers across AI tools? TaxAiPro runs several models in parallel, compares what they say,
-              flags conflicts, and rewrites one consistent, conservative output you can actually triage.
+              LLMs can answer the <span className="text-white/85 font-medium">same question</span> in different ways.
+              TaxAiPro runs multiple models in parallel, compares where they agree and disagree, then rewrites a{" "}
+              <span className="text-white/85 font-medium">single conservative answer</span> with explicit assumptions,
+              caveats, and missing facts.
             </p>
 
             <div className="mt-7 grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl">
               <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
-                <div className="text-sm font-medium">Crosscheck variance</div>
+                <div className="text-sm font-medium">Crosscheck</div>
                 <div className="mt-1 text-sm text-white/60">
-                  See where models agree vs. disagree — before you rely on an answer.
+                  See conflicts before you rely on an answer.
                 </div>
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
                 <div className="text-sm font-medium">Conservative synthesis</div>
                 <div className="mt-1 text-sm text-white/60">
-                  A “best answer” with caveats + missing facts, written in one consistent voice.
+                  One consistent output + caveats + missing facts.
                 </div>
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
                 <div className="text-sm font-medium">Memo / email ready</div>
                 <div className="mt-1 text-sm text-white/60">
-                  Export outputs in a clean format for internal review and client comms.
+                  Clean formatting for review and client comms.
                 </div>
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
-                <div className="text-sm font-medium">Designed for tax reality</div>
+                <div className="text-sm font-medium">Built for tax work</div>
                 <div className="mt-1 text-sm text-white/60">
-                  Assumptions, thresholds, documentation focus, and edge cases are explicit.
+                  Assumptions, thresholds, documentation focus are explicit.
                 </div>
               </div>
             </div>
@@ -287,7 +273,7 @@ export default function SignInPage() {
             </div>
           </section>
 
-          {/* Right: sign-in card */}
+          {/* RIGHT: sign-in card (remove duplicated logo + remove “Brand” line) */}
           <aside className="lg:col-span-5">
             <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-black/30 backdrop-blur-xl">
               {!configured ? (
@@ -300,17 +286,8 @@ export default function SignInPage() {
                 </div>
               ) : null}
 
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-lg font-semibold">Sign in</h2>
-                  <p className="mt-1 text-sm text-white/60">Start with Google, or use email.</p>
-                </div>
-
-                {/* small mark inside card (keep subtle) */}
-                <div className="relative h-12 w-12 opacity-90">
-                  <Image src="/taxaipro-logo.png" alt="TaxAiPro" fill className="object-contain" />
-                </div>
-              </div>
+              <h2 className="text-lg font-semibold">Sign in</h2>
+              <p className="mt-1 text-sm text-white/60">Start with Google, or use email.</p>
 
               <button
                 onClick={loginWithGoogle}
@@ -332,7 +309,9 @@ export default function SignInPage() {
               {emailEnabled ? (
                 <div className="mt-5">
                   <div className="flex items-center justify-between">
-                    <div className="text-xs text-white/60">{mode === "signin" ? "Email sign-in" : "Create account"}</div>
+                    <div className="text-xs text-white/60">
+                      {mode === "signin" ? "Email sign-in" : "Create account"}
+                    </div>
                     <div className="flex gap-2">
                       <button
                         type="button"
