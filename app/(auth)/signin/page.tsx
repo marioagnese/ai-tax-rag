@@ -1,4 +1,3 @@
-// app/(auth)/signin/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -171,35 +170,31 @@ export default function SignInPage() {
   const disableButtons = busy || !configured;
 
   return (
-    <div className="min-h-screen text-white bg-black">
-      {/* BACKGROUND: use CSS background-image so it ALWAYS shows (no Next/Image dependency). */}
-      <div
-        className="fixed inset-0 -z-10 bg-black"
-        style={{
-          backgroundImage: "url(/landing-bg.png)",
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-          backgroundRepeat: "no-repeat",
-        }}
-      >
-        {/* Harvey-style readability: heavy LEFT gradient, light RIGHT so image stays visible */}
-        <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/55 to-black/10" />
-        {/* Slight top/bottom shaping without killing the photo */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-black/25" />
+    <div className="min-h-screen text-white bg-black relative overflow-hidden">
+      {/* BACKGROUND: use plain <img> (most reliable) */}
+      <div className="fixed inset-0 -z-10">
+        <img
+          src="/landing-bg.png"
+          alt="TaxAiPro background"
+          className="h-full w-full object-cover object-center"
+          style={{
+            // Make it clearly visible
+            filter: "contrast(1.12) saturate(1.05) brightness(0.92)",
+            transform: "scale(1.02)",
+          }}
+        />
+
+        {/* Harvey-style readability: strong LEFT gradient, but DO NOT kill the image */}
+        <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/45 to-black/10" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-black/15" />
       </div>
 
-      {/* TOP BAR: Big logo left, Login right (NO small TaxAiPro text). */}
+      {/* TOP BAR: BIG logo left, Login right */}
       <header className="mx-auto max-w-6xl px-6 pt-8">
         <div className="flex items-center justify-between">
-          {/* Big logo */}
-          <div className="relative h-12 w-56 sm:h-14 sm:w-72 md:h-16 md:w-80">
-            <Image
-              src="/taxaipro-logo.png"
-              alt="TaxAiPro"
-              fill
-              priority
-              className="object-contain"
-            />
+          {/* BIGGER LOGO */}
+          <div className="relative h-20 w-[340px] sm:h-24 sm:w-[420px] md:h-28 md:w-[520px]">
+            <Image src="/taxaipro-logo.png" alt="TaxAiPro" fill priority className="object-contain" />
           </div>
 
           <button
@@ -214,7 +209,7 @@ export default function SignInPage() {
 
       {/* HERO */}
       <main className="mx-auto max-w-6xl px-6">
-        <section className="pt-16 md:pt-24 pb-28 md:pb-36">
+        <section className="pt-14 md:pt-20 pb-28 md:pb-36">
           <div className="max-w-2xl">
             <h1 className="text-5xl md:text-6xl font-semibold tracking-tight leading-[1.02]">
               Multi-model tax analysis,
@@ -236,11 +231,7 @@ export default function SignInPage() {
               >
                 Sign in to try it
               </button>
-
-              {/* keep minimal, not clutter */}
-              <div className="text-sm text-white/60">
-                Export memo/email-ready outputs in one click.
-              </div>
+              <div className="text-sm text-white/60">Export memo/email-ready outputs in one click.</div>
             </div>
 
             <div className="mt-10 text-xs text-white/45">
