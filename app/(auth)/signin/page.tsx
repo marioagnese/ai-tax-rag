@@ -48,16 +48,35 @@ export default function SignInPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>("");
   const [info, setInfo] = useState<string>("");
+
   const [authOpen, setAuthOpen] = useState(false);
 
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
+  // DEBUG: prove which deployment is live
+  const commit =
+    (process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ||
+      process.env.NEXT_PUBLIC_GIT_COMMIT_SHA ||
+      "no-commit-env")?.slice(0, 7);
+
+  // DEBUG: prove if background loads
+  const [bgStatus, setBgStatus] = useState<"loading" | "ok" | "fail">("loading");
+  useEffect(() => {
+    const img = new window.Image();
+    img.onload = () => setBgStatus("ok");
+    img.onerror = () => setBgStatus("fail");
+    img.src = "/landing-bg.png?v=" + Date.now(); // cache-bust
+    return () => {
+      img.onload = null;
+      img.onerror = null;
+    };
+  }, []);
+
   const configured = useMemo(() => firebaseClientConfigured(), []);
   const auth = useMemo(() => (configured ? getFirebaseAuth() : null), [configured]);
 
-  // Guard against duplicate onAuthStateChanged firing (dev/refresh)
   const mintedOnceRef = useRef(false);
 
   useEffect(() => {
@@ -171,29 +190,28 @@ export default function SignInPage() {
 
   return (
     <div className="min-h-screen text-white bg-black relative overflow-hidden">
-      {/* BACKGROUND: use plain <img> (most reliable) */}
+      {/* Background: real <img> layer (most reliable) */}
       <div className="fixed inset-0 -z-10">
         <img
-          src="/landing-bg.png"
+          src={"/landing-bg.png?v=" + Date.now()}
           alt="TaxAiPro background"
           className="h-full w-full object-cover object-center"
           style={{
-            // Make it clearly visible
-            filter: "contrast(1.12) saturate(1.05) brightness(0.92)",
-            transform: "scale(1.02)",
+            // Make it CLEARLY visible (Harvey-ish)
+            filter: "contrast(1.12) saturate(1.10) brightness(0.95)",
+            transform: "scale(1.03)",
           }}
         />
 
-        {/* Harvey-style readability: strong LEFT gradient, but DO NOT kill the image */}
-        <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/45 to-black/10" />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-black/15" />
+        {/* Readability overlay (strong left fade, light elsewhere) */}
+        <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/35 to-black/10" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-black/10" />
       </div>
 
-      {/* TOP BAR: BIG logo left, Login right */}
+      {/* Top bar: BIG logo left, Login right (no tiny “TaxAiPro” text) */}
       <header className="mx-auto max-w-6xl px-6 pt-8">
         <div className="flex items-center justify-between">
-          {/* BIGGER LOGO */}
-          <div className="relative h-20 w-[340px] sm:h-24 sm:w-[420px] md:h-28 md:w-[520px]">
+          <div className="relative h-24 w-[420px] sm:h-28 sm:w-[520px] md:h-32 md:w-[620px]">
             <Image src="/taxaipro-logo.png" alt="TaxAiPro" fill priority className="object-contain" />
           </div>
 
@@ -207,7 +225,7 @@ export default function SignInPage() {
         </div>
       </header>
 
-      {/* HERO */}
+      {/* Hero */}
       <main className="mx-auto max-w-6xl px-6">
         <section className="pt-14 md:pt-20 pb-28 md:pb-36">
           <div className="max-w-2xl">
@@ -241,7 +259,12 @@ export default function SignInPage() {
         </section>
       </main>
 
-      {/* AUTH MODAL */}
+      {/* DEBUG badge (you can remove later) */}
+      <div className="fixed bottom-3 right-3 z-50 rounded-full border border-white/10 bg-black/60 px-3 py-1 text-[11px] text-white/70 backdrop-blur">
+        commit:{commit} • bg:{bgStatus}
+      </div>
+
+      {/* Auth Modal */}
       {authOpen ? (
         <div
           className="fixed inset-0 z-50"
