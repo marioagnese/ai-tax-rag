@@ -185,20 +185,15 @@ export default function SignInPage() {
       {/* IMPORTANT: keep overlay basically transparent so the image shows */}
       <div className="absolute inset-0 bg-black/10" />
 
-      {/* Top bar: big logo + login */}
+      {/* Top bar: big logo ONLY (remove Login button to avoid duplication) */}
       <header className="relative mx-auto max-w-6xl px-6 pt-8">
         <div className="flex items-start justify-between gap-6">
           <div className="relative h-24 w-[460px] sm:h-28 sm:w-[560px] md:h-32 md:w-[660px]">
             <Image src="/taxaipro-logo.png" alt="TaxAiPro" fill priority className="object-contain" />
           </div>
 
-          <button
-            type="button"
-            onClick={() => setAuthOpen(true)}
-            className="mt-2 text-sm text-white/90 hover:text-white"
-          >
-            Login
-          </button>
+          {/* spacer to preserve layout rhythm */}
+          <div className="w-14" aria-hidden="true" />
         </div>
       </header>
 
