@@ -194,32 +194,34 @@ export default function SignInPage() {
 
       {/* Hero */}
       <main className="relative mx-auto max-w-6xl px-6">
-        <section className="pt-8 md:pt-10 pb-20 md:pb-28">
-          <div className="max-w-2xl rounded-3xl border border-white/10 bg-black/55 backdrop-blur-sm px-7 py-8 md:px-10 md:py-10 shadow-2xl shadow-black/40">
-            <h1 className="text-5xl md:text-6xl font-semibold tracking-tight leading-[1.02]">
+        {/* push hero down a bit so the card sits more “bottom-left” */}
+        <section className="pt-16 md:pt-24 pb-16 md:pb-24">
+          {/* Card: ~15–20% narrower + less tall (more rectangular) */}
+          <div className="max-w-xl rounded-3xl border border-white/10 bg-black/45 backdrop-blur-sm px-6 py-7 md:px-8 md:py-8 shadow-2xl shadow-black/40">
+            <h1 className="text-4xl md:text-5xl font-semibold tracking-tight leading-[1.05]">
               Multi-model tax analysis,
               <span className="block text-white/65">built to reduce uncertainty.</span>
             </h1>
 
-            <p className="mt-6 text-base md:text-lg text-white/78 leading-relaxed">
+            <p className="mt-5 text-sm md:text-base text-white/78 leading-relaxed">
               LLMs often answer the <span className="text-white font-medium">same prompt</span> in different ways.
               TaxAiPro runs multiple models in parallel, crosschecks where they agree and disagree, then rewrites{" "}
               <span className="text-white font-medium">one conservative answer</span> with explicit assumptions, caveats,
               and missing facts.
             </p>
 
-            <div className="mt-9 flex flex-col sm:flex-row gap-3 sm:items-center">
+            <div className="mt-7 flex flex-col sm:flex-row gap-3 sm:items-center">
               <button
                 type="button"
                 onClick={() => setAuthOpen(true)}
-                className="h-12 px-6 rounded-xl bg-white text-black font-medium hover:bg-white/90"
+                className="h-11 px-5 rounded-xl bg-white text-black font-medium hover:bg-white/90"
               >
                 Sign in to try it
               </button>
               <div className="text-sm text-white/65">Export memo/email-ready outputs in one click.</div>
             </div>
 
-            <div className="mt-10 text-xs text-white/55">
+            <div className="mt-8 text-xs text-white/55">
               TaxAiPro generates drafts for triage only — not legal or tax advice.
             </div>
           </div>
