@@ -1,3 +1,4 @@
+// app/(auth)/signin/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -55,29 +56,10 @@ export default function SignInPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  // DEBUG: prove which deployment is live
-  const commit = (
-    process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ||
-    process.env.NEXT_PUBLIC_GIT_COMMIT_SHA ||
-    "no-commit-env"
-  )?.slice(0, 7);
-
-  // DEBUG: prove if background loads
-  const [bgStatus, setBgStatus] = useState<"loading" | "ok" | "fail">("loading");
-  useEffect(() => {
-    const img = new window.Image();
-    img.onload = () => setBgStatus("ok");
-    img.onerror = () => setBgStatus("fail");
-    img.src = "/landing-bg.png?v=" + Date.now(); // cache-bust
-    return () => {
-      img.onload = null;
-      img.onerror = null;
-    };
-  }, []);
-
   const configured = useMemo(() => firebaseClientConfigured(), []);
   const auth = useMemo(() => (configured ? getFirebaseAuth() : null), [configured]);
 
+  // Guard against duplicate onAuthStateChanged firing (dev/refresh)
   const mintedOnceRef = useRef(false);
 
   useEffect(() => {
@@ -190,35 +172,30 @@ export default function SignInPage() {
   const disableButtons = busy || !configured;
 
   return (
-    <div className="min-h-screen text-white bg-black relative overflow-hidden">
-      {/* Background: real <img> layer (most reliable) */}
-      <div className="fixed inset-0 -z-10">
-        <img
-          src={"/landing-bg.png?v=" + Date.now()}
-          alt="TaxAiPro background"
-          className="h-full w-full object-cover object-center"
-          style={{
-            // Make it CLEARLY visible
-            filter: "contrast(1.10) saturate(1.08) brightness(1.0)",
-            transform: "scale(1.03)",
-          }}
-        />
+    <div
+      className="min-h-screen text-white relative overflow-hidden"
+      style={{
+        backgroundImage: `url("/landing-bg.png")`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+        backgroundAttachment: "fixed",
+      }}
+    >
+      {/* IMPORTANT: keep overlay basically transparent so the image shows */}
+      <div className="absolute inset-0 bg-black/10" />
 
-        {/* OVERLAY: make it basically transparent (so image shows) */}
-        <div className="absolute inset-0 bg-black/0" />
-      </div>
-
-      {/* Top bar: BIG logo left, Login right (no tiny “TaxAiPro” text) */}
-      <header className="mx-auto max-w-6xl px-6 pt-8">
-        <div className="flex items-center justify-between">
-          <div className="relative h-24 w-[420px] sm:h-28 sm:w-[520px] md:h-32 md:w-[620px]">
+      {/* Top bar: big logo + login */}
+      <header className="relative mx-auto max-w-6xl px-6 pt-8">
+        <div className="flex items-start justify-between gap-6">
+          <div className="relative h-24 w-[460px] sm:h-28 sm:w-[560px] md:h-32 md:w-[660px]">
             <Image src="/taxaipro-logo.png" alt="TaxAiPro" fill priority className="object-contain" />
           </div>
 
           <button
             type="button"
             onClick={() => setAuthOpen(true)}
-            className="text-sm text-white/85 hover:text-white"
+            className="mt-2 text-sm text-white/90 hover:text-white"
           >
             Login
           </button>
@@ -226,19 +203,20 @@ export default function SignInPage() {
       </header>
 
       {/* Hero */}
-      <main className="mx-auto max-w-6xl px-6">
-        <section className="pt-14 md:pt-20 pb-28 md:pb-36">
-          <div className="max-w-2xl">
+      <main className="relative mx-auto max-w-6xl px-6">
+        <section className="pt-10 md:pt-14 pb-20 md:pb-28">
+          {/* Put text inside a readable “hero card” so we don’t need to black-out the whole page */}
+          <div className="max-w-2xl rounded-3xl border border-white/10 bg-black/55 backdrop-blur-sm px-7 py-8 md:px-10 md:py-10 shadow-2xl shadow-black/40">
             <h1 className="text-5xl md:text-6xl font-semibold tracking-tight leading-[1.02]">
               Multi-model tax analysis,
               <span className="block text-white/65">built to reduce uncertainty.</span>
             </h1>
 
-            <p className="mt-6 text-base md:text-lg text-white/75 leading-relaxed">
+            <p className="mt-6 text-base md:text-lg text-white/78 leading-relaxed">
               LLMs often answer the <span className="text-white font-medium">same prompt</span> in different ways.
               TaxAiPro runs multiple models in parallel, crosschecks where they agree and disagree, then rewrites{" "}
-              <span className="text-white font-medium">one conservative answer</span> with explicit assumptions,
-              caveats, and missing facts.
+              <span className="text-white font-medium">one conservative answer</span> with explicit assumptions, caveats,
+              and missing facts.
             </p>
 
             <div className="mt-9 flex flex-col sm:flex-row gap-3 sm:items-center">
@@ -249,20 +227,15 @@ export default function SignInPage() {
               >
                 Sign in to try it
               </button>
-              <div className="text-sm text-white/60">Export memo/email-ready outputs in one click.</div>
+              <div className="text-sm text-white/65">Export memo/email-ready outputs in one click.</div>
             </div>
 
-            <div className="mt-10 text-xs text-white/45">
+            <div className="mt-10 text-xs text-white/55">
               TaxAiPro generates drafts for triage only — not legal or tax advice.
             </div>
           </div>
         </section>
       </main>
-
-      {/* DEBUG badge (remove later) */}
-      <div className="fixed bottom-3 right-3 z-50 rounded-full border border-white/10 bg-black/60 px-3 py-1 text-[11px] text-white/70 backdrop-blur">
-        commit:{commit} • bg:{bgStatus}
-      </div>
 
       {/* Auth Modal */}
       {authOpen ? (
