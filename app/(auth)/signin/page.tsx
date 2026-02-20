@@ -182,25 +182,19 @@ export default function SignInPage() {
         backgroundAttachment: "fixed",
       }}
     >
-      {/* IMPORTANT: keep overlay basically transparent so the image shows */}
+      {/* keep overlay very light so the image shows */}
       <div className="absolute inset-0 bg-black/10" />
 
-      {/* Top bar: big logo ONLY (remove Login button to avoid duplication) */}
-      <header className="relative mx-auto max-w-6xl px-6 pt-8">
-        <div className="flex items-start justify-between gap-6">
-          <div className="relative h-24 w-[460px] sm:h-28 sm:w-[560px] md:h-32 md:w-[660px]">
-            <Image src="/taxaipro-logo.png" alt="TaxAiPro" fill priority className="object-contain" />
-          </div>
-
-          {/* spacer to preserve layout rhythm */}
-          <div className="w-14" aria-hidden="true" />
+      {/* Top-left logo (smaller, pinned) */}
+      <header className="relative px-6 pt-6">
+        <div className="relative h-16 w-56 sm:h-18 sm:w-64 md:h-20 md:w-72">
+          <Image src="/taxaipro-logo.png" alt="TaxAiPro" fill priority className="object-contain" />
         </div>
       </header>
 
       {/* Hero */}
       <main className="relative mx-auto max-w-6xl px-6">
-        <section className="pt-10 md:pt-14 pb-20 md:pb-28">
-          {/* Put text inside a readable “hero card” so we don’t need to black-out the whole page */}
+        <section className="pt-8 md:pt-10 pb-20 md:pb-28">
           <div className="max-w-2xl rounded-3xl border border-white/10 bg-black/55 backdrop-blur-sm px-7 py-8 md:px-10 md:py-10 shadow-2xl shadow-black/40">
             <h1 className="text-5xl md:text-6xl font-semibold tracking-tight leading-[1.02]">
               Multi-model tax analysis,
