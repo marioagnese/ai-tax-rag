@@ -48,28 +48,32 @@ type SavedRun = {
 
 const LS_KEY = "taxaipro_runs_v1";
 
-function Pill({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-white/80">
-      {children}
-    </span>
-  );
+/* ---------------- UI primitives ---------------- */
+
+function cn(...xs: Array<string | false | null | undefined>) {
+  return xs.filter(Boolean).join(" ");
 }
 
-function SectionTitle({
+function Pill({
   children,
-  hint,
+  tone = "neutral",
 }: {
   children: React.ReactNode;
-  hint?: string;
+  tone?: "neutral" | "good" | "warn" | "bad";
 }) {
+  const styles =
+    tone === "good"
+      ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-100"
+      : tone === "warn"
+      ? "border-amber-500/25 bg-amber-500/10 text-amber-100"
+      : tone === "bad"
+      ? "border-red-500/25 bg-red-500/10 text-red-100"
+      : "border-white/10 bg-white/5 text-white/80";
+
   return (
-    <div className="flex items-end justify-between gap-3">
-      <div className="text-xs font-semibold tracking-wide text-white/60 uppercase">
-        {children}
-      </div>
-      {hint ? <div className="text-[11px] text-white/40">{hint}</div> : null}
-    </div>
+    <span className={cn("inline-flex items-center rounded-full border px-2.5 py-1 text-xs", styles)}>
+      {children}
+    </span>
   );
 }
 
@@ -81,13 +85,33 @@ function Card({
   className?: string;
 }) {
   return (
-    <div
-      className={`rounded-2xl border border-white/10 bg-white/[0.03] ${className}`}
-    >
+    <div className={cn("rounded-2xl border border-white/10 bg-white/[0.035] backdrop-blur-sm", className)}>
       {children}
     </div>
   );
 }
+
+function SectionTitle({
+  title,
+  subtitle,
+  right,
+}: {
+  title: string;
+  subtitle?: string;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        <div className="text-sm font-semibold text-white/90">{title}</div>
+        {subtitle ? <div className="mt-0.5 text-xs text-white/55">{subtitle}</div> : null}
+      </div>
+      {right ? <div className="pt-0.5">{right}</div> : null}
+    </div>
+  );
+}
+
+/* ---------------- Formatting helpers ---------------- */
 
 function formatMemo(args: {
   jurisdiction?: string;
@@ -148,9 +172,7 @@ function formatMemo(args: {
     lines.push("");
   }
 
-  lines.push(
-    "Not legal or tax advice. For decisions, validate with primary sources and/or counsel."
-  );
+  lines.push("Not legal or tax advice. For decisions, validate with primary sources and/or counsel.");
   return lines.join("\n");
 }
 
@@ -164,11 +186,7 @@ function formatEmail(args: {
   const { jurisdiction, question, answer, caveats = [], followups = [] } = args;
 
   const lines: string[] = [];
-  lines.push(
-    `Subject: Tax question follow-up${
-      jurisdiction ? ` (${jurisdiction})` : ""
-    }`
-  );
+  lines.push(`Subject: Tax question follow-up${jurisdiction ? ` (${jurisdiction})` : ""}`);
   lines.push("");
   lines.push("Hi [Name],");
   lines.push("");
@@ -212,6 +230,8 @@ function downloadText(filename: string, content: string) {
   URL.revokeObjectURL(url);
 }
 
+/* ---------------- Local history ---------------- */
+
 function safeParseRuns(): SavedRun[] {
   try {
     const raw = localStorage.getItem(LS_KEY);
@@ -232,15 +252,8 @@ function safeParseRuns(): SavedRun[] {
         answer: x.answer ? String(x.answer) : undefined,
         caveats: Array.isArray(x.caveats) ? x.caveats.map(String) : [],
         followups: Array.isArray(x.followups) ? x.followups.map(String) : [],
-        disagreements: Array.isArray(x.disagreements)
-          ? x.disagreements.map(String)
-          : [],
-        confidence:
-          x.confidence === "low" ||
-          x.confidence === "medium" ||
-          x.confidence === "high"
-            ? x.confidence
-            : undefined,
+        disagreements: Array.isArray(x.disagreements) ? x.disagreements.map(String) : [],
+        confidence: x.confidence === "low" || x.confidence === "medium" || x.confidence === "high" ? x.confidence : undefined,
       }))
       .sort((a, b) => b.createdAt - a.createdAt);
   } catch {
@@ -255,16 +268,7 @@ function persistRuns(runs: SavedRun[]) {
 function buildConstraints(globalDefaults: string, runOverrides: string) {
   const g = (globalDefaults || "").trim();
   const r = (runOverrides || "").trim();
-
-  if (g && r) {
-    return [
-      "GLOBAL DEFAULTS:",
-      g,
-      "",
-      "RUN OVERRIDES (ONLY FOR THIS RUN):",
-      r,
-    ].join("\n");
-  }
+  if (g && r) return ["GLOBAL DEFAULTS:", g, "", "RUN OVERRIDES (ONLY FOR THIS RUN):", r].join("\n");
   if (g) return g;
   if (r) return r;
   return undefined;
@@ -273,6 +277,8 @@ function buildConstraints(globalDefaults: string, runOverrides: string) {
 function clampTitleFromQuestion(q: string) {
   return (q.trim().slice(0, 60) || "Untitled").replace(/\s+/g, " ");
 }
+
+/* ---------------- Page ---------------- */
 
 export default function CrosscheckPage() {
   const [jurisdiction, setJurisdiction] = useState("Panama");
@@ -297,11 +303,10 @@ export default function CrosscheckPage() {
 
   const [history, setHistory] = useState<SavedRun[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const runFnRef = useRef<() => void>(() => {});
-  const mintedOnceKeyRef = useRef(0);
 
-  // Load history once (client-only)
   useEffect(() => {
     setHistory(safeParseRuns());
   }, []);
@@ -310,16 +315,10 @@ export default function CrosscheckPage() {
   const failed = resp?.meta?.failed ?? [];
   const runtimeMs = resp?.meta?.runtime_ms ?? null;
 
-  const providerBadges = useMemo(() => {
-    const ok = succeeded.map((x) => `${x.provider}:${x.model}`);
-    const bad = failed.map((x) => `${x.provider}:${x.model}`);
-    return { ok, bad };
-  }, [succeeded, failed]);
+  const constraints = useMemo(() => buildConstraints(globalDefaults, runOverrides), [globalDefaults, runOverrides]);
 
-  const constraints = useMemo(
-    () => buildConstraints(globalDefaults, runOverrides),
-    [globalDefaults, runOverrides]
-  );
+  const confidence = resp?.consensus?.confidence;
+  const canSave = !!resp?.consensus?.answer?.trim();
 
   const displayText = useMemo(() => {
     const base = {
@@ -338,9 +337,6 @@ export default function CrosscheckPage() {
     return (resp?.consensus?.answer || "Your consensus answer will appear here.").trim();
   }, [outputStyle, resp, jurisdiction, facts, question]);
 
-  const canSave = !!resp?.consensus?.answer?.trim();
-  const confidence = resp?.consensus?.confidence;
-
   function loadRun(r: SavedRun) {
     setSelectedId(r.id);
     setJurisdiction(r.jurisdiction || "");
@@ -357,12 +353,7 @@ export default function CrosscheckPage() {
         disagreements: r.disagreements || [],
         confidence: r.confidence,
       },
-      meta: {
-        runtime_ms: undefined,
-        attempted: [],
-        succeeded: [],
-        failed: [],
-      },
+      meta: { runtime_ms: undefined, attempted: [], succeeded: [], failed: [] },
       providers: [],
     });
     setError(null);
@@ -377,11 +368,9 @@ export default function CrosscheckPage() {
 
   function saveCurrentRun() {
     if (!canSave) return;
-
-    const now = Date.now();
     const run: SavedRun = {
       id: crypto.randomUUID(),
-      createdAt: now,
+      createdAt: Date.now(),
       title: clampTitleFromQuestion(question),
       jurisdiction: jurisdiction.trim() || undefined,
       facts: facts.trim() || undefined,
@@ -404,7 +393,6 @@ export default function CrosscheckPage() {
   function applyMissingFactsToFacts() {
     const followups = resp?.consensus?.followups ?? [];
     if (!followups.length) return;
-
     const block = followups.map((f) => `• ${f}`).join("\n");
     const prefix = facts.trim() ? `${facts.trim()}\n\n` : "";
     setFacts(`${prefix}Missing facts to confirm:\n${block}\n`);
@@ -454,459 +442,446 @@ export default function CrosscheckPage() {
     }
   }
 
-  // stable key handler
   runFnRef.current = run;
+
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
-      if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") {
-        runFnRef.current?.();
-      }
+      if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") runFnRef.current?.();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // minor: prevent any “double-mint” style issues if this page ever triggers side-effects
-  useEffect(() => {
-    mintedOnceKeyRef.current += 1;
-  }, []);
+  const systemTone =
+    failed.length > 0 && succeeded.length === 0 ? "bad" : failed.length > 0 ? "warn" : "good";
+
+  const systemLabel =
+    failed.length > 0 && succeeded.length === 0
+      ? "System: degraded"
+      : failed.length > 0
+      ? "System: partial"
+      : resp
+      ? "System: healthy"
+      : "System: —";
 
   return (
     <div className="min-h-screen text-white bg-[#070A12]">
-      <div className="pointer-events-none fixed inset-0 opacity-70">
-        <div className="absolute -top-40 left-1/2 h-[520px] w-[520px] -translate-x-1/2 rounded-full bg-white/10 blur-3xl" />
-        <div className="absolute bottom-[-180px] right-[-120px] h-[520px] w-[520px] rounded-full bg-white/5 blur-3xl" />
+      {/* Premium background glow */}
+      <div className="pointer-events-none fixed inset-0 opacity-80">
+        <div className="absolute -top-48 left-1/2 h-[560px] w-[560px] -translate-x-1/2 rounded-full bg-white/10 blur-3xl" />
+        <div className="absolute bottom-[-220px] right-[-140px] h-[560px] w-[560px] rounded-full bg-white/5 blur-3xl" />
       </div>
 
       <div className="relative mx-auto max-w-7xl px-4 py-6">
-        {/* Top bar */}
+        {/* Header */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
-            {/* If you have /public/taxaipro-logo.png, you can swap the block below for an <img>. */}
-            <div className="h-10 w-10 rounded-xl bg-white/10 border border-white/10 flex items-center justify-center font-bold">
+            {/* Swap this for your real logo if you want:
+                <img src="/taxaipro-logo.png" className="h-9 w-9 rounded-xl" />
+            */}
+            <div className="h-10 w-10 rounded-xl border border-white/10 bg-white/5 flex items-center justify-center font-semibold">
               AI
             </div>
             <div>
-              <div className="text-sm font-semibold">TaxAiPro</div>
-              <div className="text-xs text-white/60">
-                Multi-model validation + conservative synthesis (2–3 run method)
+              <div className="text-sm font-semibold leading-none">TaxAiPro</div>
+              <div className="mt-1 text-xs text-white/55">
+                Enterprise-grade multi-model validation for conservative tax triage
               </div>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setHistoryOpen(true)}
+              className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
+            >
+              History
+            </button>
             <Pill>⌘/Ctrl + Enter</Pill>
-            {runtimeMs != null && <Pill>{runtimeMs}ms</Pill>}
-            {confidence ? <Pill>Confidence: {confidence}</Pill> : null}
+            {runtimeMs != null ? <Pill>{runtimeMs}ms</Pill> : null}
+            <Pill tone={resp ? (systemTone as any) : "neutral"}>{systemLabel}</Pill>
+            {confidence ? <Pill tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}>Confidence: {confidence}</Pill> : null}
           </div>
         </div>
 
-        {/* How to use */}
-        <Card className="mt-4 p-4">
-          <details>
-            <summary className="cursor-pointer select-none text-sm font-semibold text-white/90">
-              How to use (2–3 run method)
-              <span className="ml-2 text-xs font-normal text-white/50">
-                run → fill missing facts → re-run → export
-              </span>
-            </summary>
+        {/* Main layout: Guided Input (left) + Output (right, dominant) */}
+        <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-12">
+          {/* LEFT: Guided input */}
+          <div className="lg:col-span-5 space-y-4">
+            <Card className="p-5">
+              <SectionTitle
+                title="1) Jurisdiction"
+                subtitle="Country / state. Add treaty context in Facts if relevant."
+              />
+              <input
+                value={jurisdiction}
+                onChange={(e) => setJurisdiction(e.target.value)}
+                className="mt-3 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm outline-none focus:border-white/20"
+                placeholder="e.g., Panama"
+              />
+            </Card>
 
-            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3 text-sm text-white/75">
-              <div className="rounded-xl border border-white/10 bg-black/30 p-3">
-                <div className="text-xs font-semibold text-white/80">Run 1</div>
-                <div className="mt-1">
-                  Ask the question with minimal facts. Expect{" "}
-                  <span className="text-white/90">Missing facts</span> and{" "}
-                  <span className="text-white/90">Caveats</span>.
-                </div>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-black/30 p-3">
-                <div className="text-xs font-semibold text-white/80">Run 2</div>
-                <div className="mt-1">
-                  Paste requested items into <span className="text-white/90">Facts</span> and re-run
-                  for a tighter answer.
-                </div>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-black/30 p-3">
-                <div className="text-xs font-semibold text-white/80">
-                  Run 3 (optional)
-                </div>
-                <div className="mt-1">
-                  If confidence is low or models disagree, add clarifying facts or{" "}
-                  <span className="text-white/90">Run overrides</span>, then export as{" "}
-                  <span className="text-white/90">Memo</span> or{" "}
-                  <span className="text-white/90">Email</span>.
-                </div>
-              </div>
-            </div>
-          </details>
-        </Card>
-
-        {/* Layout */}
-        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-12">
-          {/* History */}
-          <Card className="lg:col-span-2 p-4">
-            <SectionTitle hint="Saved on this device">Case history</SectionTitle>
-
-            <div className="mt-3 text-xs text-white/50">
-              Local for now. Next: tie to Firebase UID + Firestore.
-            </div>
-
-            <div className="mt-3 space-y-2">
-              {history.length ? (
-                history.map((h) => (
-                  <div
-                    key={h.id}
-                    className={`rounded-xl border border-white/10 p-2 bg-black/30 ${
-                      selectedId === h.id ? "ring-1 ring-white/20" : ""
-                    }`}
-                  >
-                    <button
-                      onClick={() => loadRun(h)}
-                      className="w-full text-left"
-                      title={h.title}
-                    >
-                      <div className="text-xs font-semibold text-white/85 line-clamp-2">
-                        {h.title}
-                      </div>
-                      <div className="mt-1 text-[11px] text-white/45">
-                        {new Date(h.createdAt).toLocaleDateString()} ·{" "}
-                        {h.jurisdiction || "—"}
-                      </div>
-                    </button>
-
-                    <div className="mt-2 flex items-center justify-between">
-                      <span className="text-[11px] text-white/45">
-                        {h.confidence ? `Conf: ${h.confidence}` : "—"}
-                      </span>
-                      <button
-                        onClick={() => deleteRun(h.id)}
-                        className="text-[11px] text-white/50 hover:text-white/80"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-white/50">
-                  No saved runs yet.
-                </div>
-              )}
-            </div>
-          </Card>
-
-          {/* Intake */}
-          <Card className="lg:col-span-3 p-4">
-            <SectionTitle hint="Used by every run">Intake</SectionTitle>
-
-            <label className="mt-3 block text-xs text-white/70">
-              Jurisdiction
-              <span className="ml-2 text-[11px] text-white/40">
-                (country/state; add treaty context if relevant)
-              </span>
-            </label>
-            <input
-              value={jurisdiction}
-              onChange={(e) => setJurisdiction(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-white/20"
-              placeholder="e.g., Panama"
-            />
-
-            <label className="mt-3 block text-xs text-white/70">
-              Facts
-              <span className="ml-2 text-[11px] text-white/40">
-                (paste bullets; after Run 1, paste “Missing facts” here)
-              </span>
-            </label>
-            <textarea
-              value={facts}
-              onChange={(e) => setFacts(e.target.value)}
-              className="mt-1 min-h-[160px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-white/20"
-              placeholder={[
-                "• Entity type, residency, ownership",
-                "• Transaction flow + timing + amounts",
-                "• Where title passes / who performs services",
-                "• Thresholds (PE, withholding, VAT registration, etc.)",
-              ].join("\n")}
-            />
-
-            <label className="mt-3 block text-xs text-white/70">
-              Global defaults (style + posture)
-              <span className="ml-2 text-[11px] text-white/40">
-                (stable across runs — how the model should behave)
-              </span>
-            </label>
-            <textarea
-              value={globalDefaults}
-              onChange={(e) => setGlobalDefaults(e.target.value)}
-              className="mt-1 min-h-[140px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-white/20"
-              placeholder="Conservative posture, format, what to include…"
-            />
-
-            <label className="mt-3 block text-xs text-white/70">
-              Run overrides (optional)
-              <span className="ml-2 text-[11px] text-white/40">
-                (only for this run — e.g., “assume invoice is issued from X”)
-              </span>
-            </label>
-            <textarea
-              value={runOverrides}
-              onChange={(e) => setRunOverrides(e.target.value)}
-              className="mt-1 min-h-[90px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-white/20"
-              placeholder={[
-                "Examples:",
-                "• Focus only on withholding + treaty relief",
-                "• Provide a simple decision tree + next steps",
-                "• Assume the payer is resident in [country]",
-              ].join("\n")}
-            />
-          </Card>
-
-          {/* Ask */}
-          <Card className="lg:col-span-4 p-4">
-            <SectionTitle hint="Keep question short; put details in Facts">
-              Ask
-            </SectionTitle>
-
-            <div className="mt-3 rounded-2xl border border-white/10 bg-black/30 p-3">
+            <Card className="p-5">
+              <SectionTitle title="2) Your question" subtitle="Ask in plain English. Keep it short; details go in Facts." />
               <textarea
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
-                className="min-h-[140px] w-full resize-none bg-transparent text-sm outline-none"
-                placeholder="Ask your tax question here…"
+                className="mt-3 min-h-[140px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm outline-none focus:border-white/20"
+                placeholder="Example: If a Panama company invoices a foreign client for consulting services, is it Panama-source income? Any withholding exposure?"
               />
 
-              <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-xs text-white/50">
-                  Tip: Run 1 is exploratory. Then click “Paste missing facts into Facts” and re-run.
+                  Tip: Run once → review “Missing facts” → paste → re-run for higher confidence.
                 </div>
 
                 <div className="flex items-center gap-2">
                   <button
                     onClick={run}
                     disabled={loading}
-                    className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black disabled:opacity-50"
+                    className="h-10 rounded-xl bg-white px-4 text-sm font-semibold text-black hover:bg-white/90 disabled:opacity-50"
                   >
-                    {loading ? "Running…" : "Crosscheck"}
+                    {loading ? "Running…" : "Run validation"}
                   </button>
 
                   <button
                     onClick={saveCurrentRun}
                     disabled={!canSave}
-                    className="rounded-xl border border-white/15 px-3 py-2 text-sm text-white/90 hover:bg-white/5 disabled:opacity-40 disabled:hover:bg-transparent"
+                    className="h-10 rounded-xl border border-white/15 bg-white/5 px-3 text-sm text-white/85 hover:bg-white/10 disabled:opacity-40"
                     title={canSave ? "Save this run" : "Run once first"}
                   >
-                    Save run
+                    Save
                   </button>
                 </div>
               </div>
-            </div>
 
-            {error && (
-              <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">
-                {error}
-              </div>
-            )}
+              {error ? (
+                <div className="mt-3 rounded-xl border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-100">
+                  {error}
+                </div>
+              ) : null}
+            </Card>
 
-            <div className="mt-4 grid grid-cols-1 gap-3">
-              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-3">
-                <SectionTitle hint="Quick helper">Next action</SectionTitle>
-                <div className="mt-2 flex flex-wrap gap-2">
+            <Card className="p-0">
+              <details open={false} className="p-5">
+                <summary className="cursor-pointer select-none list-none">
+                  <SectionTitle
+                    title="Facts (recommended)"
+                    subtitle="Paste bullets. After Run 1, paste “Missing facts” here."
+                    right={<Pill>Optional</Pill>}
+                  />
+                </summary>
+
+                <textarea
+                  value={facts}
+                  onChange={(e) => setFacts(e.target.value)}
+                  className="mt-4 min-h-[180px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm outline-none focus:border-white/20"
+                  placeholder={[
+                    "• Entity type, residency, ownership",
+                    "• Transaction flow + timing + amounts",
+                    "• Where title passes / who performs services",
+                    "• Thresholds (PE, withholding, VAT registration, etc.)",
+                  ].join("\n")}
+                />
+
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <div className="text-[11px] text-white/45">
+                    Use bullets. Keep sources/links if you have them.
+                  </div>
                   <button
                     onClick={applyMissingFactsToFacts}
                     disabled={!(resp?.consensus?.followups ?? []).length}
-                    className="rounded-xl border border-white/15 px-3 py-2 text-xs text-white/85 hover:bg-white/5 disabled:opacity-40 disabled:hover:bg-transparent"
+                    className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10 disabled:opacity-40"
                   >
-                    Paste missing facts into Facts
-                  </button>
-                  <button
-                    onClick={() => setRunOverrides("")}
-                    disabled={!runOverrides.trim()}
-                    className="rounded-xl border border-white/15 px-3 py-2 text-xs text-white/85 hover:bg-white/5 disabled:opacity-40 disabled:hover:bg-transparent"
-                  >
-                    Clear run overrides
+                    Paste missing facts
                   </button>
                 </div>
-                <div className="mt-2 text-[11px] text-white/45">
-                  Run overrides are great for “assume X” or “focus on Y” without changing your global defaults.
+              </details>
+            </Card>
+
+            <Card className="p-0">
+              <details open={false} className="p-5">
+                <summary className="cursor-pointer select-none list-none">
+                  <SectionTitle
+                    title="Advanced"
+                    subtitle="Defaults, run overrides, and debug outputs."
+                    right={<Pill>Power users</Pill>}
+                  />
+                </summary>
+
+                <div className="mt-4 space-y-4">
+                  <div>
+                    <div className="text-xs font-semibold text-white/70">Global defaults</div>
+                    <div className="mt-1 text-[11px] text-white/45">Stable posture across runs.</div>
+                    <textarea
+                      value={globalDefaults}
+                      onChange={(e) => setGlobalDefaults(e.target.value)}
+                      className="mt-2 min-h-[140px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm outline-none focus:border-white/20"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="text-xs font-semibold text-white/70">Run overrides</div>
+                    <div className="mt-1 text-[11px] text-white/45">Only for this run (e.g., “assume X”).</div>
+                    <textarea
+                      value={runOverrides}
+                      onChange={(e) => setRunOverrides(e.target.value)}
+                      className="mt-2 min-h-[90px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm outline-none focus:border-white/20"
+                      placeholder="Example: Focus only on withholding + treaty relief."
+                    />
+                    <div className="mt-2 flex justify-end">
+                      <button
+                        onClick={() => setRunOverrides("")}
+                        disabled={!runOverrides.trim()}
+                        className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10 disabled:opacity-40"
+                      >
+                        Clear overrides
+                      </button>
+                    </div>
+                  </div>
+
+                  {resp?.providers?.length ? (
+                    <details className="rounded-xl border border-white/10 bg-black/20 p-3">
+                      <summary className="cursor-pointer text-xs font-semibold text-white/70">
+                        Debug: provider outputs
+                      </summary>
+                      <div className="mt-3 space-y-3">
+                        {resp.providers.map((p, idx) => (
+                          <div key={idx} className="rounded-xl border border-white/10 bg-black/30 p-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-xs text-white/70">
+                                <span className="font-semibold text-white/90">{p.provider}</span> · {p.model}
+                              </div>
+                              <div className="text-xs text-white/50">
+                                {p.status !== "ok" ? <span className="text-amber-200">({p.status})</span> : null} {p.ms}ms
+                              </div>
+                            </div>
+                            <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">
+                              {p.status === "ok" ? p.text : p.error}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  ) : null}
                 </div>
-              </div>
+              </details>
+            </Card>
+          </div>
 
-              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-3">
-                <SectionTitle hint="Useful to debug outages / model failures">
-                  Models
-                </SectionTitle>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {providerBadges.ok.map((x) => (
-                    <span
-                      key={x}
-                      className="rounded-full bg-emerald-500/15 border border-emerald-500/25 px-2.5 py-1 text-xs text-emerald-100"
+          {/* RIGHT: Output (dominant) */}
+          <div className="lg:col-span-7 space-y-4">
+            <Card className="p-5">
+              <SectionTitle
+                title="Output"
+                subtitle="Switch style, then copy or download."
+                right={
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setOutputStyle("answer")}
+                      className={cn(
+                        "rounded-full px-3 py-1 text-xs border",
+                        outputStyle === "answer"
+                          ? "bg-white text-black border-white"
+                          : "border-white/15 text-white/80 hover:bg-white/5"
+                      )}
                     >
-                      ✓ {x}
-                    </span>
-                  ))}
-                  {providerBadges.bad.map((x) => (
-                    <span
-                      key={x}
-                      className="rounded-full bg-amber-500/15 border border-amber-500/25 px-2.5 py-1 text-xs text-amber-100"
+                      Answer
+                    </button>
+                    <button
+                      onClick={() => setOutputStyle("memo")}
+                      className={cn(
+                        "rounded-full px-3 py-1 text-xs border",
+                        outputStyle === "memo"
+                          ? "bg-white text-black border-white"
+                          : "border-white/15 text-white/80 hover:bg-white/5"
+                      )}
                     >
-                      ! {x}
-                    </span>
-                  ))}
-                  {!resp && (
-                    <span className="text-xs text-white/50">
-                      Run once to see status.
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-          </Card>
+                      Memo
+                    </button>
+                    <button
+                      onClick={() => setOutputStyle("email")}
+                      className={cn(
+                        "rounded-full px-3 py-1 text-xs border",
+                        outputStyle === "email"
+                          ? "bg-white text-black border-white"
+                          : "border-white/15 text-white/80 hover:bg-white/5"
+                      )}
+                    >
+                      Email
+                    </button>
+                  </div>
+                }
+              />
 
-          {/* Results */}
-          <Card className="lg:col-span-3 p-4">
-            <SectionTitle hint="Switch output style, then copy/download">
-              Output
-            </SectionTitle>
-
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => setOutputStyle("answer")}
-                className={`rounded-full px-3 py-1 text-xs border ${
-                  outputStyle === "answer"
-                    ? "bg-white text-black border-white"
-                    : "border-white/15 text-white/80 hover:bg-white/5"
-                }`}
-              >
-                Answer
-              </button>
-              <button
-                onClick={() => setOutputStyle("memo")}
-                className={`rounded-full px-3 py-1 text-xs border ${
-                  outputStyle === "memo"
-                    ? "bg-white text-black border-white"
-                    : "border-white/15 text-white/80 hover:bg-white/5"
-                }`}
-              >
-                Memo
-              </button>
-              <button
-                onClick={() => setOutputStyle("email")}
-                className={`rounded-full px-3 py-1 text-xs border ${
-                  outputStyle === "email"
-                    ? "bg-white text-black border-white"
-                    : "border-white/15 text-white/80 hover:bg-white/5"
-                }`}
-              >
-                Email
-              </button>
-
-              <div className="ml-auto flex items-center gap-2">
+              <div className="mt-4 flex flex-wrap items-center gap-2">
                 <button
                   onClick={async () => {
                     try {
                       await navigator.clipboard.writeText(displayText);
                     } catch {}
                   }}
-                  className="rounded-xl border border-white/15 px-3 py-1.5 text-xs text-white/85 hover:bg-white/5"
+                  className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
                 >
                   Copy
                 </button>
 
                 <button
                   onClick={() => {
-                    const base =
-                      outputStyle === "memo"
-                        ? "taxaipro-memo"
-                        : outputStyle === "email"
-                        ? "taxaipro-email"
-                        : "taxaipro-answer";
+                    const base = outputStyle === "memo" ? "taxaipro-memo" : outputStyle === "email" ? "taxaipro-email" : "taxaipro-answer";
                     downloadText(`${base}.txt`, displayText);
                   }}
-                  className="rounded-xl border border-white/15 px-3 py-1.5 text-xs text-white/85 hover:bg-white/5"
+                  className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
                 >
                   Download
                 </button>
-              </div>
-            </div>
 
-            <div className="mt-3 rounded-2xl border border-white/10 bg-black/30 p-3">
-              <pre className="whitespace-pre-wrap text-sm leading-relaxed text-white/90">
-                {displayText || "—"}
-              </pre>
-            </div>
-
-            <div className="mt-3 grid grid-cols-1 gap-3">
-              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-3">
-                <SectionTitle hint="Assumptions + edge cases">Caveats</SectionTitle>
-                <ul className="mt-2 list-disc pl-5 text-sm text-white/80 space-y-1">
-                  {(resp?.consensus?.caveats ?? []).length ? (
-                    (resp?.consensus?.caveats ?? []).map((c, i) => <li key={i}>{c}</li>)
-                  ) : (
-                    <li className="list-none text-white/50">None yet.</li>
-                  )}
-                </ul>
+                <div className="ml-auto flex flex-wrap items-center gap-2">
+                  {resp ? <Pill tone={systemTone as any}>{systemLabel}</Pill> : null}
+                  {confidence ? (
+                    <Pill tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}>
+                      Confidence: {confidence}
+                    </Pill>
+                  ) : null}
+                </div>
               </div>
 
-              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-3">
-                <SectionTitle hint="Paste these into Facts, then re-run">
-                  Missing facts
-                </SectionTitle>
-
-                <ul className="mt-2 list-disc pl-5 text-sm text-white/80 space-y-1">
-                  {(resp?.consensus?.followups ?? []).length ? (
-                    (resp?.consensus?.followups ?? []).map((c, i) => <li key={i}>{c}</li>)
-                  ) : (
-                    <li className="list-none text-white/50">None yet.</li>
-                  )}
-                </ul>
-
-                {(resp?.consensus?.followups ?? []).length ? (
-                  <button
-                    onClick={applyMissingFactsToFacts}
-                    className="mt-3 w-full rounded-xl border border-white/15 px-3 py-2 text-xs text-white/85 hover:bg-white/5"
-                  >
-                    Paste into Facts
-                  </button>
-                ) : null}
+              {/* Big answer area */}
+              <div className="mt-4 rounded-2xl border border-white/10 bg-black/35 p-5">
+                <pre className="whitespace-pre-wrap text-[15px] leading-relaxed text-white/92">
+                  {displayText || "—"}
+                </pre>
               </div>
-            </div>
 
-            {resp?.providers?.length ? (
-              <details className="mt-4 rounded-2xl border border-white/10 bg-white/[0.02] p-3">
-                <summary className="cursor-pointer text-xs font-semibold tracking-wide text-white/70 uppercase">
-                  Provider outputs (debug)
-                </summary>
-                <div className="mt-3 space-y-3">
-                  {resp.providers.map((p, idx) => (
-                    <div
-                      key={idx}
-                      className="rounded-xl border border-white/10 bg-black/30 p-3"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-xs text-white/70">
-                          <span className="font-semibold text-white/90">
-                            {p.provider}
-                          </span>{" "}
-                          · {p.model}
-                        </div>
-                        <div className="text-xs text-white/50">{p.ms}ms</div>
-                      </div>
-                      <div className="mt-2 text-sm whitespace-pre-wrap text-white/80">
-                        {p.status === "ok" ? p.text : p.error}
-                      </div>
+              <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                  <div className="text-xs font-semibold text-white/70">Caveats</div>
+                  <div className="mt-2 space-y-1 text-sm text-white/80">
+                    {(resp?.consensus?.caveats ?? []).length ? (
+                      (resp?.consensus?.caveats ?? []).slice(0, 6).map((c, i) => <div key={i}>• {c}</div>)
+                    ) : (
+                      <div className="text-white/50">None yet.</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs font-semibold text-white/70">Missing facts</div>
+                    {(resp?.consensus?.followups ?? []).length ? (
+                      <button
+                        onClick={applyMissingFactsToFacts}
+                        className="rounded-xl border border-white/15 bg-white/5 px-2.5 py-1.5 text-xs text-white/85 hover:bg-white/10"
+                      >
+                        Paste to Facts
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-2 space-y-1 text-sm text-white/80">
+                    {(resp?.consensus?.followups ?? []).length ? (
+                      (resp?.consensus?.followups ?? []).slice(0, 6).map((c, i) => <div key={i}>• {c}</div>)
+                    ) : (
+                      <div className="text-white/50">None yet.</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <p className="mt-4 text-[11px] text-white/40">
+                TaxAiPro generates drafts for triage only — not legal or tax advice.
+              </p>
+            </Card>
+
+            {/* Optional: show disagreements only when present */}
+            {(resp?.consensus?.disagreements ?? []).length ? (
+              <Card className="p-5">
+                <SectionTitle title="Disagreements" subtitle="Where models differed. Consider adding facts and re-running." />
+                <div className="mt-3 space-y-2 text-sm text-white/80">
+                  {(resp?.consensus?.disagreements ?? []).map((d, i) => (
+                    <div key={i} className="rounded-xl border border-white/10 bg-black/25 p-3">
+                      {d}
                     </div>
                   ))}
                 </div>
-              </details>
+              </Card>
             ) : null}
-
-            <p className="mt-4 text-[11px] text-white/40">
-              TaxAiPro generates drafts for triage only — not legal or tax advice.
-            </p>
-          </Card>
+          </div>
         </div>
+
+        {/* History drawer */}
+        {historyOpen ? (
+          <div
+            className="fixed inset-0 z-50"
+            role="dialog"
+            aria-modal="true"
+            onMouseDown={() => setHistoryOpen(false)}
+          >
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+            <div
+              className="absolute right-0 top-0 h-full w-[92vw] max-w-md border-l border-white/10 bg-[#070A12]/95 p-4"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-white/90">Case history</div>
+                  <div className="mt-1 text-xs text-white/50">Saved on this device (localStorage).</div>
+                </div>
+                <button
+                  onClick={() => setHistoryOpen(false)}
+                  className="text-white/60 hover:text-white"
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-2 overflow-auto pr-1" style={{ maxHeight: "calc(100vh - 84px)" }}>
+                {history.length ? (
+                  history.map((h) => (
+                    <div
+                      key={h.id}
+                      className={cn(
+                        "rounded-xl border border-white/10 bg-black/25 p-3",
+                        selectedId === h.id && "ring-1 ring-white/20"
+                      )}
+                    >
+                      <button onClick={() => loadRun(h)} className="w-full text-left">
+                        <div className="text-xs font-semibold text-white/85 line-clamp-2">{h.title}</div>
+                        <div className="mt-1 text-[11px] text-white/45">
+                          {new Date(h.createdAt).toLocaleDateString()} · {h.jurisdiction || "—"} ·{" "}
+                          {h.confidence ? `Conf: ${h.confidence}` : "Conf: —"}
+                        </div>
+                      </button>
+
+                      <div className="mt-3 flex items-center justify-between">
+                        <button
+                          onClick={() => {
+                            loadRun(h);
+                            setHistoryOpen(false);
+                          }}
+                          className="rounded-xl border border-white/15 bg-white/5 px-3 py-1.5 text-xs text-white/85 hover:bg-white/10"
+                        >
+                          Open
+                        </button>
+                        <button
+                          onClick={() => deleteRun(h.id)}
+                          className="text-xs text-white/55 hover:text-white/80"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-white/50">
+                    No saved runs yet.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
