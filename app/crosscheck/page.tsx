@@ -71,7 +71,9 @@ function Pill({
       : "border-white/10 bg-white/5 text-white/80";
 
   return (
-    <span className={cn("inline-flex items-center rounded-full border px-2.5 py-1 text-xs", styles)}>
+    <span
+      className={cn("inline-flex items-center rounded-full border px-2.5 py-1 text-xs", styles)}
+    >
       {children}
     </span>
   );
@@ -85,7 +87,12 @@ function Card({
   className?: string;
 }) {
   return (
-    <div className={cn("rounded-2xl border border-white/10 bg-white/[0.035] backdrop-blur-sm", className)}>
+    <div
+      className={cn(
+        "rounded-2xl border border-white/10 bg-white/[0.035] backdrop-blur-sm",
+        className
+      )}
+    >
       {children}
     </div>
   );
@@ -240,21 +247,32 @@ function safeParseRuns(): SavedRun[] {
     if (!Array.isArray(parsed)) return [];
     return parsed
       .filter(Boolean)
-      .map((x: any) => ({
-        id: String(x.id || crypto.randomUUID()),
-        createdAt: Number(x.createdAt || Date.now()),
-        title: String(x.title || "Untitled"),
-        jurisdiction: x.jurisdiction ? String(x.jurisdiction) : undefined,
-        facts: x.facts ? String(x.facts) : undefined,
-        globalDefaults: x.globalDefaults ? String(x.globalDefaults) : undefined,
-        runOverrides: x.runOverrides ? String(x.runOverrides) : undefined,
-        question: String(x.question || ""),
-        answer: x.answer ? String(x.answer) : undefined,
-        caveats: Array.isArray(x.caveats) ? x.caveats.map(String) : [],
-        followups: Array.isArray(x.followups) ? x.followups.map(String) : [],
-        disagreements: Array.isArray(x.disagreements) ? x.disagreements.map(String) : [],
-        confidence: x.confidence === "low" || x.confidence === "medium" || x.confidence === "high" ? x.confidence : undefined,
-      }))
+      .map((x: unknown) => {
+        const r = x as Partial<SavedRun> & {
+          caveats?: unknown;
+          followups?: unknown;
+          disagreements?: unknown;
+        };
+
+        return {
+          id: String(r.id || crypto.randomUUID()),
+          createdAt: Number(r.createdAt || Date.now()),
+          title: String(r.title || "Untitled"),
+          jurisdiction: r.jurisdiction ? String(r.jurisdiction) : undefined,
+          facts: r.facts ? String(r.facts) : undefined,
+          globalDefaults: r.globalDefaults ? String(r.globalDefaults) : undefined,
+          runOverrides: r.runOverrides ? String(r.runOverrides) : undefined,
+          question: String(r.question || ""),
+          answer: r.answer ? String(r.answer) : undefined,
+          caveats: Array.isArray(r.caveats) ? r.caveats.map(String) : [],
+          followups: Array.isArray(r.followups) ? r.followups.map(String) : [],
+          disagreements: Array.isArray(r.disagreements) ? r.disagreements.map(String) : [],
+          confidence:
+            r.confidence === "low" || r.confidence === "medium" || r.confidence === "high"
+              ? r.confidence
+              : undefined,
+        };
+      })
       .sort((a, b) => b.createdAt - a.createdAt);
   } catch {
     return [];
@@ -268,7 +286,8 @@ function persistRuns(runs: SavedRun[]) {
 function buildConstraints(globalDefaults: string, runOverrides: string) {
   const g = (globalDefaults || "").trim();
   const r = (runOverrides || "").trim();
-  if (g && r) return ["GLOBAL DEFAULTS:", g, "", "RUN OVERRIDES (ONLY FOR THIS RUN):", r].join("\n");
+  if (g && r)
+    return ["GLOBAL DEFAULTS:", g, "", "RUN OVERRIDES (ONLY FOR THIS RUN):", r].join("\n");
   if (g) return g;
   if (r) return r;
   return undefined;
@@ -315,7 +334,10 @@ export default function CrosscheckPage() {
   const failed = resp?.meta?.failed ?? [];
   const runtimeMs = resp?.meta?.runtime_ms ?? null;
 
-  const constraints = useMemo(() => buildConstraints(globalDefaults, runOverrides), [globalDefaults, runOverrides]);
+  const constraints = useMemo(
+    () => buildConstraints(globalDefaults, runOverrides),
+    [globalDefaults, runOverrides]
+  );
 
   const confidence = resp?.consensus?.confidence;
   const canSave = !!resp?.consensus?.answer?.trim();
@@ -422,21 +444,24 @@ export default function CrosscheckPage() {
       });
 
       const text = await r.text();
-      let json: any = null;
+      let json: unknown = null;
       try {
         json = JSON.parse(text);
       } catch {
         json = { ok: false, error: text };
       }
 
-      if (!r.ok || json?.ok === false) {
-        setResp(json);
-        setError(json?.error || `Request failed (${r.status})`);
+      const parsed = json as CrosscheckResponse;
+
+      if (!r.ok || parsed?.ok === false) {
+        setResp(parsed);
+        setError(parsed?.error || `Request failed (${r.status})`);
       } else {
-        setResp(json);
+        setResp(parsed);
       }
-    } catch (e: any) {
-      setError(e?.message || "Request failed.");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Request failed.";
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -476,12 +501,11 @@ export default function CrosscheckPage() {
         {/* Header */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
-            {/* Swap this for your real logo if you want:
-                <img src="/taxaipro-logo.png" className="h-9 w-9 rounded-xl" />
-            */}
-            <div className="h-10 w-10 rounded-xl border border-white/10 bg-white/5 flex items-center justify-center font-semibold">
-              AI
-            </div>
+            <img
+              src="/taxaipro-logo.png"
+              alt="TaxAiPro"
+              className="h-10 w-10 rounded-xl object-contain border border-white/10 bg-white/5"
+            />
             <div>
               <div className="text-sm font-semibold leading-none">TaxAiPro</div>
               <div className="mt-1 text-xs text-white/55">
@@ -500,29 +524,58 @@ export default function CrosscheckPage() {
             <Pill>⌘/Ctrl + Enter</Pill>
             {runtimeMs != null ? <Pill>{runtimeMs}ms</Pill> : null}
             <Pill tone={resp ? (systemTone as any) : "neutral"}>{systemLabel}</Pill>
-            {confidence ? <Pill tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}>Confidence: {confidence}</Pill> : null}
+            {confidence ? (
+              <Pill
+                tone={
+                  confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"
+                }
+              >
+                Confidence: {confidence}
+              </Pill>
+            ) : null}
           </div>
         </div>
 
         {/* Main layout: Guided Input (left) + Output (right, dominant) */}
         <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-12">
           {/* LEFT: Guided input */}
-          <div className="lg:col-span-5 space-y-4">
+          <div className="lg:col-span-4 space-y-4">
             <Card className="p-5">
               <SectionTitle
                 title="1) Jurisdiction"
                 subtitle="Country / state. Add treaty context in Facts if relevant."
               />
-              <input
+              <select
                 value={jurisdiction}
                 onChange={(e) => setJurisdiction(e.target.value)}
                 className="mt-3 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm outline-none focus:border-white/20"
-                placeholder="e.g., Panama"
-              />
+              >
+                <optgroup label="USA">
+                  <option value="United States">United States</option>
+                </optgroup>
+
+                <optgroup label="LATAM">
+                  <option value="Argentina">Argentina</option>
+                  <option value="Brazil">Brazil</option>
+                  <option value="Chile">Chile</option>
+                  <option value="Colombia">Colombia</option>
+                  <option value="Mexico">Mexico</option>
+                  <option value="Panama">Panama</option>
+                  <option value="Peru">Peru</option>
+                  <option value="Uruguay">Uruguay</option>
+                </optgroup>
+
+                <optgroup label="Other">
+                  <option value="Other">Other / Not listed</option>
+                </optgroup>
+              </select>
             </Card>
 
             <Card className="p-5">
-              <SectionTitle title="2) Your question" subtitle="Ask in plain English. Keep it short; details go in Facts." />
+              <SectionTitle
+                title="2) Your question"
+                subtitle="Ask in plain English. Keep it short; details go in Facts."
+              />
               <textarea
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
@@ -585,9 +638,7 @@ export default function CrosscheckPage() {
                 />
 
                 <div className="mt-3 flex items-center justify-between gap-3">
-                  <div className="text-[11px] text-white/45">
-                    Use bullets. Keep sources/links if you have them.
-                  </div>
+                  <div className="text-[11px] text-white/45">Use bullets. Keep sources/links if you have them.</div>
                   <button
                     onClick={applyMissingFactsToFacts}
                     disabled={!(resp?.consensus?.followups ?? []).length}
@@ -653,7 +704,10 @@ export default function CrosscheckPage() {
                                 <span className="font-semibold text-white/90">{p.provider}</span> · {p.model}
                               </div>
                               <div className="text-xs text-white/50">
-                                {p.status !== "ok" ? <span className="text-amber-200">({p.status})</span> : null} {p.ms}ms
+                                {p.status !== "ok" ? (
+                                  <span className="text-amber-200">({p.status})</span>
+                                ) : null}{" "}
+                                {p.ms}ms
                               </div>
                             </div>
                             <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">
@@ -670,7 +724,7 @@ export default function CrosscheckPage() {
           </div>
 
           {/* RIGHT: Output (dominant) */}
-          <div className="lg:col-span-7 space-y-4">
+          <div className="lg:col-span-8 space-y-4">
             <Card className="p-5">
               <SectionTitle
                 title="Output"
@@ -728,7 +782,12 @@ export default function CrosscheckPage() {
 
                 <button
                   onClick={() => {
-                    const base = outputStyle === "memo" ? "taxaipro-memo" : outputStyle === "email" ? "taxaipro-email" : "taxaipro-answer";
+                    const base =
+                      outputStyle === "memo"
+                        ? "taxaipro-memo"
+                        : outputStyle === "email"
+                        ? "taxaipro-email"
+                        : "taxaipro-answer";
                     downloadText(`${base}.txt`, displayText);
                   }}
                   className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
@@ -739,7 +798,11 @@ export default function CrosscheckPage() {
                 <div className="ml-auto flex flex-wrap items-center gap-2">
                   {resp ? <Pill tone={systemTone as any}>{systemLabel}</Pill> : null}
                   {confidence ? (
-                    <Pill tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}>
+                    <Pill
+                      tone={
+                        confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"
+                      }
+                    >
                       Confidence: {confidence}
                     </Pill>
                   ) : null}
@@ -747,7 +810,7 @@ export default function CrosscheckPage() {
               </div>
 
               {/* Big answer area */}
-              <div className="mt-4 rounded-2xl border border-white/10 bg-black/35 p-5">
+              <div className="mt-4 rounded-2xl border border-white/10 bg-black/35 p-6 min-h-[480px]">
                 <pre className="whitespace-pre-wrap text-[15px] leading-relaxed text-white/92">
                   {displayText || "—"}
                 </pre>
@@ -796,7 +859,10 @@ export default function CrosscheckPage() {
             {/* Optional: show disagreements only when present */}
             {(resp?.consensus?.disagreements ?? []).length ? (
               <Card className="p-5">
-                <SectionTitle title="Disagreements" subtitle="Where models differed. Consider adding facts and re-running." />
+                <SectionTitle
+                  title="Disagreements"
+                  subtitle="Where models differed. Consider adding facts and re-running."
+                />
                 <div className="mt-3 space-y-2 text-sm text-white/80">
                   {(resp?.consensus?.disagreements ?? []).map((d, i) => (
                     <div key={i} className="rounded-xl border border-white/10 bg-black/25 p-3">
