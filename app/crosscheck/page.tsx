@@ -30,6 +30,13 @@ type CrosscheckResponse = {
 
 type OutputStyle = "answer" | "memo" | "email";
 
+type ThreadMessage = {
+  id: string;
+  createdAt: number;
+  role: "user" | "assistant";
+  text: string;
+};
+
 type SavedRun = {
   id: string;
   createdAt: number;
@@ -44,6 +51,8 @@ type SavedRun = {
   followups?: string[];
   disagreements?: string[];
   confidence?: "low" | "medium" | "high";
+  // NEW (optional): store case thread on device
+  thread?: ThreadMessage[];
 };
 
 const LS_KEY = "taxaipro_runs_v1";
@@ -252,7 +261,22 @@ function safeParseRuns(): SavedRun[] {
           caveats?: unknown;
           followups?: unknown;
           disagreements?: unknown;
+          thread?: unknown;
         };
+
+        const thread: ThreadMessage[] =
+          Array.isArray(r.thread) && r.thread.length
+            ? (r.thread as any[])
+                .filter(Boolean)
+                .map((m) => ({
+                  id: String(m.id || crypto.randomUUID()),
+                  createdAt: Number(m.createdAt || Date.now()),
+                  role: m.role === "assistant" ? "assistant" : "user",
+                  text: String(m.text || ""),
+                }))
+                .filter((m) => m.text.trim())
+                .sort((a, b) => a.createdAt - b.createdAt)
+            : [];
 
         return {
           id: String(r.id || crypto.randomUUID()),
@@ -271,6 +295,7 @@ function safeParseRuns(): SavedRun[] {
             r.confidence === "low" || r.confidence === "medium" || r.confidence === "high"
               ? r.confidence
               : undefined,
+          thread,
         };
       })
       .sort((a, b) => b.createdAt - a.createdAt);
@@ -297,6 +322,58 @@ function clampTitleFromQuestion(q: string) {
   return (q.trim().slice(0, 60) || "Untitled").replace(/\s+/g, " ");
 }
 
+/* ---------------- Thread helpers ---------------- */
+
+function newMsg(role: "user" | "assistant", text: string): ThreadMessage {
+  return {
+    id: crypto.randomUUID(),
+    createdAt: Date.now(),
+    role,
+    text: text.trim(),
+  };
+}
+
+function buildCompositeFollowUpPrompt(args: {
+  originalQuestion: string;
+  priorConsensusAnswer: string;
+  followUpQuestion: string;
+}) {
+  const { originalQuestion, priorConsensusAnswer, followUpQuestion } = args;
+
+  // Intentionally simple + conservative. We keep facts/jurisdiction passed via existing fields.
+  // This is the minimal “hybrid thread” step before a real messages[] API.
+  return [
+    "You are continuing the same tax case. Keep the original fact pattern unless the follow-up changes it.",
+    "",
+    "ORIGINAL QUESTION:",
+    originalQuestion.trim(),
+    "",
+    "PRIOR CONSENSUS ANSWER (MOST RECENT):",
+    priorConsensusAnswer.trim(),
+    "",
+    "FOLLOW-UP QUESTION:",
+    followUpQuestion.trim(),
+    "",
+    "INSTRUCTIONS:",
+    "- Answer the follow-up directly.",
+    "- If the follow-up materially changes facts/assumptions, state the delta explicitly.",
+    "- Keep conservative posture; list assumptions, caveats, and missing facts.",
+  ].join("\n");
+}
+
+function buildQuestionForFormatting(thread: ThreadMessage[], fallbackQuestion: string) {
+  const userQs = thread.filter((m) => m.role === "user").map((m) => m.text.trim()).filter(Boolean);
+  if (!userQs.length) return fallbackQuestion.trim();
+  if (userQs.length === 1) return userQs[0];
+  // Compact thread view for memo/email “Question:” section
+  const lines: string[] = [];
+  lines.push(userQs[0]);
+  lines.push("");
+  lines.push("Follow-ups:");
+  userQs.slice(1).forEach((q, i) => lines.push(`${i + 1}) ${q}`));
+  return lines.join("\n");
+}
+
 /* ---------------- Page ---------------- */
 
 export default function CrosscheckPage() {
@@ -304,7 +381,7 @@ export default function CrosscheckPage() {
   const [facts, setFacts] = useState("");
   const [globalDefaults, setGlobalDefaults] = useState(
     [
-      "Act like a senior tax specialist.",
+      "Act like a senior partner tax specialist.",
       "Be conservative; avoid overclaiming.",
       "Start with a bottom-line first.",
       "List assumptions, missing facts, and caveats.",
@@ -324,6 +401,11 @@ export default function CrosscheckPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
 
+  // NEW: case thread state + follow-up input
+  const [thread, setThread] = useState<ThreadMessage[]>([]);
+  const [followUp, setFollowUp] = useState("");
+  const [followUpLoading, setFollowUpLoading] = useState(false);
+
   const runFnRef = useRef<() => void>(() => {});
 
   useEffect(() => {
@@ -342,11 +424,17 @@ export default function CrosscheckPage() {
   const confidence = resp?.consensus?.confidence;
   const canSave = !!resp?.consensus?.answer?.trim();
 
+  // Effective “question” used for memo/email display (includes follow-ups)
+  const effectiveQuestionForOutput = useMemo(
+    () => buildQuestionForFormatting(thread, question),
+    [thread, question]
+  );
+
   const displayText = useMemo(() => {
     const base = {
       jurisdiction: jurisdiction.trim() || undefined,
       facts: facts.trim() || undefined,
-      question: question.trim(),
+      question: effectiveQuestionForOutput.trim(),
       answer: resp?.consensus?.answer || "",
       caveats: resp?.consensus?.caveats || [],
       followups: resp?.consensus?.followups || [],
@@ -357,7 +445,7 @@ export default function CrosscheckPage() {
     if (outputStyle === "memo") return formatMemo(base);
     if (outputStyle === "email") return formatEmail(base);
     return (resp?.consensus?.answer || "Your consensus answer will appear here.").trim();
-  }, [outputStyle, resp, jurisdiction, facts, question]);
+  }, [outputStyle, resp, jurisdiction, facts, effectiveQuestionForOutput]);
 
   function loadRun(r: SavedRun) {
     setSelectedId(r.id);
@@ -366,6 +454,18 @@ export default function CrosscheckPage() {
     setGlobalDefaults(r.globalDefaults || globalDefaults);
     setRunOverrides(r.runOverrides || "");
     setQuestion(r.question || "");
+
+    // Restore thread if present, else synthesize minimal 2-turn thread from saved Q/A
+    const restoredThread =
+      r.thread && r.thread.length
+        ? r.thread
+        : [
+            ...(r.question?.trim() ? [newMsg("user", r.question.trim())] : []),
+            ...(r.answer?.trim() ? [newMsg("assistant", r.answer.trim())] : []),
+          ];
+
+    setThread(restoredThread);
+
     setResp({
       ok: true,
       consensus: {
@@ -390,6 +490,8 @@ export default function CrosscheckPage() {
 
   function saveCurrentRun() {
     if (!canSave) return;
+
+    // Save current thread (optional) to keep a per-case follow-up trail on device
     const run: SavedRun = {
       id: crypto.randomUUID(),
       createdAt: Date.now(),
@@ -404,6 +506,7 @@ export default function CrosscheckPage() {
       followups: resp?.consensus?.followups || [],
       disagreements: resp?.consensus?.disagreements || [],
       confidence: resp?.consensus?.confidence,
+      thread: thread.length ? thread : undefined,
     };
 
     const next = [run, ...history].slice(0, 50);
@@ -420,6 +523,15 @@ export default function CrosscheckPage() {
     setFacts(`${prefix}Missing facts to confirm:\n${block}\n`);
   }
 
+  function resetCaseThreadToCurrentQuestion() {
+    const q = question.trim();
+    if (!q) {
+      setThread([]);
+      return;
+    }
+    setThread([newMsg("user", q)]);
+  }
+
   async function run() {
     setError(null);
     setResp(null);
@@ -429,6 +541,9 @@ export default function CrosscheckPage() {
       setError("Type a question first.");
       return;
     }
+
+    // Starting a new “case”: reset thread to the base question
+    setThread([newMsg("user", q)]);
 
     setLoading(true);
     try {
@@ -456,14 +571,95 @@ export default function CrosscheckPage() {
       if (!r.ok || parsed?.ok === false) {
         setResp(parsed);
         setError(parsed?.error || `Request failed (${r.status})`);
-      } else {
-        setResp(parsed);
+        return;
+      }
+
+      setResp(parsed);
+
+      const ans = (parsed?.consensus?.answer || "").trim();
+      if (ans) {
+        setThread((t) => [...t, newMsg("assistant", ans)]);
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Request failed.";
       setError(msg);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function runFollowUp() {
+    setError(null);
+
+    const follow = followUp.trim();
+    if (!follow) {
+      setError("Type a follow-up first.");
+      return;
+    }
+    const prior = (resp?.consensus?.answer || "").trim();
+    if (!prior) {
+      setError("Run the initial question first to create a baseline answer.");
+      return;
+    }
+
+    const baseQ = question.trim();
+    if (!baseQ) {
+      setError("Type an original question first.");
+      return;
+    }
+
+    setFollowUpLoading(true);
+
+    // Optimistically append follow-up user msg to thread
+    const userMsg = newMsg("user", follow);
+    setThread((t) => [...t, userMsg]);
+
+    try {
+      const composite = buildCompositeFollowUpPrompt({
+        originalQuestion: baseQ,
+        priorConsensusAnswer: prior,
+        followUpQuestion: follow,
+      });
+
+      const r = await fetch("/api/ui/crosscheck", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jurisdiction: jurisdiction.trim() || undefined,
+          facts: facts.trim() || undefined,
+          constraints,
+          question: composite,
+        }),
+      });
+
+      const text = await r.text();
+      let json: unknown = null;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        json = { ok: false, error: text };
+      }
+
+      const parsed = json as CrosscheckResponse;
+
+      if (!r.ok || parsed?.ok === false) {
+        setResp(parsed);
+        setError(parsed?.error || `Request failed (${r.status})`);
+        return;
+      }
+
+      setResp(parsed);
+
+      const ans = (parsed?.consensus?.answer || "").trim();
+      if (ans) {
+        setThread((t) => [...t, newMsg("assistant", ans)]);
+      }
+      setFollowUp("");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Request failed.";
+      setError(msg);
+    } finally {
+      setFollowUpLoading(false);
     }
   }
 
@@ -489,6 +685,9 @@ export default function CrosscheckPage() {
       ? "System: healthy"
       : "System: —";
 
+  const hasBaselineAnswer = !!resp?.consensus?.answer?.trim();
+  const threadTurns = thread.length;
+
   return (
     <div className="min-h-screen text-white bg-[#070A12]">
       {/* Premium background glow */}
@@ -508,9 +707,7 @@ export default function CrosscheckPage() {
             />
             <div>
               <div className="text-sm font-semibold leading-none">TaxAiPro</div>
-              <div className="mt-1 text-xs text-white/55">
-                Enterprise-grade multi-model validation for conservative tax triage
-              </div>
+              <div className="mt-1 text-xs text-white/55">Multi Model Conservative Tax Triage</div>
             </div>
           </div>
 
@@ -525,14 +722,11 @@ export default function CrosscheckPage() {
             {runtimeMs != null ? <Pill>{runtimeMs}ms</Pill> : null}
             <Pill tone={resp ? (systemTone as any) : "neutral"}>{systemLabel}</Pill>
             {confidence ? (
-              <Pill
-                tone={
-                  confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"
-                }
-              >
+              <Pill tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}>
                 Confidence: {confidence}
               </Pill>
             ) : null}
+            {threadTurns ? <Pill>Thread: {Math.max(0, Math.floor(threadTurns / 2))} turns</Pill> : null}
           </div>
         </div>
 
@@ -542,7 +736,7 @@ export default function CrosscheckPage() {
           <div className="lg:col-span-4 space-y-4">
             <Card className="p-5">
               <SectionTitle
-                title="1) Jurisdiction"
+                title="Jurisdiction"
                 subtitle="Country / state. Add treaty context in Facts if relevant."
               />
               <select
@@ -552,6 +746,7 @@ export default function CrosscheckPage() {
               >
                 <optgroup label="USA">
                   <option value="United States">United States</option>
+                  <option value="Canada">Canada</option>
                 </optgroup>
 
                 <optgroup label="LATAM">
@@ -563,6 +758,12 @@ export default function CrosscheckPage() {
                   <option value="Panama">Panama</option>
                   <option value="Peru">Peru</option>
                   <option value="Uruguay">Uruguay</option>
+                  <option value="Paraguay">Paraguay</option>
+                  <option value="Bolivia">Bolivia</option>
+                  <option value="Puerto Rico">Puerto Rico</option>
+                  <option value="Ecuador">Ecuador</option>
+                  <option value="Reublica Dominicana">Rep. Dominicana</option>
+                  <option value="Jamaica">Jamaica</option>
                 </optgroup>
 
                 <optgroup label="Other">
@@ -572,10 +773,7 @@ export default function CrosscheckPage() {
             </Card>
 
             <Card className="p-5">
-              <SectionTitle
-                title="2) Your question"
-                subtitle="Ask in plain English. Keep it short; details go in Facts."
-              />
+              <SectionTitle title="Your question" subtitle="Keep it short; Place relevant details in Facts." />
               <textarea
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
@@ -611,6 +809,20 @@ export default function CrosscheckPage() {
               {error ? (
                 <div className="mt-3 rounded-xl border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-100">
                   {error}
+                </div>
+              ) : null}
+
+              {/* NEW: quick action to realign thread to the base question */}
+              {thread.length > 0 ? (
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <div className="text-[11px] text-white/45">Thread is client-side only (saved in History if you Save).</div>
+                  <button
+                    onClick={resetCaseThreadToCurrentQuestion}
+                    className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
+                    title="Resets the thread to only the original question."
+                  >
+                    Reset thread
+                  </button>
                 </div>
               ) : null}
             </Card>
@@ -799,9 +1011,7 @@ export default function CrosscheckPage() {
                   {resp ? <Pill tone={systemTone as any}>{systemLabel}</Pill> : null}
                   {confidence ? (
                     <Pill
-                      tone={
-                        confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"
-                      }
+                      tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}
                     >
                       Confidence: {confidence}
                     </Pill>
@@ -816,12 +1026,60 @@ export default function CrosscheckPage() {
                 </pre>
               </div>
 
+              {/* NEW: Follow-up (hybrid thread) */}
+              <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-semibold text-white/80">Follow-up</div>
+                    <div className="mt-1 text-[11px] text-white/50">
+                      Continues the same case: original question + last answer + your follow-up.
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Pill tone={hasBaselineAnswer ? "good" : "neutral"}>
+                      {hasBaselineAnswer ? "Case: ready" : "Run baseline first"}
+                    </Pill>
+                  </div>
+                </div>
+
+                <textarea
+                  value={followUp}
+                  onChange={(e) => setFollowUp(e.target.value)}
+                  className="mt-3 min-h-[90px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm outline-none focus:border-white/20"
+                  placeholder="Example: If the services are performed partly in Panama (management), does that change source rules or PE exposure?"
+                />
+
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="text-[11px] text-white/45">
+                    Minimal hybrid mode (client-side). Later: DB + messages[] API.
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={runFollowUp}
+                      disabled={followUpLoading || !hasBaselineAnswer}
+                      className="h-10 rounded-xl bg-white px-4 text-sm font-semibold text-black hover:bg-white/90 disabled:opacity-50"
+                    >
+                      {followUpLoading ? "Running…" : "Run follow-up"}
+                    </button>
+                    <button
+                      onClick={() => setFollowUp("")}
+                      disabled={!followUp.trim() || followUpLoading}
+                      className="h-10 rounded-xl border border-white/15 bg-white/5 px-3 text-sm text-white/85 hover:bg-white/10 disabled:opacity-40"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
                 <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
                   <div className="text-xs font-semibold text-white/70">Caveats</div>
                   <div className="mt-2 space-y-1 text-sm text-white/80">
                     {(resp?.consensus?.caveats ?? []).length ? (
-                      (resp?.consensus?.caveats ?? []).slice(0, 6).map((c, i) => <div key={i}>• {c}</div>)
+                      (resp?.consensus?.caveats ?? []).slice(0, 6).map((c, i) => (
+                        <div key={i}>• {c}</div>
+                      ))
                     ) : (
                       <div className="text-white/50">None yet.</div>
                     )}
@@ -843,7 +1101,9 @@ export default function CrosscheckPage() {
 
                   <div className="mt-2 space-y-1 text-sm text-white/80">
                     {(resp?.consensus?.followups ?? []).length ? (
-                      (resp?.consensus?.followups ?? []).slice(0, 6).map((c, i) => <div key={i}>• {c}</div>)
+                      (resp?.consensus?.followups ?? []).slice(0, 6).map((c, i) => (
+                        <div key={i}>• {c}</div>
+                      ))
                     ) : (
                       <div className="text-white/50">None yet.</div>
                     )}
@@ -902,7 +1162,10 @@ export default function CrosscheckPage() {
                 </button>
               </div>
 
-              <div className="mt-4 space-y-2 overflow-auto pr-1" style={{ maxHeight: "calc(100vh - 84px)" }}>
+              <div
+                className="mt-4 space-y-2 overflow-auto pr-1"
+                style={{ maxHeight: "calc(100vh - 84px)" }}
+              >
                 {history.length ? (
                   history.map((h) => (
                     <div
@@ -917,6 +1180,7 @@ export default function CrosscheckPage() {
                         <div className="mt-1 text-[11px] text-white/45">
                           {new Date(h.createdAt).toLocaleDateString()} · {h.jurisdiction || "—"} ·{" "}
                           {h.confidence ? `Conf: ${h.confidence}` : "Conf: —"}
+                          {h.thread?.length ? ` · Turns: ${Math.max(0, Math.floor(h.thread.length / 2))}` : ""}
                         </div>
                       </button>
 
