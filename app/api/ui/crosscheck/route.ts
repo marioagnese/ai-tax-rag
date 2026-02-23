@@ -26,15 +26,13 @@ type CrosscheckUiBody = {
   [k: string]: unknown;
 };
 
-function sanitizeBody(raw: any): CrosscheckUiBody {
-  const b: CrosscheckUiBody = raw && typeof raw === "object" ? raw : {};
+function sanitizeBody(raw: unknown): CrosscheckUiBody {
+  const b: CrosscheckUiBody = raw && typeof raw === "object" ? (raw as any) : {};
 
-  const jurisdiction =
-    typeof b.jurisdiction === "string" ? b.jurisdiction.trim() : undefined;
+  const jurisdiction = typeof b.jurisdiction === "string" ? b.jurisdiction.trim() : undefined;
   const facts = typeof b.facts === "string" ? b.facts : undefined;
   const constraints = typeof b.constraints === "string" ? b.constraints : undefined;
-  const question =
-    typeof b.question === "string" ? b.question.trim() : undefined;
+  const question = typeof b.question === "string" ? b.question.trim() : undefined;
 
   // clamp to sane bounds (avoid accidental huge values)
   const timeoutMs =
@@ -48,7 +46,7 @@ function sanitizeBody(raw: any): CrosscheckUiBody {
       : undefined;
 
   // only forward known inputs
-  const out: CrosscheckUiBody = {
+  return {
     jurisdiction: jurisdiction || undefined,
     facts: typeof facts === "string" ? facts : undefined,
     constraints: typeof constraints === "string" ? constraints : undefined,
@@ -56,8 +54,6 @@ function sanitizeBody(raw: any): CrosscheckUiBody {
     timeoutMs,
     maxTokens,
   };
-
-  return out;
 }
 
 export async function POST(req: NextRequest) {
@@ -69,10 +65,7 @@ export async function POST(req: NextRequest) {
     const body = sanitizeBody(raw);
 
     if (!body.question) {
-      return NextResponse.json(
-        { ok: false, error: "Missing 'question'." },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: "Missing 'question'." }, { status: 400 });
     }
 
     const key = requireEnv("CROSSCHECK_KEY");
@@ -94,8 +87,7 @@ export async function POST(req: NextRequest) {
     return new NextResponse(text, {
       status: upstream.status,
       headers: {
-        "content-type":
-          upstream.headers.get("content-type") || "application/json",
+        "content-type": upstream.headers.get("content-type") || "application/json",
         "cache-control": "no-store, max-age=0",
       },
     });
@@ -103,10 +95,7 @@ export async function POST(req: NextRequest) {
     const msg = err?.message || "Unknown error";
 
     if (msg === "UNAUTHORIZED") {
-      return NextResponse.json(
-        { ok: false, error: "Unauthorized" },
-        { status: 401 }
-      );
+      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
 
     if (msg.startsWith("Missing env var:")) {
