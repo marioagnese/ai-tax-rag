@@ -250,15 +250,31 @@ function downloadText(filename: string, content: string) {
 
 /* ---------------- Local history ---------------- */
 
+// Hard-typed normalization so TS never widens role to `string`,
+// and we never crash if localStorage has older/invalid shapes.
+function normalizeThreadMessage(m: any): ThreadMessage | null {
+  const text = String(m?.text ?? "").trim();
+  if (!text) return null;
+
+  const role: ThreadMessage["role"] = m?.role === "assistant" ? "assistant" : "user";
+  return {
+    id: String(m?.id ?? crypto.randomUUID()),
+    createdAt: Number.isFinite(Number(m?.createdAt)) ? Number(m.createdAt) : Date.now(),
+    role,
+    text,
+  };
+}
+
 function safeParseRuns(): SavedRun[] {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
+
     return parsed
       .filter(Boolean)
-      .map((x: unknown) => {
+      .map((x: unknown): SavedRun => {
         const r = x as Partial<SavedRun> & {
           caveats?: unknown;
           followups?: unknown;
@@ -269,20 +285,14 @@ function safeParseRuns(): SavedRun[] {
         const thread: ThreadMessage[] =
           Array.isArray(r.thread) && r.thread.length
             ? (r.thread as any[])
-                .filter(Boolean)
-                .map((m) => ({
-                  id: String(m.id || crypto.randomUUID()),
-                  createdAt: Number(m.createdAt || Date.now()),
-                  role: m.role === "assistant" ? "assistant" : "user",
-                  text: String(m.text || ""),
-                }))
-                .filter((m) => m.text.trim())
+                .map(normalizeThreadMessage)
+                .filter((m): m is ThreadMessage => !!m)
                 .sort((a, b) => a.createdAt - b.createdAt)
             : [];
 
         return {
           id: String(r.id || crypto.randomUUID()),
-          createdAt: Number(r.createdAt || Date.now()),
+          createdAt: Number.isFinite(Number(r.createdAt)) ? Number(r.createdAt) : Date.now(),
           title: String(r.title || "Untitled"),
           jurisdiction: r.jurisdiction ? String(r.jurisdiction) : undefined,
           facts: r.facts ? String(r.facts) : undefined,
@@ -723,7 +733,9 @@ export default function CrosscheckPage() {
                 Confidence: {confidence}
               </Pill>
             ) : null}
-            {threadTurns ? <Pill>Thread: {Math.max(0, Math.floor(threadTurns / 2))} turns</Pill> : null}
+            {threadTurns ? (
+              <Pill>Thread: {Math.max(0, Math.floor(threadTurns / 2))} turns</Pill>
+            ) : null}
           </div>
         </div>
 
@@ -861,7 +873,11 @@ export default function CrosscheckPage() {
             <Card className="p-0">
               <details open={false} className="p-5">
                 <summary className="cursor-pointer select-none list-none">
-                  <SectionTitle title="Advanced" subtitle="Defaults, run overrides, and debug outputs." right={<Pill>Power users</Pill>} />
+                  <SectionTitle
+                    title="Advanced"
+                    subtitle="Defaults, run overrides, and debug outputs."
+                    right={<Pill>Power users</Pill>}
+                  />
                 </summary>
 
                 <div className="mt-4 space-y-4">
@@ -908,7 +924,9 @@ export default function CrosscheckPage() {
                                 <span className="font-semibold text-white/90">{p.provider}</span> · {p.model}
                               </div>
                               <div className="text-xs text-white/50">
-                                {p.status !== "ok" ? <span className="text-amber-200">({p.status})</span> : null}{" "}
+                                {p.status !== "ok" ? (
+                                  <span className="text-amber-200">({p.status})</span>
+                                ) : null}{" "}
                                 {p.ms}ms
                               </div>
                             </div>
@@ -999,7 +1017,9 @@ export default function CrosscheckPage() {
                 <div className="ml-auto flex flex-wrap items-center gap-2">
                   {resp ? <Pill tone={systemTone as any}>{systemLabel}</Pill> : null}
                   {confidence ? (
-                    <Pill tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}>
+                    <Pill
+                      tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}
+                    >
                       Confidence: {confidence}
                     </Pill>
                   ) : null}
@@ -1034,7 +1054,9 @@ export default function CrosscheckPage() {
                 />
 
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="text-[11px] text-white/45">Minimal hybrid mode (client-side). Later: DB + messages[] API.</div>
+                  <div className="text-[11px] text-white/45">
+                    Minimal hybrid mode (client-side). Later: DB + messages[] API.
+                  </div>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={runFollowUp}
@@ -1059,7 +1081,9 @@ export default function CrosscheckPage() {
                   <div className="text-xs font-semibold text-white/70">Caveats</div>
                   <div className="mt-2 space-y-1 text-sm text-white/80">
                     {(resp?.consensus?.caveats ?? []).length ? (
-                      (resp?.consensus?.caveats ?? []).slice(0, 6).map((c, i) => <div key={i}>• {c}</div>)
+                      (resp?.consensus?.caveats ?? [])
+                        .slice(0, 6)
+                        .map((c, i) => <div key={i}>• {c}</div>)
                     ) : (
                       <div className="text-white/50">None yet.</div>
                     )}
@@ -1081,7 +1105,9 @@ export default function CrosscheckPage() {
 
                   <div className="mt-2 space-y-1 text-sm text-white/80">
                     {(resp?.consensus?.followups ?? []).length ? (
-                      (resp?.consensus?.followups ?? []).slice(0, 6).map((c, i) => <div key={i}>• {c}</div>)
+                      (resp?.consensus?.followups ?? [])
+                        .slice(0, 6)
+                        .map((c, i) => <div key={i}>• {c}</div>)
                     ) : (
                       <div className="text-white/50">None yet.</div>
                     )}
@@ -1138,7 +1164,10 @@ export default function CrosscheckPage() {
                 </button>
               </div>
 
-              <div className="mt-4 space-y-2 overflow-auto pr-1" style={{ maxHeight: "calc(100vh - 84px)" }}>
+              <div
+                className="mt-4 space-y-2 overflow-auto pr-1"
+                style={{ maxHeight: "calc(100vh - 84px)" }}
+              >
                 {history.length ? (
                   history.map((h) => (
                     <div
@@ -1153,7 +1182,9 @@ export default function CrosscheckPage() {
                         <div className="mt-1 text-[11px] text-white/45">
                           {new Date(h.createdAt).toLocaleDateString()} · {h.jurisdiction || "—"} ·{" "}
                           {h.confidence ? `Conf: ${h.confidence}` : "Conf: —"}
-                          {h.thread?.length ? ` · Turns: ${Math.max(0, Math.floor(h.thread.length / 2))}` : ""}
+                          {h.thread?.length
+                            ? ` · Turns: ${Math.max(0, Math.floor(h.thread.length / 2))}`
+                            : ""}
                         </div>
                       </button>
 
