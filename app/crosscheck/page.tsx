@@ -51,7 +51,7 @@ type SavedRun = {
   followups?: string[];
   disagreements?: string[];
   confidence?: "low" | "medium" | "high";
-  // NEW (optional): store case thread on device
+  // optional: store case thread on device
   thread?: ThreadMessage[];
 };
 
@@ -414,10 +414,12 @@ export default function CrosscheckPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
 
-  // NEW: case thread state + follow-up input
   const [thread, setThread] = useState<ThreadMessage[]>([]);
   const [followUp, setFollowUp] = useState("");
   const [followUpLoading, setFollowUpLoading] = useState(false);
+
+  // NEW: reset confirmation modal
+  const [confirmResetOpen, setConfirmResetOpen] = useState(false);
 
   const runFnRef = useRef<() => void>(() => {});
 
@@ -490,6 +492,7 @@ export default function CrosscheckPage() {
       providers: [],
     });
     setError(null);
+    setFollowUp("");
   }
 
   function deleteRun(id: string) {
@@ -533,13 +536,29 @@ export default function CrosscheckPage() {
     setFacts(`${prefix}Missing facts to confirm:\n${block}\n`);
   }
 
-  function resetCaseThreadToCurrentQuestion() {
-    const q = question.trim();
-    if (!q) {
-      setThread([]);
-      return;
-    }
-    setThread([newMsg("user", q)]);
+  // Opens the confirmation modal (instead of resetting immediately)
+  function requestReset() {
+    setConfirmResetOpen(true);
+  }
+
+  // Clean reset (does NOT delete history; only clears current unsaved session)
+  function doFullReset() {
+    setConfirmResetOpen(false);
+
+    setResp(null);
+    setError(null);
+    setThread([]);
+    setFollowUp("");
+    setFollowUpLoading(false);
+    setOutputStyle("answer");
+
+    // Keep defaults and jurisdiction; clear facts/question/runOverrides.
+    setFacts("");
+    setQuestion("");
+    setRunOverrides("");
+
+    // Also clear selection highlight (optional)
+    setSelectedId(null);
   }
 
   async function run() {
@@ -696,6 +715,17 @@ export default function CrosscheckPage() {
   const hasBaselineAnswer = !!resp?.consensus?.answer?.trim();
   const threadTurns = thread.length;
 
+  const hasUnsavedWork = useMemo(() => {
+    return !!(
+      question.trim() ||
+      facts.trim() ||
+      runOverrides.trim() ||
+      followUp.trim() ||
+      thread.length ||
+      resp?.consensus?.answer?.trim()
+    );
+  }, [question, facts, runOverrides, followUp, thread.length, resp]);
+
   return (
     <div className="min-h-screen text-white bg-[#070A12]">
       <div className="pointer-events-none fixed inset-0 opacity-80">
@@ -733,9 +763,7 @@ export default function CrosscheckPage() {
                 Confidence: {confidence}
               </Pill>
             ) : null}
-            {threadTurns ? (
-              <Pill>Thread: {Math.max(0, Math.floor(threadTurns / 2))} turns</Pill>
-            ) : null}
+            {threadTurns ? <Pill>Thread: {Math.max(0, Math.floor(threadTurns / 2))} turns</Pill> : null}
           </div>
         </div>
 
@@ -749,7 +777,8 @@ export default function CrosscheckPage() {
               <select
                 value={jurisdiction}
                 onChange={(e) => setJurisdiction(e.target.value)}
-                className="mt-3 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm outline-none focus:border-white/20"
+                // darker select background for readability
+                className="mt-3 w-full rounded-xl border border-white/10 bg-black px-3 py-2.5 text-sm text-white outline-none focus:border-white/20"
               >
                 <optgroup label="USA">
                   <option value="United States">United States</option>
@@ -819,20 +848,18 @@ export default function CrosscheckPage() {
                 </div>
               ) : null}
 
-              {thread.length > 0 ? (
-                <div className="mt-3 flex items-center justify-between gap-2">
-                  <div className="text-[11px] text-white/45">
-                    Thread is client-side only (saved in History if you Save).
-                  </div>
-                  <button
-                    onClick={resetCaseThreadToCurrentQuestion}
-                    className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
-                    title="Resets the thread to only the original question."
-                  >
-                    Reset thread
-                  </button>
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <div className="text-[11px] text-white/45">
+                  Thread is client-side only (saved in History if you Save).
                 </div>
-              ) : null}
+                <button
+                  onClick={requestReset}
+                  className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
+                  title="Resets the whole current case state."
+                >
+                  Reset thread
+                </button>
+              </div>
             </Card>
 
             <Card className="p-0">
@@ -924,9 +951,7 @@ export default function CrosscheckPage() {
                                 <span className="font-semibold text-white/90">{p.provider}</span> · {p.model}
                               </div>
                               <div className="text-xs text-white/50">
-                                {p.status !== "ok" ? (
-                                  <span className="text-amber-200">({p.status})</span>
-                                ) : null}{" "}
+                                {p.status !== "ok" ? <span className="text-amber-200">({p.status})</span> : null}{" "}
                                 {p.ms}ms
                               </div>
                             </div>
@@ -1017,9 +1042,7 @@ export default function CrosscheckPage() {
                 <div className="ml-auto flex flex-wrap items-center gap-2">
                   {resp ? <Pill tone={systemTone as any}>{systemLabel}</Pill> : null}
                   {confidence ? (
-                    <Pill
-                      tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}
-                    >
+                    <Pill tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}>
                       Confidence: {confidence}
                     </Pill>
                   ) : null}
@@ -1054,9 +1077,7 @@ export default function CrosscheckPage() {
                 />
 
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="text-[11px] text-white/45">
-                    Minimal hybrid mode (client-side). Later: DB + messages[] API.
-                  </div>
+                  <div className="text-[11px] text-white/45">Minimal hybrid mode (client-side). Later: DB + messages[] API.</div>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={runFollowUp}
@@ -1081,9 +1102,7 @@ export default function CrosscheckPage() {
                   <div className="text-xs font-semibold text-white/70">Caveats</div>
                   <div className="mt-2 space-y-1 text-sm text-white/80">
                     {(resp?.consensus?.caveats ?? []).length ? (
-                      (resp?.consensus?.caveats ?? [])
-                        .slice(0, 6)
-                        .map((c, i) => <div key={i}>• {c}</div>)
+                      (resp?.consensus?.caveats ?? []).slice(0, 6).map((c, i) => <div key={i}>• {c}</div>)
                     ) : (
                       <div className="text-white/50">None yet.</div>
                     )}
@@ -1105,9 +1124,7 @@ export default function CrosscheckPage() {
 
                   <div className="mt-2 space-y-1 text-sm text-white/80">
                     {(resp?.consensus?.followups ?? []).length ? (
-                      (resp?.consensus?.followups ?? [])
-                        .slice(0, 6)
-                        .map((c, i) => <div key={i}>• {c}</div>)
+                      (resp?.consensus?.followups ?? []).slice(0, 6).map((c, i) => <div key={i}>• {c}</div>)
                     ) : (
                       <div className="text-white/50">None yet.</div>
                     )}
@@ -1138,6 +1155,44 @@ export default function CrosscheckPage() {
           </div>
         </div>
 
+        {/* Reset confirmation modal */}
+        {confirmResetOpen ? (
+          <div
+            className="fixed inset-0 z-50"
+            role="dialog"
+            aria-modal="true"
+            onMouseDown={() => setConfirmResetOpen(false)}
+          >
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+            <div
+              className="absolute left-1/2 top-1/2 w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-white/10 bg-[#070A12]/95 p-5 shadow-2xl"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div className="text-sm font-semibold text-white/90">Reset current case?</div>
+              <div className="mt-2 text-xs text-white/55">
+                This will clear the current question, facts, overrides, output, and follow-up thread.
+                {hasUnsavedWork ? " If you haven’t saved, this conversation will be lost." : ""}
+              </div>
+
+              <div className="mt-4 flex items-center justify-end gap-2">
+                <button
+                  onClick={() => setConfirmResetOpen(false)}
+                  className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={doFullReset}
+                  className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-black hover:bg-white/90"
+                >
+                  Yes, reset
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {/* History drawer */}
         {historyOpen ? (
           <div
             className="fixed inset-0 z-50"
@@ -1164,10 +1219,7 @@ export default function CrosscheckPage() {
                 </button>
               </div>
 
-              <div
-                className="mt-4 space-y-2 overflow-auto pr-1"
-                style={{ maxHeight: "calc(100vh - 84px)" }}
-              >
+              <div className="mt-4 space-y-2 overflow-auto pr-1" style={{ maxHeight: "calc(100vh - 84px)" }}>
                 {history.length ? (
                   history.map((h) => (
                     <div
@@ -1182,9 +1234,7 @@ export default function CrosscheckPage() {
                         <div className="mt-1 text-[11px] text-white/45">
                           {new Date(h.createdAt).toLocaleDateString()} · {h.jurisdiction || "—"} ·{" "}
                           {h.confidence ? `Conf: ${h.confidence}` : "Conf: —"}
-                          {h.thread?.length
-                            ? ` · Turns: ${Math.max(0, Math.floor(h.thread.length / 2))}`
-                            : ""}
+                          {h.thread?.length ? ` · Turns: ${Math.max(0, Math.floor(h.thread.length / 2))}` : ""}
                         </div>
                       </button>
 
