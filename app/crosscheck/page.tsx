@@ -739,10 +739,9 @@ export default function CrosscheckPage() {
             <img
               src="/taxaipro-logo.png"
               alt="TaxAiPro"
-              className="h-10 w-10 rounded-xl object-contain border border-white/10 bg-white/5"
+              className="h-30 w-30 rounded-xl object-contain border border-white/10 bg-white/5"
             />
             <div>
-              <div className="text-sm font-semibold leading-none">TaxAiPro</div>
               <div className="mt-1 text-xs text-white/55">Multi Model Conservative Tax Triage</div>
               <div className="mt-1 text-[10px] text-white/35">Build: {BUILD_WATERMARK}</div>
             </div>
