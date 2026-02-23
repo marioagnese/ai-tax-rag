@@ -57,6 +57,10 @@ type SavedRun = {
 
 const LS_KEY = "taxaipro_runs_v1";
 
+// Visible watermark to confirm prod deployment updated.
+// You can delete this once you see it live.
+const BUILD_WATERMARK = "FOLLOWUP_UI_ENABLED";
+
 /* ---------------- UI primitives ---------------- */
 
 function cn(...xs: Array<string | false | null | undefined>) {
@@ -80,9 +84,7 @@ function Pill({
       : "border-white/10 bg-white/5 text-white/80";
 
   return (
-    <span
-      className={cn("inline-flex items-center rounded-full border px-2.5 py-1 text-xs", styles)}
-    >
+    <span className={cn("inline-flex items-center rounded-full border px-2.5 py-1 text-xs", styles)}>
       {children}
     </span>
   );
@@ -311,8 +313,7 @@ function persistRuns(runs: SavedRun[]) {
 function buildConstraints(globalDefaults: string, runOverrides: string) {
   const g = (globalDefaults || "").trim();
   const r = (runOverrides || "").trim();
-  if (g && r)
-    return ["GLOBAL DEFAULTS:", g, "", "RUN OVERRIDES (ONLY FOR THIS RUN):", r].join("\n");
+  if (g && r) return ["GLOBAL DEFAULTS:", g, "", "RUN OVERRIDES (ONLY FOR THIS RUN):", r].join("\n");
   if (g) return g;
   if (r) return r;
   return undefined;
@@ -340,8 +341,6 @@ function buildCompositeFollowUpPrompt(args: {
 }) {
   const { originalQuestion, priorConsensusAnswer, followUpQuestion } = args;
 
-  // Intentionally simple + conservative. We keep facts/jurisdiction passed via existing fields.
-  // This is the minimal “hybrid thread” step before a real messages[] API.
   return [
     "You are continuing the same tax case. Keep the original fact pattern unless the follow-up changes it.",
     "",
@@ -362,10 +361,14 @@ function buildCompositeFollowUpPrompt(args: {
 }
 
 function buildQuestionForFormatting(thread: ThreadMessage[], fallbackQuestion: string) {
-  const userQs = thread.filter((m) => m.role === "user").map((m) => m.text.trim()).filter(Boolean);
+  const userQs = thread
+    .filter((m) => m.role === "user")
+    .map((m) => m.text.trim())
+    .filter(Boolean);
+
   if (!userQs.length) return fallbackQuestion.trim();
   if (userQs.length === 1) return userQs[0];
-  // Compact thread view for memo/email “Question:” section
+
   const lines: string[] = [];
   lines.push(userQs[0]);
   lines.push("");
@@ -424,7 +427,6 @@ export default function CrosscheckPage() {
   const confidence = resp?.consensus?.confidence;
   const canSave = !!resp?.consensus?.answer?.trim();
 
-  // Effective “question” used for memo/email display (includes follow-ups)
   const effectiveQuestionForOutput = useMemo(
     () => buildQuestionForFormatting(thread, question),
     [thread, question]
@@ -455,7 +457,6 @@ export default function CrosscheckPage() {
     setRunOverrides(r.runOverrides || "");
     setQuestion(r.question || "");
 
-    // Restore thread if present, else synthesize minimal 2-turn thread from saved Q/A
     const restoredThread =
       r.thread && r.thread.length
         ? r.thread
@@ -491,7 +492,6 @@ export default function CrosscheckPage() {
   function saveCurrentRun() {
     if (!canSave) return;
 
-    // Save current thread (optional) to keep a per-case follow-up trail on device
     const run: SavedRun = {
       id: crypto.randomUUID(),
       createdAt: Date.now(),
@@ -542,7 +542,6 @@ export default function CrosscheckPage() {
       return;
     }
 
-    // Starting a new “case”: reset thread to the base question
     setThread([newMsg("user", q)]);
 
     setLoading(true);
@@ -610,7 +609,6 @@ export default function CrosscheckPage() {
 
     setFollowUpLoading(true);
 
-    // Optimistically append follow-up user msg to thread
     const userMsg = newMsg("user", follow);
     setThread((t) => [...t, userMsg]);
 
@@ -690,14 +688,12 @@ export default function CrosscheckPage() {
 
   return (
     <div className="min-h-screen text-white bg-[#070A12]">
-      {/* Premium background glow */}
       <div className="pointer-events-none fixed inset-0 opacity-80">
         <div className="absolute -top-48 left-1/2 h-[560px] w-[560px] -translate-x-1/2 rounded-full bg-white/10 blur-3xl" />
         <div className="absolute bottom-[-220px] right-[-140px] h-[560px] w-[560px] rounded-full bg-white/5 blur-3xl" />
       </div>
 
       <div className="relative mx-auto max-w-7xl px-4 py-6">
-        {/* Header */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <img
@@ -708,6 +704,7 @@ export default function CrosscheckPage() {
             <div>
               <div className="text-sm font-semibold leading-none">TaxAiPro</div>
               <div className="mt-1 text-xs text-white/55">Multi Model Conservative Tax Triage</div>
+              <div className="mt-1 text-[10px] text-white/35">Build: {BUILD_WATERMARK}</div>
             </div>
           </div>
 
@@ -730,9 +727,7 @@ export default function CrosscheckPage() {
           </div>
         </div>
 
-        {/* Main layout: Guided Input (left) + Output (right, dominant) */}
         <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-12">
-          {/* LEFT: Guided input */}
           <div className="lg:col-span-4 space-y-4">
             <Card className="p-5">
               <SectionTitle
@@ -812,10 +807,11 @@ export default function CrosscheckPage() {
                 </div>
               ) : null}
 
-              {/* NEW: quick action to realign thread to the base question */}
               {thread.length > 0 ? (
                 <div className="mt-3 flex items-center justify-between gap-2">
-                  <div className="text-[11px] text-white/45">Thread is client-side only (saved in History if you Save).</div>
+                  <div className="text-[11px] text-white/45">
+                    Thread is client-side only (saved in History if you Save).
+                  </div>
                   <button
                     onClick={resetCaseThreadToCurrentQuestion}
                     className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
@@ -865,11 +861,7 @@ export default function CrosscheckPage() {
             <Card className="p-0">
               <details open={false} className="p-5">
                 <summary className="cursor-pointer select-none list-none">
-                  <SectionTitle
-                    title="Advanced"
-                    subtitle="Defaults, run overrides, and debug outputs."
-                    right={<Pill>Power users</Pill>}
-                  />
+                  <SectionTitle title="Advanced" subtitle="Defaults, run overrides, and debug outputs." right={<Pill>Power users</Pill>} />
                 </summary>
 
                 <div className="mt-4 space-y-4">
@@ -916,9 +908,7 @@ export default function CrosscheckPage() {
                                 <span className="font-semibold text-white/90">{p.provider}</span> · {p.model}
                               </div>
                               <div className="text-xs text-white/50">
-                                {p.status !== "ok" ? (
-                                  <span className="text-amber-200">({p.status})</span>
-                                ) : null}{" "}
+                                {p.status !== "ok" ? <span className="text-amber-200">({p.status})</span> : null}{" "}
                                 {p.ms}ms
                               </div>
                             </div>
@@ -935,7 +925,6 @@ export default function CrosscheckPage() {
             </Card>
           </div>
 
-          {/* RIGHT: Output (dominant) */}
           <div className="lg:col-span-8 space-y-4">
             <Card className="p-5">
               <SectionTitle
@@ -1010,23 +999,20 @@ export default function CrosscheckPage() {
                 <div className="ml-auto flex flex-wrap items-center gap-2">
                   {resp ? <Pill tone={systemTone as any}>{systemLabel}</Pill> : null}
                   {confidence ? (
-                    <Pill
-                      tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}
-                    >
+                    <Pill tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}>
                       Confidence: {confidence}
                     </Pill>
                   ) : null}
                 </div>
               </div>
 
-              {/* Big answer area */}
               <div className="mt-4 rounded-2xl border border-white/10 bg-black/35 p-6 min-h-[480px]">
                 <pre className="whitespace-pre-wrap text-[15px] leading-relaxed text-white/92">
                   {displayText || "—"}
                 </pre>
               </div>
 
-              {/* NEW: Follow-up (hybrid thread) */}
+              {/* Follow-up card */}
               <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -1035,11 +1021,9 @@ export default function CrosscheckPage() {
                       Continues the same case: original question + last answer + your follow-up.
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Pill tone={hasBaselineAnswer ? "good" : "neutral"}>
-                      {hasBaselineAnswer ? "Case: ready" : "Run baseline first"}
-                    </Pill>
-                  </div>
+                  <Pill tone={hasBaselineAnswer ? "good" : "neutral"}>
+                    {hasBaselineAnswer ? "Case: ready" : "Run baseline first"}
+                  </Pill>
                 </div>
 
                 <textarea
@@ -1050,9 +1034,7 @@ export default function CrosscheckPage() {
                 />
 
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="text-[11px] text-white/45">
-                    Minimal hybrid mode (client-side). Later: DB + messages[] API.
-                  </div>
+                  <div className="text-[11px] text-white/45">Minimal hybrid mode (client-side). Later: DB + messages[] API.</div>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={runFollowUp}
@@ -1077,9 +1059,7 @@ export default function CrosscheckPage() {
                   <div className="text-xs font-semibold text-white/70">Caveats</div>
                   <div className="mt-2 space-y-1 text-sm text-white/80">
                     {(resp?.consensus?.caveats ?? []).length ? (
-                      (resp?.consensus?.caveats ?? []).slice(0, 6).map((c, i) => (
-                        <div key={i}>• {c}</div>
-                      ))
+                      (resp?.consensus?.caveats ?? []).slice(0, 6).map((c, i) => <div key={i}>• {c}</div>)
                     ) : (
                       <div className="text-white/50">None yet.</div>
                     )}
@@ -1101,9 +1081,7 @@ export default function CrosscheckPage() {
 
                   <div className="mt-2 space-y-1 text-sm text-white/80">
                     {(resp?.consensus?.followups ?? []).length ? (
-                      (resp?.consensus?.followups ?? []).slice(0, 6).map((c, i) => (
-                        <div key={i}>• {c}</div>
-                      ))
+                      (resp?.consensus?.followups ?? []).slice(0, 6).map((c, i) => <div key={i}>• {c}</div>)
                     ) : (
                       <div className="text-white/50">None yet.</div>
                     )}
@@ -1116,7 +1094,6 @@ export default function CrosscheckPage() {
               </p>
             </Card>
 
-            {/* Optional: show disagreements only when present */}
             {(resp?.consensus?.disagreements ?? []).length ? (
               <Card className="p-5">
                 <SectionTitle
@@ -1135,7 +1112,6 @@ export default function CrosscheckPage() {
           </div>
         </div>
 
-        {/* History drawer */}
         {historyOpen ? (
           <div
             className="fixed inset-0 z-50"
@@ -1162,10 +1138,7 @@ export default function CrosscheckPage() {
                 </button>
               </div>
 
-              <div
-                className="mt-4 space-y-2 overflow-auto pr-1"
-                style={{ maxHeight: "calc(100vh - 84px)" }}
-              >
+              <div className="mt-4 space-y-2 overflow-auto pr-1" style={{ maxHeight: "calc(100vh - 84px)" }}>
                 {history.length ? (
                   history.map((h) => (
                     <div
