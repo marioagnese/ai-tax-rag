@@ -52,14 +52,12 @@ type SavedRun = {
   followups?: string[];
   disagreements?: string[];
   confidence?: "low" | "medium" | "high";
-  // optional: store case thread on device
   thread?: ThreadMessage[];
 };
 
 const LS_KEY = "taxaipro_runs_v1";
 
 // Visible watermark to confirm prod deployment updated.
-// You can delete this once you see it live.
 const BUILD_WATERMARK = "FOLLOWUP_UI_ENABLED";
 
 // Keep tier locally for now (until Stripe/DB-backed tiers).
@@ -178,7 +176,13 @@ function formatMemo(args: {
   return lines.join("\n");
 }
 
-function formatEmail(args: { jurisdiction?: string; question: string; answer?: string; caveats?: string[]; followups?: string[] }) {
+function formatEmail(args: {
+  jurisdiction?: string;
+  question: string;
+  answer?: string;
+  caveats?: string[];
+  followups?: string[];
+}) {
   const { jurisdiction, question, answer, caveats = [], followups = [] } = args;
 
   const lines: string[] = [];
@@ -228,8 +232,6 @@ function downloadText(filename: string, content: string) {
 
 /* ---------------- Local history ---------------- */
 
-// Hard-typed normalization so TS never widens role to `string`,
-// and we never crash if localStorage has older/invalid shapes.
 function normalizeThreadMessage(m: any): ThreadMessage | null {
   const text = String(m?.text ?? "").trim();
   if (!text) return null;
@@ -281,7 +283,10 @@ function safeParseRuns(): SavedRun[] {
           caveats: Array.isArray(r.caveats) ? (r.caveats as any[]).map(String) : [],
           followups: Array.isArray(r.followups) ? (r.followups as any[]).map(String) : [],
           disagreements: Array.isArray(r.disagreements) ? (r.disagreements as any[]).map(String) : [],
-          confidence: r.confidence === "low" || r.confidence === "medium" || r.confidence === "high" ? r.confidence : undefined,
+          confidence:
+            r.confidence === "low" || r.confidence === "medium" || r.confidence === "high"
+              ? r.confidence
+              : undefined,
           thread,
         };
       })
@@ -319,7 +324,11 @@ function newMsg(role: "user" | "assistant", text: string): ThreadMessage {
   };
 }
 
-function buildCompositeFollowUpPrompt(args: { originalQuestion: string; priorConsensusAnswer: string; followUpQuestion: string }) {
+function buildCompositeFollowUpPrompt(args: {
+  originalQuestion: string;
+  priorConsensusAnswer: string;
+  followUpQuestion: string;
+}) {
   const { originalQuestion, priorConsensusAnswer, followUpQuestion } = args;
 
   return [
@@ -390,6 +399,30 @@ function tierPrice(t: Tier) {
   return "$0";
 }
 
+/* ---------------- Rate limit UI (from response headers) ---------------- */
+
+type RateUi = {
+  tier?: Tier;
+  limit?: number; // -1 unlimited
+  used?: number;
+  remaining?: number; // -1 unlimited
+  resetAt?: string; // ISO
+};
+
+function parseIntOrUndef(x: string | null): number | undefined {
+  if (x == null) return undefined;
+  const n = Number.parseInt(x, 10);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function formatResetLocal(iso?: string) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return null;
+  // Show local time
+  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
 /* ---------------- Page ---------------- */
 
 export default function CrosscheckPage() {
@@ -421,12 +454,14 @@ export default function CrosscheckPage() {
   const [followUp, setFollowUp] = useState("");
   const [followUpLoading, setFollowUpLoading] = useState(false);
 
-  // NEW: reset confirmation modal
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
 
-  // NEW: tier + upgrade prompt
+  // tier + plans modal
   const [tier, setTier] = useState<Tier>("0");
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+
+  // NEW: live rate limit state (server authoritative)
+  const [rate, setRate] = useState<RateUi>({});
 
   const runFnRef = useRef<() => void>(() => {});
 
@@ -439,12 +474,18 @@ export default function CrosscheckPage() {
   const failed = resp?.meta?.failed ?? [];
   const runtimeMs = resp?.meta?.runtime_ms ?? null;
 
-  const constraints = useMemo(() => buildConstraints(globalDefaults, runOverrides), [globalDefaults, runOverrides]);
+  const constraints = useMemo(
+    () => buildConstraints(globalDefaults, runOverrides),
+    [globalDefaults, runOverrides]
+  );
 
   const confidence = resp?.consensus?.confidence;
   const canSave = !!resp?.consensus?.answer?.trim();
 
-  const effectiveQuestionForOutput = useMemo(() => buildQuestionForFormatting(thread, question), [thread, question]);
+  const effectiveQuestionForOutput = useMemo(
+    () => buildQuestionForFormatting(thread, question),
+    [thread, question]
+  );
 
   const displayText = useMemo(() => {
     const base = {
@@ -538,12 +579,10 @@ export default function CrosscheckPage() {
     setFacts(`${prefix}Missing facts to confirm:\n${block}\n`);
   }
 
-  // Opens the confirmation modal (instead of resetting immediately)
   function requestReset() {
     setConfirmResetOpen(true);
   }
 
-  // Clean reset (does NOT delete history; only clears current unsaved session)
   function doFullReset() {
     setConfirmResetOpen(false);
 
@@ -554,21 +593,43 @@ export default function CrosscheckPage() {
     setFollowUpLoading(false);
     setOutputStyle("answer");
 
-    // Keep defaults and jurisdiction; clear facts/question/runOverrides.
     setFacts("");
     setQuestion("");
     setRunOverrides("");
 
-    // Also clear selection highlight (optional)
     setSelectedId(null);
   }
 
-  // NEW: update tier locally (until Stripe)
   function setTierLocal(next: Tier) {
     try {
       localStorage.setItem(LS_TIER_KEY, next);
     } catch {}
     setTier(next);
+  }
+
+  function updateRateFromHeaders(h: Headers) {
+    const next: RateUi = {
+      tier: (h.get("x-taxaipro-tier") as Tier | null) || undefined,
+      limit: parseIntOrUndef(h.get("x-ratelimit-limit")),
+      used: parseIntOrUndef(h.get("x-ratelimit-used")),
+      remaining: parseIntOrUndef(h.get("x-ratelimit-remaining")),
+      resetAt: h.get("x-ratelimit-reset") || undefined,
+    };
+
+    // Merge (don’t wipe old values if headers missing)
+    setRate((prev) => ({ ...prev, ...next }));
+
+    // If server tells us tier, keep UI consistent
+    if (next.tier === "0" || next.tier === "1" || next.tier === "2") {
+      setTierLocal(next.tier);
+    }
+
+    // Proactive upgrade prompt:
+    // - remaining === 0 => open plans
+    // - remaining === 1 => optional (subtle), do NOT auto-open
+    if (typeof next.remaining === "number" && next.remaining === 0) {
+      setUpgradeOpen(true);
+    }
   }
 
   async function run() {
@@ -589,8 +650,7 @@ export default function CrosscheckPage() {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          // TEMP: server reads x-taxaipro-tier (0|1|2)
-          "x-taxaipro-tier": tier,
+          "x-taxaipro-tier": tier, // TEMP: server reads this header
         },
         body: JSON.stringify({
           jurisdiction: jurisdiction.trim() || undefined,
@@ -599,6 +659,9 @@ export default function CrosscheckPage() {
           question: q,
         }),
       });
+
+      // Always read ratelimit headers (even on error)
+      updateRateFromHeaders(r.headers);
 
       const text = await r.text();
       let json: unknown = null;
@@ -613,7 +676,6 @@ export default function CrosscheckPage() {
       if (!r.ok || parsed?.ok === false) {
         setResp(parsed);
 
-        // If rate limited, show upgrade modal
         if (r.status === 429) setUpgradeOpen(true);
 
         setError(parsed?.error || `Request failed (${r.status})`);
@@ -623,9 +685,7 @@ export default function CrosscheckPage() {
       setResp(parsed);
 
       const ans = (parsed?.consensus?.answer || "").trim();
-      if (ans) {
-        setThread((t) => [...t, newMsg("assistant", ans)]);
-      }
+      if (ans) setThread((t) => [...t, newMsg("assistant", ans)]);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Request failed.";
       setError(msg);
@@ -680,6 +740,8 @@ export default function CrosscheckPage() {
         }),
       });
 
+      updateRateFromHeaders(r.headers);
+
       const text = await r.text();
       let json: unknown = null;
       try {
@@ -700,9 +762,7 @@ export default function CrosscheckPage() {
       setResp(parsed);
 
       const ans = (parsed?.consensus?.answer || "").trim();
-      if (ans) {
-        setThread((t) => [...t, newMsg("assistant", ans)]);
-      }
+      if (ans) setThread((t) => [...t, newMsg("assistant", ans)]);
       setFollowUp("");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Request failed.";
@@ -722,7 +782,8 @@ export default function CrosscheckPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const systemTone = failed.length > 0 && succeeded.length === 0 ? "bad" : failed.length > 0 ? "warn" : "good";
+  const systemTone =
+    failed.length > 0 && succeeded.length === 0 ? "bad" : failed.length > 0 ? "warn" : "good";
 
   const systemLabel =
     failed.length > 0 && succeeded.length === 0
@@ -747,6 +808,27 @@ export default function CrosscheckPage() {
     );
   }, [question, facts, runOverrides, followUp, thread.length, resp]);
 
+  // Display “runs left” from server (authoritative)
+  const runsLeft =
+    typeof rate.remaining === "number"
+      ? rate.remaining === -1
+        ? "∞"
+        : String(rate.remaining)
+      : null;
+
+  const resetLocal = formatResetLocal(rate.resetAt);
+
+  const runsPillTone =
+    typeof rate.remaining === "number"
+      ? rate.remaining === -1
+        ? "good"
+        : rate.remaining <= 0
+        ? "bad"
+        : rate.remaining <= 1
+        ? "warn"
+        : "neutral"
+      : "neutral";
+
   return (
     <div className="min-h-screen text-white bg-[#070A12]">
       <div className="pointer-events-none fixed inset-0 opacity-80">
@@ -768,6 +850,13 @@ export default function CrosscheckPage() {
               <div className="mt-1 text-[11px] text-white/55">
                 {tierLabel(tier)} · {tierPrice(tier)} · {tierDailyRuns(tier)} runs
               </div>
+
+              {runsLeft ? (
+                <div className="mt-1 text-[11px] text-white/55">
+                  Runs left today: <span className="text-white/85">{runsLeft}</span>
+                  {resetLocal ? <span className="text-white/40"> · Resets {resetLocal}</span> : null}
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -786,6 +875,9 @@ export default function CrosscheckPage() {
             >
               Plans
             </button>
+
+            {runsLeft ? <Pill tone={runsPillTone as any}>Runs left: {runsLeft}</Pill> : null}
+            {resetLocal ? <Pill>Resets: {resetLocal}</Pill> : null}
 
             <Pill>⌘/Ctrl + Enter</Pill>
             {runtimeMs != null ? <Pill>{runtimeMs}ms</Pill> : null}
@@ -877,7 +969,9 @@ export default function CrosscheckPage() {
               ) : null}
 
               <div className="mt-3 flex items-center justify-between gap-2">
-                <div className="text-[11px] text-white/45">Thread is client-side only (saved in History if you Save).</div>
+                <div className="text-[11px] text-white/45">
+                  Thread is client-side only (saved in History if you Save).
+                </div>
                 <button
                   onClick={requestReset}
                   className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
@@ -926,7 +1020,11 @@ export default function CrosscheckPage() {
             <Card className="p-0">
               <details open={false} className="p-5">
                 <summary className="cursor-pointer select-none list-none">
-                  <SectionTitle title="Advanced" subtitle="Defaults, run overrides, and debug outputs." right={<Pill>Power users</Pill>} />
+                  <SectionTitle
+                    title="Advanced"
+                    subtitle="Defaults, run overrides, and debug outputs."
+                    right={<Pill>Power users</Pill>}
+                  />
                 </summary>
 
                 <div className="mt-4 space-y-4">
@@ -962,7 +1060,9 @@ export default function CrosscheckPage() {
 
                   {resp?.providers?.length ? (
                     <details className="rounded-xl border border-white/10 bg-black/20 p-3">
-                      <summary className="cursor-pointer text-xs font-semibold text-white/70">Debug: provider outputs</summary>
+                      <summary className="cursor-pointer text-xs font-semibold text-white/70">
+                        Debug: provider outputs
+                      </summary>
                       <div className="mt-3 space-y-3">
                         {resp.providers.map((p, idx) => (
                           <div key={idx} className="rounded-xl border border-white/10 bg-black/30 p-3">
@@ -971,10 +1071,13 @@ export default function CrosscheckPage() {
                                 <span className="font-semibold text-white/90">{p.provider}</span> · {p.model}
                               </div>
                               <div className="text-xs text-white/50">
-                                {p.status !== "ok" ? <span className="text-amber-200">({p.status})</span> : null} {p.ms}ms
+                                {p.status !== "ok" ? <span className="text-amber-200">({p.status})</span> : null}{" "}
+                                {p.ms}ms
                               </div>
                             </div>
-                            <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">{p.status === "ok" ? p.text : p.error}</div>
+                            <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">
+                              {p.status === "ok" ? p.text : p.error}
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -996,7 +1099,9 @@ export default function CrosscheckPage() {
                       onClick={() => setOutputStyle("answer")}
                       className={cn(
                         "rounded-full px-3 py-1 text-xs border",
-                        outputStyle === "answer" ? "bg-white text-black border-white" : "border-white/15 text-white/80 hover:bg-white/5"
+                        outputStyle === "answer"
+                          ? "bg-white text-black border-white"
+                          : "border-white/15 text-white/80 hover:bg-white/5"
                       )}
                     >
                       Answer
@@ -1005,7 +1110,9 @@ export default function CrosscheckPage() {
                       onClick={() => setOutputStyle("memo")}
                       className={cn(
                         "rounded-full px-3 py-1 text-xs border",
-                        outputStyle === "memo" ? "bg-white text-black border-white" : "border-white/15 text-white/80 hover:bg-white/5"
+                        outputStyle === "memo"
+                          ? "bg-white text-black border-white"
+                          : "border-white/15 text-white/80 hover:bg-white/5"
                       )}
                     >
                       Memo
@@ -1014,7 +1121,9 @@ export default function CrosscheckPage() {
                       onClick={() => setOutputStyle("email")}
                       className={cn(
                         "rounded-full px-3 py-1 text-xs border",
-                        outputStyle === "email" ? "bg-white text-black border-white" : "border-white/15 text-white/80 hover:bg-white/5"
+                        outputStyle === "email"
+                          ? "bg-white text-black border-white"
+                          : "border-white/15 text-white/80 hover:bg-white/5"
                       )}
                     >
                       Email
@@ -1037,7 +1146,12 @@ export default function CrosscheckPage() {
 
                 <button
                   onClick={() => {
-                    const base = outputStyle === "memo" ? "taxaipro-memo" : outputStyle === "email" ? "taxaipro-email" : "taxaipro-answer";
+                    const base =
+                      outputStyle === "memo"
+                        ? "taxaipro-memo"
+                        : outputStyle === "email"
+                        ? "taxaipro-email"
+                        : "taxaipro-answer";
                     downloadText(`${base}.txt`, displayText);
                   }}
                   className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
@@ -1056,7 +1170,9 @@ export default function CrosscheckPage() {
               </div>
 
               <div className="mt-4 rounded-2xl border border-white/10 bg-black/35 p-6 min-h-[480px]">
-                <pre className="whitespace-pre-wrap text-[15px] leading-relaxed text-white/92">{displayText || "—"}</pre>
+                <pre className="whitespace-pre-wrap text-[15px] leading-relaxed text-white/92">
+                  {displayText || "—"}
+                </pre>
               </div>
 
               {/* Follow-up card */}
@@ -1068,7 +1184,9 @@ export default function CrosscheckPage() {
                       Continues the same case: original question + last answer + your follow-up.
                     </div>
                   </div>
-                  <Pill tone={hasBaselineAnswer ? "good" : "neutral"}>{hasBaselineAnswer ? "Case: ready" : "Run baseline first"}</Pill>
+                  <Pill tone={hasBaselineAnswer ? "good" : "neutral"}>
+                    {hasBaselineAnswer ? "Case: ready" : "Run baseline first"}
+                  </Pill>
                 </div>
 
                 <textarea
@@ -1079,7 +1197,9 @@ export default function CrosscheckPage() {
                 />
 
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="text-[11px] text-white/45">Minimal hybrid mode (client-side). Later: DB + messages[] API.</div>
+                  <div className="text-[11px] text-white/45">
+                    Client-side thread for now. Later: DB + messages[] API.
+                  </div>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={runFollowUp}
@@ -1134,12 +1254,14 @@ export default function CrosscheckPage() {
                 </div>
               </div>
 
-              <p className="mt-4 text-[11px] text-white/40">TaxAiPro generates drafts for triage only — not legal or tax advice.</p>
+              <p className="mt-4 text-[11px] text-white/40">
+                TaxAiPro generates drafts for triage only — not legal or tax advice.
+              </p>
             </Card>
 
             {(resp?.consensus?.disagreements ?? []).length ? (
               <Card className="p-5">
-                <SectionTitle title="Disagreements" subtitle="Where models differed. Consider adding facts and re-running." />
+                <SectionTitle title="Disagreements" subtitle="Where models differed. Add facts and re-run." />
                 <div className="mt-3 space-y-2 text-sm text-white/80">
                   {(resp?.consensus?.disagreements ?? []).map((d, i) => (
                     <div key={i} className="rounded-xl border border-white/10 bg-black/25 p-3">
@@ -1164,8 +1286,14 @@ export default function CrosscheckPage() {
                 <div>
                   <div className="text-sm font-semibold text-white/90">Plans & tiers</div>
                   <div className="mt-1 text-xs text-white/55">
-                    Everyone starts free. Upgrade anytime (manual for now; Stripe wiring next).
+                    Upgrade increases daily runs. Resets daily (UTC midnight).
                   </div>
+                  {runsLeft ? (
+                    <div className="mt-2 text-[11px] text-white/55">
+                      Runs left today: <span className="text-white/85">{runsLeft}</span>
+                      {resetLocal ? <span className="text-white/40"> · Resets {resetLocal}</span> : null}
+                    </div>
+                  ) : null}
                 </div>
                 <button onClick={() => setUpgradeOpen(false)} className="text-white/60 hover:text-white" aria-label="Close">
                   ✕
@@ -1173,7 +1301,6 @@ export default function CrosscheckPage() {
               </div>
 
               <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-                {/* Tier 0 */}
                 <div className={cn("rounded-2xl border p-4", tier === "0" ? "border-white/25 bg-white/5" : "border-white/10 bg-black/25")}>
                   <div className="text-xs font-semibold text-white/85">Tier 0 — Simple</div>
                   <div className="mt-1 text-2xl font-semibold text-white">$0</div>
@@ -1182,14 +1309,15 @@ export default function CrosscheckPage() {
                     onClick={() => setTierLocal("0")}
                     className={cn(
                       "mt-3 w-full rounded-xl px-3 py-2 text-xs font-semibold",
-                      tier === "0" ? "bg-white text-black" : "border border-white/15 bg-white/5 text-white/85 hover:bg-white/10"
+                      tier === "0"
+                        ? "bg-white text-black"
+                        : "border border-white/15 bg-white/5 text-white/85 hover:bg-white/10"
                     )}
                   >
                     {tier === "0" ? "Current" : "Start free"}
                   </button>
                 </div>
 
-                {/* Tier 1 */}
                 <div className={cn("rounded-2xl border p-4", tier === "1" ? "border-white/25 bg-white/5" : "border-white/10 bg-black/25")}>
                   <div className="text-xs font-semibold text-white/85">Tier 1 — Pro</div>
                   <div className="mt-1 text-2xl font-semibold text-white">$3.99</div>
@@ -1206,7 +1334,6 @@ export default function CrosscheckPage() {
                   </button>
                 </div>
 
-                {/* Tier 2 */}
                 <div className={cn("rounded-2xl border p-4", tier === "2" ? "border-white/25 bg-white/5" : "border-white/10 bg-black/25")}>
                   <div className="text-xs font-semibold text-white/85">Tier 2 — Unlimited</div>
                   <div className="mt-1 text-2xl font-semibold text-white">$15.99</div>
@@ -1225,7 +1352,7 @@ export default function CrosscheckPage() {
               </div>
 
               <div className="mt-4 rounded-xl border border-white/10 bg-black/25 p-3 text-[11px] text-white/55">
-                Note: Tier enforcement is active on the Crosscheck endpoint. Payments & automatic upgrades will be wired via Stripe next.
+                In this version, the server enforces daily limits and returns “runs left” in headers. Stripe automation is next.
               </div>
             </div>
           </div>
@@ -1252,7 +1379,10 @@ export default function CrosscheckPage() {
                 >
                   Cancel
                 </button>
-                <button onClick={doFullReset} className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-black hover:bg-white/90">
+                <button
+                  onClick={doFullReset}
+                  className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-black hover:bg-white/90"
+                >
                   Yes, reset
                 </button>
               </div>
@@ -1283,7 +1413,10 @@ export default function CrosscheckPage() {
                   history.map((h) => (
                     <div
                       key={h.id}
-                      className={cn("rounded-xl border border-white/10 bg-black/25 p-3", selectedId === h.id && "ring-1 ring-white/20")}
+                      className={cn(
+                        "rounded-xl border border-white/10 bg-black/25 p-3",
+                        selectedId === h.id && "ring-1 ring-white/20"
+                      )}
                     >
                       <button onClick={() => loadRun(h)} className="w-full text-left">
                         <div className="text-xs font-semibold text-white/85 line-clamp-2">{h.title}</div>
@@ -1311,7 +1444,9 @@ export default function CrosscheckPage() {
                     </div>
                   ))
                 ) : (
-                  <div className="rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-white/50">No saved runs yet.</div>
+                  <div className="rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-white/50">
+                    No saved runs yet.
+                  </div>
                 )}
               </div>
             </div>

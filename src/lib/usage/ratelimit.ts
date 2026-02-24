@@ -5,9 +5,9 @@ type Tier = 0 | 1 | 2;
 
 type RateLimitMeta = {
   tier: Tier;
-  limit: number;
+  limit: number; // use -1 to represent unlimited in meta/headers
   used: number;
-  remaining: number;
+  remaining: number; // -1 if unlimited
   resetAt: string; // ISO
   key: string;
   clientId: string;
@@ -79,56 +79,65 @@ function utcDayKey(now = new Date()) {
 }
 
 function endOfUtcDay(now = new Date()) {
-  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
-  return end;
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
 }
 
-export async function assertWithinDailyLimit(args: {
-  req: Request;
-  tier: Tier;
-  clientId: string;
-}) {
-  const { req, tier, clientId } = args;
+/**
+ * Enforces per-UTC-day usage limits by tier.
+ * Returns RateLimitMeta on success (so UI can show remaining/reset).
+ * Throws RATE_LIMIT error with meta when exceeded.
+ */
+export async function assertWithinDailyLimit(args: { req: Request; tier: Tier; clientId: string }) {
+  const { tier, clientId } = args;
 
   const limit = tierLimit(tier);
+  const reset = endOfUtcDay();
+
+  // Unlimited: still return meta for UI, but no Redis usage
   if (!Number.isFinite(limit)) {
-    // Unlimited
-    return;
+    const meta: RateLimitMeta = {
+      tier,
+      limit: -1,
+      used: 0,
+      remaining: -1,
+      resetAt: reset.toISOString(),
+      key: "unlimited",
+      clientId,
+    };
+    return meta;
   }
 
   const day = utcDayKey();
   const key = `taxaipro:rl:${day}:${clientId}:t${tier}`;
-
   const redis = getRedis();
 
-  // Atomic-ish enough for this use-case:
-  // INCR returns the new count.
+  // INCR returns the new count
   const used = await redis.incr(key);
 
   // Ensure the key expires at end of UTC day (reset window)
-  const reset = endOfUtcDay();
   const ttlSeconds = Math.max(60, Math.floor((reset.getTime() - Date.now()) / 1000));
-  // Only need to set expire; safe to call every time.
   await redis.expire(key, ttlSeconds);
 
   const remaining = Math.max(0, limit - used);
 
-  if (used > limit) {
-    const meta: RateLimitMeta = {
-      tier,
-      limit,
-      used,
-      remaining,
-      resetAt: reset.toISOString(),
-      key,
-      clientId,
-    };
+  const meta: RateLimitMeta = {
+    tier,
+    limit,
+    used,
+    remaining,
+    resetAt: reset.toISOString(),
+    key,
+    clientId,
+  };
 
+  if (used > limit) {
     const err: any = new Error("RATE_LIMIT");
     err.status = 429;
     err.meta = meta;
     throw err;
   }
+
+  return meta;
 }
 
 export type { Tier, RateLimitMeta };

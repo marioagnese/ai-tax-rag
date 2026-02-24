@@ -5,6 +5,7 @@ import {
   assertWithinDailyLimit,
   getClientId,
   getTierFromRequest,
+  type RateLimitMeta,
 } from "../../../../src/lib/usage/ratelimit";
 
 export const runtime = "nodejs";
@@ -61,7 +62,21 @@ function sanitizeBody(raw: unknown): CrosscheckUiBody {
   };
 }
 
+function applyRateLimitHeaders(h: Headers, meta?: RateLimitMeta) {
+  if (!meta) return;
+
+  // Standard-ish pattern for client UX:
+  // -1 means unlimited
+  h.set("x-taxaipro-tier", String(meta.tier));
+  h.set("x-ratelimit-limit", String(meta.limit));
+  h.set("x-ratelimit-used", String(meta.used));
+  h.set("x-ratelimit-remaining", String(meta.remaining));
+  h.set("x-ratelimit-reset", meta.resetAt);
+}
+
 export async function POST(req: NextRequest) {
+  let rlMeta: RateLimitMeta | undefined;
+
   try {
     // must be logged in to use the UI route
     await requireSessionUser();
@@ -72,7 +87,7 @@ export async function POST(req: NextRequest) {
     const tier = getTierFromRequest(req as unknown as Request);
     const clientId = getClientId(req as unknown as Request);
 
-    await assertWithinDailyLimit({
+    rlMeta = await assertWithinDailyLimit({
       req: req as unknown as Request,
       tier,
       clientId,
@@ -82,7 +97,10 @@ export async function POST(req: NextRequest) {
     const body = sanitizeBody(raw);
 
     if (!body.question) {
-      return NextResponse.json({ ok: false, error: "Missing 'question'." }, { status: 400 });
+      const res = NextResponse.json({ ok: false, error: "Missing 'question'." }, { status: 400 });
+      applyRateLimitHeaders(res.headers, rlMeta);
+      res.headers.set("cache-control", "no-store, max-age=0");
+      return res;
     }
 
     const key = requireEnv("CROSSCHECK_KEY");
@@ -100,26 +118,34 @@ export async function POST(req: NextRequest) {
 
     const text = await upstream.text();
 
-    // Pass-through upstream body + status, but prevent caching
-    return new NextResponse(text, {
+    // Pass-through upstream body + status, but prevent caching.
+    // Also attach rate-limit headers so the UI can show remaining/reset even on success.
+    const res = new NextResponse(text, {
       status: upstream.status,
       headers: {
         "content-type": upstream.headers.get("content-type") || "application/json",
         "cache-control": "no-store, max-age=0",
       },
     });
+
+    applyRateLimitHeaders(res.headers, rlMeta);
+    return res;
   } catch (err: any) {
     const msg = err?.message || "Unknown error";
 
     if (msg === "UNAUTHORIZED") {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+      const res = NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+      applyRateLimitHeaders(res.headers, rlMeta);
+      res.headers.set("cache-control", "no-store, max-age=0");
+      return res;
     }
 
     // rate limit
     if (msg === "RATE_LIMIT") {
       const status = typeof err?.status === "number" ? err.status : 429;
-      const meta = err?.meta || undefined;
-      return NextResponse.json(
+      const meta = (err?.meta as RateLimitMeta | undefined) || rlMeta;
+
+      const res = NextResponse.json(
         {
           ok: false,
           error: "Daily usage limit reached for your tier.",
@@ -127,12 +153,21 @@ export async function POST(req: NextRequest) {
         },
         { status }
       );
+      applyRateLimitHeaders(res.headers, meta);
+      res.headers.set("cache-control", "no-store, max-age=0");
+      return res;
     }
 
     if (msg.startsWith("Missing env var:")) {
-      return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+      const res = NextResponse.json({ ok: false, error: msg }, { status: 500 });
+      applyRateLimitHeaders(res.headers, rlMeta);
+      res.headers.set("cache-control", "no-store, max-age=0");
+      return res;
     }
 
-    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+    const res = NextResponse.json({ ok: false, error: msg }, { status: 500 });
+    applyRateLimitHeaders(res.headers, rlMeta);
+    res.headers.set("cache-control", "no-store, max-age=0");
+    return res;
   }
 }
