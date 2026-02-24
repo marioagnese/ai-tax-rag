@@ -156,6 +156,12 @@ export default function SignupPage() {
       const idToken = await userCred.user.getIdToken(true);
       await mintSession(idToken);
 
+      // Default everyone to Tier 0 on first successful login/signup.
+      // Later: replace with tier read from Firestore/Stripe subscription record.
+      try {
+        localStorage.setItem("taxaipro_tier", "0");
+      } catch {}
+
       router.replace("/crosscheck");
     } catch (e: any) {
       setError(e?.message || "Something went wrong.");
