@@ -1,6 +1,11 @@
 // app/api/ui/crosscheck/route.ts
 import { NextResponse, type NextRequest } from "next/server";
 import { requireSessionUser } from "../../../../src/lib/auth/session";
+import {
+  assertWithinDailyLimit,
+  getClientId,
+  getTierFromRequest,
+} from "../../../../src/lib/usage/ratelimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -61,6 +66,18 @@ export async function POST(req: NextRequest) {
     // must be logged in to use the UI route
     await requireSessionUser();
 
+    // ---- Rate limit (tier 0/1/2) ----
+    // TEMP: tier comes from header x-taxaipro-tier (0|1|2), default 0.
+    // Later: derive tier from user record (Stripe subscription).
+    const tier = getTierFromRequest(req as unknown as Request);
+    const clientId = getClientId(req as unknown as Request);
+
+    await assertWithinDailyLimit({
+      req: req as unknown as Request,
+      tier,
+      clientId,
+    });
+
     const raw = await req.json().catch(() => ({}));
     const body = sanitizeBody(raw);
 
@@ -96,6 +113,20 @@ export async function POST(req: NextRequest) {
 
     if (msg === "UNAUTHORIZED") {
       return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    }
+
+    // rate limit
+    if (msg === "RATE_LIMIT") {
+      const status = typeof err?.status === "number" ? err.status : 429;
+      const meta = err?.meta || undefined;
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Daily usage limit reached for your tier.",
+          meta,
+        },
+        { status }
+      );
     }
 
     if (msg.startsWith("Missing env var:")) {
