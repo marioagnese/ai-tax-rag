@@ -370,6 +370,7 @@ function buildQuestionForFormatting(thread: ThreadMessage[], fallbackQuestion: s
 /* ---------------- Tier helpers (client-side for now) ---------------- */
 
 type Tier = "0" | "1" | "2";
+type PaidTier = Exclude<Tier, "0">;
 
 function readTier(): Tier {
   try {
@@ -419,7 +420,6 @@ function formatResetLocal(iso?: string) {
   if (!iso) return null;
   const d = new Date(iso);
   if (!Number.isFinite(d.getTime())) return null;
-  // Show local time
   return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
@@ -460,32 +460,72 @@ export default function CrosscheckPage() {
   const [tier, setTier] = useState<Tier>("0");
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
+  // Stripe checkout UI
+  const [checkoutLoadingTier, setCheckoutLoadingTier] = useState<PaidTier | null>(null);
+
   // NEW: live rate limit state (server authoritative)
   const [rate, setRate] = useState<RateUi>({});
 
   const runFnRef = useRef<() => void>(() => {});
+
+  function setTierLocal(next: Tier) {
+    try {
+      localStorage.setItem(LS_TIER_KEY, next);
+    } catch {}
+    setTier(next);
+  }
+
+  // If Stripe success_url redirects back with tier in the URL, capture it and persist.
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+
+      const t = sp.get("tier");
+      const hasCheckoutSignal = sp.get("checkout") === "success" || sp.get("paid") === "1" || !!sp.get("session_id");
+
+      if ((t === "1" || t === "2") && hasCheckoutSignal) {
+        setTierLocal(t);
+
+        // Clean URL
+        sp.delete("tier");
+        sp.delete("checkout");
+        sp.delete("paid");
+        sp.delete("session_id");
+        const qs = sp.toString();
+        const nextUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+        window.history.replaceState({}, "", nextUrl);
+      }
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     setHistory(safeParseRuns());
     setTier(readTier());
   }, []);
 
+  // Open plans modal if we navigated back with ?plans=1
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      if (sp.get("plans") === "1") {
+        setUpgradeOpen(true);
+      }
+    } catch {}
+  }, []);
+
   const succeeded = resp?.meta?.succeeded ?? [];
   const failed = resp?.meta?.failed ?? [];
   const runtimeMs = resp?.meta?.runtime_ms ?? null;
 
-  const constraints = useMemo(
-    () => buildConstraints(globalDefaults, runOverrides),
-    [globalDefaults, runOverrides]
-  );
+  const constraints = useMemo(() => buildConstraints(globalDefaults, runOverrides), [globalDefaults, runOverrides]);
 
   const confidence = resp?.consensus?.confidence;
   const canSave = !!resp?.consensus?.answer?.trim();
 
-  const effectiveQuestionForOutput = useMemo(
-    () => buildQuestionForFormatting(thread, question),
-    [thread, question]
-  );
+  const effectiveQuestionForOutput = useMemo(() => buildQuestionForFormatting(thread, question), [thread, question]);
 
   const displayText = useMemo(() => {
     const base = {
@@ -600,13 +640,6 @@ export default function CrosscheckPage() {
     setSelectedId(null);
   }
 
-  function setTierLocal(next: Tier) {
-    try {
-      localStorage.setItem(LS_TIER_KEY, next);
-    } catch {}
-    setTier(next);
-  }
-
   function updateRateFromHeaders(h: Headers) {
     const next: RateUi = {
       tier: (h.get("x-taxaipro-tier") as Tier | null) || undefined,
@@ -616,7 +649,6 @@ export default function CrosscheckPage() {
       resetAt: h.get("x-ratelimit-reset") || undefined,
     };
 
-    // Merge (don’t wipe old values if headers missing)
     setRate((prev) => ({ ...prev, ...next }));
 
     // If server tells us tier, keep UI consistent
@@ -624,11 +656,63 @@ export default function CrosscheckPage() {
       setTierLocal(next.tier);
     }
 
-    // Proactive upgrade prompt:
-    // - remaining === 0 => open plans
-    // - remaining === 1 => optional (subtle), do NOT auto-open
     if (typeof next.remaining === "number" && next.remaining === 0) {
       setUpgradeOpen(true);
+    }
+  }
+
+  // ✅ Stripe checkout: require payment BEFORE switching tier.
+  async function startCheckout(target: PaidTier) {
+    setError(null);
+
+    // No-op if already on that tier
+    if (tier === target) {
+      setUpgradeOpen(false);
+      return;
+    }
+
+    setCheckoutLoadingTier(target);
+
+    try {
+      const r = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tier: target }),
+      });
+
+      // Auth-protected route: redirect to signin
+      if (r.status === 401) {
+        const next = encodeURIComponent("/crosscheck?plans=1");
+        window.location.href = `/signin?next=${next}`;
+        return;
+      }
+
+      const text = await r.text();
+      let json: any = null;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        json = { ok: false, error: text };
+      }
+
+      if (!r.ok || json?.ok === false) {
+        setError(json?.error || `Stripe checkout failed (${r.status})`);
+        return;
+      }
+
+      const url = json?.url || json?.checkoutUrl;
+      if (!url || typeof url !== "string") {
+        setError("Stripe checkout did not return a redirect URL. Check /api/stripe/checkout response.");
+        return;
+      }
+
+      // Redirect to Stripe Checkout
+      window.location.href = url;
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Stripe checkout request failed.";
+      setError(msg);
+    } finally {
+      setCheckoutLoadingTier(null);
     }
   }
 
@@ -660,7 +744,6 @@ export default function CrosscheckPage() {
         }),
       });
 
-      // Always read ratelimit headers (even on error)
       updateRateFromHeaders(r.headers);
 
       const text = await r.text();
@@ -808,7 +891,6 @@ export default function CrosscheckPage() {
     );
   }, [question, facts, runOverrides, followUp, thread.length, resp]);
 
-  // Display “runs left” from server (authoritative)
   const runsLeft =
     typeof rate.remaining === "number"
       ? rate.remaining === -1
@@ -842,7 +924,7 @@ export default function CrosscheckPage() {
             <img
               src="/taxaipro-logo.png"
               alt="TaxAiPro"
-              className="h-30 w-30 rounded-xl object-contain border border-white/10 bg-white/5"
+              className="h-20 w-20 rounded-xl object-contain border border-white/10 bg-white/5"
             />
             <div>
               <div className="mt-1 text-xs text-white/55">Multi Model Conservative Tax Triage</div>
@@ -969,9 +1051,7 @@ export default function CrosscheckPage() {
               ) : null}
 
               <div className="mt-3 flex items-center justify-between gap-2">
-                <div className="text-[11px] text-white/45">
-                  Thread is client-side only (saved in History if you Save).
-                </div>
+                <div className="text-[11px] text-white/45">Thread is client-side only (saved in History if you Save).</div>
                 <button
                   onClick={requestReset}
                   className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
@@ -1020,11 +1100,7 @@ export default function CrosscheckPage() {
             <Card className="p-0">
               <details open={false} className="p-5">
                 <summary className="cursor-pointer select-none list-none">
-                  <SectionTitle
-                    title="Advanced"
-                    subtitle="Defaults, run overrides, and debug outputs."
-                    right={<Pill>Power users</Pill>}
-                  />
+                  <SectionTitle title="Advanced" subtitle="Defaults, run overrides, and debug outputs." right={<Pill>Power users</Pill>} />
                 </summary>
 
                 <div className="mt-4 space-y-4">
@@ -1060,9 +1136,7 @@ export default function CrosscheckPage() {
 
                   {resp?.providers?.length ? (
                     <details className="rounded-xl border border-white/10 bg-black/20 p-3">
-                      <summary className="cursor-pointer text-xs font-semibold text-white/70">
-                        Debug: provider outputs
-                      </summary>
+                      <summary className="cursor-pointer text-xs font-semibold text-white/70">Debug: provider outputs</summary>
                       <div className="mt-3 space-y-3">
                         {resp.providers.map((p, idx) => (
                           <div key={idx} className="rounded-xl border border-white/10 bg-black/30 p-3">
@@ -1071,13 +1145,10 @@ export default function CrosscheckPage() {
                                 <span className="font-semibold text-white/90">{p.provider}</span> · {p.model}
                               </div>
                               <div className="text-xs text-white/50">
-                                {p.status !== "ok" ? <span className="text-amber-200">({p.status})</span> : null}{" "}
-                                {p.ms}ms
+                                {p.status !== "ok" ? <span className="text-amber-200">({p.status})</span> : null} {p.ms}ms
                               </div>
                             </div>
-                            <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">
-                              {p.status === "ok" ? p.text : p.error}
-                            </div>
+                            <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">{p.status === "ok" ? p.text : p.error}</div>
                           </div>
                         ))}
                       </div>
@@ -1099,9 +1170,7 @@ export default function CrosscheckPage() {
                       onClick={() => setOutputStyle("answer")}
                       className={cn(
                         "rounded-full px-3 py-1 text-xs border",
-                        outputStyle === "answer"
-                          ? "bg-white text-black border-white"
-                          : "border-white/15 text-white/80 hover:bg-white/5"
+                        outputStyle === "answer" ? "bg-white text-black border-white" : "border-white/15 text-white/80 hover:bg-white/5"
                       )}
                     >
                       Answer
@@ -1110,9 +1179,7 @@ export default function CrosscheckPage() {
                       onClick={() => setOutputStyle("memo")}
                       className={cn(
                         "rounded-full px-3 py-1 text-xs border",
-                        outputStyle === "memo"
-                          ? "bg-white text-black border-white"
-                          : "border-white/15 text-white/80 hover:bg-white/5"
+                        outputStyle === "memo" ? "bg-white text-black border-white" : "border-white/15 text-white/80 hover:bg-white/5"
                       )}
                     >
                       Memo
@@ -1121,9 +1188,7 @@ export default function CrosscheckPage() {
                       onClick={() => setOutputStyle("email")}
                       className={cn(
                         "rounded-full px-3 py-1 text-xs border",
-                        outputStyle === "email"
-                          ? "bg-white text-black border-white"
-                          : "border-white/15 text-white/80 hover:bg-white/5"
+                        outputStyle === "email" ? "bg-white text-black border-white" : "border-white/15 text-white/80 hover:bg-white/5"
                       )}
                     >
                       Email
@@ -1146,12 +1211,7 @@ export default function CrosscheckPage() {
 
                 <button
                   onClick={() => {
-                    const base =
-                      outputStyle === "memo"
-                        ? "taxaipro-memo"
-                        : outputStyle === "email"
-                        ? "taxaipro-email"
-                        : "taxaipro-answer";
+                    const base = outputStyle === "memo" ? "taxaipro-memo" : outputStyle === "email" ? "taxaipro-email" : "taxaipro-answer";
                     downloadText(`${base}.txt`, displayText);
                   }}
                   className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
@@ -1162,17 +1222,13 @@ export default function CrosscheckPage() {
                 <div className="ml-auto flex flex-wrap items-center gap-2">
                   {resp ? <Pill tone={systemTone as any}>{systemLabel}</Pill> : null}
                   {confidence ? (
-                    <Pill tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}>
-                      Confidence: {confidence}
-                    </Pill>
+                    <Pill tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}>Confidence: {confidence}</Pill>
                   ) : null}
                 </div>
               </div>
 
               <div className="mt-4 rounded-2xl border border-white/10 bg-black/35 p-6 min-h-[480px]">
-                <pre className="whitespace-pre-wrap text-[15px] leading-relaxed text-white/92">
-                  {displayText || "—"}
-                </pre>
+                <pre className="whitespace-pre-wrap text-[15px] leading-relaxed text-white/92">{displayText || "—"}</pre>
               </div>
 
               {/* Follow-up card */}
@@ -1180,13 +1236,9 @@ export default function CrosscheckPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="text-xs font-semibold text-white/80">Follow-up</div>
-                    <div className="mt-1 text-[11px] text-white/50">
-                      Continues the same case: original question + last answer + your follow-up.
-                    </div>
+                    <div className="mt-1 text-[11px] text-white/50">Continues the same case: original question + last answer + your follow-up.</div>
                   </div>
-                  <Pill tone={hasBaselineAnswer ? "good" : "neutral"}>
-                    {hasBaselineAnswer ? "Case: ready" : "Run baseline first"}
-                  </Pill>
+                  <Pill tone={hasBaselineAnswer ? "good" : "neutral"}>{hasBaselineAnswer ? "Case: ready" : "Run baseline first"}</Pill>
                 </div>
 
                 <textarea
@@ -1197,9 +1249,7 @@ export default function CrosscheckPage() {
                 />
 
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="text-[11px] text-white/45">
-                    Client-side thread for now. Later: DB + messages[] API.
-                  </div>
+                  <div className="text-[11px] text-white/45">Client-side thread for now. Later: DB + messages[] API.</div>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={runFollowUp}
@@ -1223,9 +1273,7 @@ export default function CrosscheckPage() {
                 <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
                   <div className="text-xs font-semibold text-white/70">Caveats</div>
                   <div className="mt-2 space-y-1 text-sm text-white/80">
-                    {(resp?.consensus?.caveats ?? []).length ? (
-                      (resp?.consensus?.caveats ?? []).slice(0, 6).map((c, i) => <div key={i}>• {c}</div>)
-                    ) : (
+                    {(resp?.consensus?.caveats ?? []).length ? (resp?.consensus?.caveats ?? []).slice(0, 6).map((c, i) => <div key={i}>• {c}</div>) : (
                       <div className="text-white/50">None yet.</div>
                     )}
                   </div>
@@ -1245,18 +1293,14 @@ export default function CrosscheckPage() {
                   </div>
 
                   <div className="mt-2 space-y-1 text-sm text-white/80">
-                    {(resp?.consensus?.followups ?? []).length ? (
-                      (resp?.consensus?.followups ?? []).slice(0, 6).map((c, i) => <div key={i}>• {c}</div>)
-                    ) : (
+                    {(resp?.consensus?.followups ?? []).length ? (resp?.consensus?.followups ?? []).slice(0, 6).map((c, i) => <div key={i}>• {c}</div>) : (
                       <div className="text-white/50">None yet.</div>
                     )}
                   </div>
                 </div>
               </div>
 
-              <p className="mt-4 text-[11px] text-white/40">
-                TaxAiPro generates drafts for triage only — not legal or tax advice.
-              </p>
+              <p className="mt-4 text-[11px] text-white/40">TaxAiPro generates drafts for triage only — not legal or tax advice.</p>
             </Card>
 
             {(resp?.consensus?.disagreements ?? []).length ? (
@@ -1264,9 +1308,7 @@ export default function CrosscheckPage() {
                 <SectionTitle title="Disagreements" subtitle="Where models differed. Add facts and re-run." />
                 <div className="mt-3 space-y-2 text-sm text-white/80">
                   {(resp?.consensus?.disagreements ?? []).map((d, i) => (
-                    <div key={i} className="rounded-xl border border-white/10 bg-black/25 p-3">
-                      {d}
-                    </div>
+                    <div key={i} className="rounded-xl border border-white/10 bg-black/25 p-3">{d}</div>
                   ))}
                 </div>
               </Card>
@@ -1285,9 +1327,7 @@ export default function CrosscheckPage() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-sm font-semibold text-white/90">Plans & tiers</div>
-                  <div className="mt-1 text-xs text-white/55">
-                    Upgrade increases daily runs. Resets daily (UTC midnight).
-                  </div>
+                  <div className="mt-1 text-xs text-white/55">Upgrade increases daily runs. Resets daily (UTC midnight).</div>
                   {runsLeft ? (
                     <div className="mt-2 text-[11px] text-white/55">
                       Runs left today: <span className="text-white/85">{runsLeft}</span>
@@ -1306,12 +1346,13 @@ export default function CrosscheckPage() {
                   <div className="mt-1 text-2xl font-semibold text-white">$0</div>
                   <div className="mt-1 text-xs text-white/60">Runs: 5/day</div>
                   <button
-                    onClick={() => setTierLocal("0")}
+                    onClick={() => {
+                      setTierLocal("0");
+                      setUpgradeOpen(false);
+                    }}
                     className={cn(
                       "mt-3 w-full rounded-xl px-3 py-2 text-xs font-semibold",
-                      tier === "0"
-                        ? "bg-white text-black"
-                        : "border border-white/15 bg-white/5 text-white/85 hover:bg-white/10"
+                      tier === "0" ? "bg-white text-black" : "border border-white/15 bg-white/5 text-white/85 hover:bg-white/10"
                     )}
                   >
                     {tier === "0" ? "Current" : "Start free"}
@@ -1323,14 +1364,16 @@ export default function CrosscheckPage() {
                   <div className="mt-1 text-2xl font-semibold text-white">$3.99</div>
                   <div className="mt-1 text-xs text-white/60">per month · 25/day</div>
                   <button
-                    onClick={() => setTierLocal("1")}
+                    onClick={() => startCheckout("1")}
+                    disabled={checkoutLoadingTier !== null}
                     className={cn(
                       "mt-3 w-full rounded-xl px-3 py-2 text-xs font-semibold",
-                      tier === "1" ? "bg-white text-black" : "bg-white text-black hover:bg-white/90"
+                      tier === "1" ? "bg-white text-black" : "bg-white text-black hover:bg-white/90",
+                      checkoutLoadingTier !== null && "opacity-60 cursor-not-allowed"
                     )}
-                    title="TEMP: local-only. Later: Stripe checkout."
+                    title="Opens Stripe Checkout first. Tier changes after successful payment redirect."
                   >
-                    {tier === "1" ? "Current" : "Choose Tier 1"}
+                    {tier === "1" ? "Current" : checkoutLoadingTier === "1" ? "Opening Stripe…" : "Choose Tier 1"}
                   </button>
                 </div>
 
@@ -1339,20 +1382,23 @@ export default function CrosscheckPage() {
                   <div className="mt-1 text-2xl font-semibold text-white">$15.99</div>
                   <div className="mt-1 text-xs text-white/60">per month · unlimited</div>
                   <button
-                    onClick={() => setTierLocal("2")}
+                    onClick={() => startCheckout("2")}
+                    disabled={checkoutLoadingTier !== null}
                     className={cn(
                       "mt-3 w-full rounded-xl px-3 py-2 text-xs font-semibold",
-                      tier === "2" ? "bg-white text-black" : "bg-white text-black hover:bg-white/90"
+                      tier === "2" ? "bg-white text-black" : "bg-white text-black hover:bg-white/90",
+                      checkoutLoadingTier !== null && "opacity-60 cursor-not-allowed"
                     )}
-                    title="TEMP: local-only. Later: Stripe checkout."
+                    title="Opens Stripe Checkout first. Tier changes after successful payment redirect."
                   >
-                    {tier === "2" ? "Current" : "Choose Tier 2"}
+                    {tier === "2" ? "Current" : checkoutLoadingTier === "2" ? "Opening Stripe…" : "Choose Tier 2"}
                   </button>
                 </div>
               </div>
 
               <div className="mt-4 rounded-xl border border-white/10 bg-black/25 p-3 text-[11px] text-white/55">
-                In this version, the server enforces daily limits and returns “runs left” in headers. Stripe automation is next.
+                This version enforces daily limits on the server (headers). Paid tiers now open Stripe Checkout before any tier
+                change. Final tier persistence should ideally come from webhook/DB (next step).
               </div>
             </div>
           </div>
@@ -1379,10 +1425,7 @@ export default function CrosscheckPage() {
                 >
                   Cancel
                 </button>
-                <button
-                  onClick={doFullReset}
-                  className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-black hover:bg-white/90"
-                >
+                <button onClick={doFullReset} className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-black hover:bg-white/90">
                   Yes, reset
                 </button>
               </div>
@@ -1413,10 +1456,7 @@ export default function CrosscheckPage() {
                   history.map((h) => (
                     <div
                       key={h.id}
-                      className={cn(
-                        "rounded-xl border border-white/10 bg-black/25 p-3",
-                        selectedId === h.id && "ring-1 ring-white/20"
-                      )}
+                      className={cn("rounded-xl border border-white/10 bg-black/25 p-3", selectedId === h.id && "ring-1 ring-white/20")}
                     >
                       <button onClick={() => loadRun(h)} className="w-full text-left">
                         <div className="text-xs font-semibold text-white/85 line-clamp-2">{h.title}</div>
@@ -1444,9 +1484,7 @@ export default function CrosscheckPage() {
                     </div>
                   ))
                 ) : (
-                  <div className="rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-white/50">
-                    No saved runs yet.
-                  </div>
+                  <div className="rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-white/50">No saved runs yet.</div>
                 )}
               </div>
             </div>
