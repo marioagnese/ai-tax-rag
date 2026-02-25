@@ -8,7 +8,8 @@ function requireEnv(name: string) {
 }
 
 export const stripe = new Stripe(requireEnv("STRIPE_SECRET_KEY"), {
-  apiVersion: "2024-06-20",
+  // Must match the Stripe SDK's allowed literal type for this installed version.
+  apiVersion: "2026-01-28.clover",
 });
 
 export function getPriceIds() {
