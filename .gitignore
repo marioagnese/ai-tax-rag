@@ -44,3 +44,4 @@ middleware.ts.bak
 Build
 main
 next
+sendgrid.env
