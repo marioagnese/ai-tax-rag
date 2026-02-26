@@ -64,17 +64,13 @@ const BUILD_WATERMARK = "FOLLOWUP_UI_ENABLED";
 const LS_TIER_KEY = "taxaipro_tier";
 
 /**
- * ✅ PRODUCTION QUICK WIN:
- * Use Stripe Payment Links (you already created them) to bypass
- * server-side Checkout Session creation issues.
- *
- * If you set “After payment → Redirect customers to URL” in Stripe Payment Link settings,
- * use:
- *  - https://YOURDOMAIN/crosscheck?tier=1&checkout=success
- *  - https://YOURDOMAIN/crosscheck?tier=2&checkout=success
+ * ✅ Stripe Payment Links (source of truth)
+ * If you create new links later, update only these two values.
  */
-const STRIPE_PAYMENT_LINK_TIER1 = "https://buy.stripe.com/4gMcMYdHV8ep9lP1W8ffy00";
-const STRIPE_PAYMENT_LINK_TIER2 = "https://buy.stripe.com/aFa5kwdHV0LX7dHdEQffy01";
+const STRIPE_PAYMENT_LINKS = {
+  "1": "https://buy.stripe.com/bJe6oA47l0LXapTfMYffy04",
+  "2": "https://buy.stripe.com/bJefZabzNgKVgOhfMYffy05",
+} as const;
 
 /* ---------------- UI primitives ---------------- */
 
@@ -297,9 +293,7 @@ function safeParseRuns(): SavedRun[] {
           followups: Array.isArray(r.followups) ? (r.followups as any[]).map(String) : [],
           disagreements: Array.isArray(r.disagreements) ? (r.disagreements as any[]).map(String) : [],
           confidence:
-            r.confidence === "low" || r.confidence === "medium" || r.confidence === "high"
-              ? r.confidence
-              : undefined,
+            r.confidence === "low" || r.confidence === "medium" || r.confidence === "high" ? r.confidence : undefined,
           thread,
         };
       })
@@ -473,7 +467,7 @@ export default function CrosscheckPage() {
   const [tier, setTier] = useState<Tier>("0");
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
-  // Payment-link click state
+  // Payment link loading UI
   const [checkoutLoadingTier, setCheckoutLoadingTier] = useState<PaidTier | null>(null);
 
   // NEW: live rate limit state (server authoritative)
@@ -488,26 +482,19 @@ export default function CrosscheckPage() {
     setTier(next);
   }
 
-  // Auto-open plans modal if URL has ?plans=1 (useful after signin redirect, etc.)
-  useEffect(() => {
-    try {
-      const sp = new URLSearchParams(window.location.search);
-      if (sp.get("plans") === "1") setUpgradeOpen(true);
-    } catch {}
-  }, []);
-
-  // If Stripe redirect returns back with tier in URL, capture and persist.
+  // If Stripe success_url redirects back with tier in the URL, capture it and persist.
   useEffect(() => {
     try {
       const sp = new URLSearchParams(window.location.search);
 
+      // Expected patterns:
+      // - ?tier=1&session_id=cs_...
+      // - ?tier=2&checkout=success
       const t = sp.get("tier");
-      const hasCheckoutSignal =
-        sp.get("checkout") === "success" || sp.get("paid") === "1" || !!sp.get("session_id");
+      const hasCheckoutSignal = !!sp.get("session_id") || sp.get("checkout") === "success" || sp.get("paid") === "1";
 
       if ((t === "1" || t === "2") && hasCheckoutSignal) {
         setTierLocal(t);
-
         // Clean URL
         sp.delete("tier");
         sp.delete("checkout");
@@ -516,6 +503,11 @@ export default function CrosscheckPage() {
         const qs = sp.toString();
         const nextUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
         window.history.replaceState({}, "", nextUrl);
+      }
+
+      // Optional: auto-open plans modal if ?plans=1
+      if (sp.get("plans") === "1") {
+        setUpgradeOpen(true);
       }
     } catch {
       // ignore
@@ -674,7 +666,11 @@ export default function CrosscheckPage() {
     }
   }
 
-  // ✅ Paid tier selection now uses Stripe Payment Links (no server Checkout Session).
+  /**
+   * ✅ Payment Links checkout:
+   * - Redirect user to Stripe Payment Link for tier 1/2
+   * - Tier is persisted only AFTER Stripe returns to /crosscheck?tier=...&session_id=...
+   */
   async function startCheckout(target: PaidTier) {
     setError(null);
 
@@ -683,21 +679,19 @@ export default function CrosscheckPage() {
       return;
     }
 
+    const link = STRIPE_PAYMENT_LINKS[target];
+    if (!link) {
+      setError(`Missing Stripe Payment Link for tier ${target}.`);
+      return;
+    }
+
     setCheckoutLoadingTier(target);
 
     try {
-      const url = target === "1" ? STRIPE_PAYMENT_LINK_TIER1 : STRIPE_PAYMENT_LINK_TIER2;
-      if (!url) {
-        setError("Missing Stripe Payment Link URL for this tier.");
-        return;
-      }
-
-      // Redirect to Stripe-hosted Payment Link
-      window.location.href = url;
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Failed to open Stripe Payment Link.";
-      setError(msg);
+      // Direct redirect to Stripe Payment Link
+      window.location.href = link;
     } finally {
+      // In practice, browser navigates away; this is only for completeness.
       setCheckoutLoadingTier(null);
     }
   }
@@ -720,7 +714,7 @@ export default function CrosscheckPage() {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-taxaipro-tier": tier, // server reads this header
+          "x-taxaipro-tier": tier, // TEMP: server reads this header
         },
         body: JSON.stringify({
           jurisdiction: jurisdiction.trim() || undefined,
@@ -849,7 +843,8 @@ export default function CrosscheckPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const systemTone = failed.length > 0 && succeeded.length === 0 ? "bad" : failed.length > 0 ? "warn" : "good";
+  const systemTone =
+    failed.length > 0 && succeeded.length === 0 ? "bad" : failed.length > 0 ? "warn" : "good";
 
   const systemLabel =
     failed.length > 0 && succeeded.length === 0
@@ -979,7 +974,7 @@ export default function CrosscheckPage() {
                   <option value="Bolivia">Bolivia</option>
                   <option value="Puerto Rico">Puerto Rico</option>
                   <option value="Ecuador">Ecuador</option>
-                  <option value="Republica Dominicana">Rep. Dominicana</option>
+                  <option value="Reublica Dominicana">Rep. Dominicana</option>
                   <option value="Jamaica">Jamaica</option>
                 </optgroup>
 
@@ -1115,9 +1110,7 @@ export default function CrosscheckPage() {
 
                   {resp?.providers?.length ? (
                     <details className="rounded-xl border border-white/10 bg-black/20 p-3">
-                      <summary className="cursor-pointer text-xs font-semibold text-white/70">
-                        Debug: provider outputs
-                      </summary>
+                      <summary className="cursor-pointer text-xs font-semibold text-white/70">Debug: provider outputs</summary>
                       <div className="mt-3 space-y-3">
                         {resp.providers.map((p, idx) => (
                           <div key={idx} className="rounded-xl border border-white/10 bg-black/30 p-3">
@@ -1129,9 +1122,7 @@ export default function CrosscheckPage() {
                                 {p.status !== "ok" ? <span className="text-amber-200">({p.status})</span> : null} {p.ms}ms
                               </div>
                             </div>
-                            <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">
-                              {p.status === "ok" ? p.text : p.error}
-                            </div>
+                            <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">{p.status === "ok" ? p.text : p.error}</div>
                           </div>
                         ))}
                       </div>
@@ -1227,9 +1218,7 @@ export default function CrosscheckPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="text-xs font-semibold text-white/80">Follow-up</div>
-                    <div className="mt-1 text-[11px] text-white/50">
-                      Continues the same case: original question + last answer + your follow-up.
-                    </div>
+                    <div className="mt-1 text-[11px] text-white/50">Continues the same case: original question + last answer + your follow-up.</div>
                   </div>
                   <Pill tone={hasBaselineAnswer ? "good" : "neutral"}>{hasBaselineAnswer ? "Case: ready" : "Run baseline first"}</Pill>
                 </div>
@@ -1370,7 +1359,6 @@ export default function CrosscheckPage() {
                       tier === "1" ? "bg-white text-black" : "bg-white text-black hover:bg-white/90",
                       checkoutLoadingTier !== null && "opacity-60 cursor-not-allowed"
                     )}
-                    title="Opens Stripe Payment Link. Set Payment Link redirect to /crosscheck?tier=1&checkout=success to auto-unlock."
                   >
                     {tier === "1" ? "Current" : checkoutLoadingTier === "1" ? "Opening Stripe…" : "Choose Tier 1"}
                   </button>
@@ -1388,7 +1376,6 @@ export default function CrosscheckPage() {
                       tier === "2" ? "bg-white text-black" : "bg-white text-black hover:bg-white/90",
                       checkoutLoadingTier !== null && "opacity-60 cursor-not-allowed"
                     )}
-                    title="Opens Stripe Payment Link. Set Payment Link redirect to /crosscheck?tier=2&checkout=success to auto-unlock."
                   >
                     {tier === "2" ? "Current" : checkoutLoadingTier === "2" ? "Opening Stripe…" : "Choose Tier 2"}
                   </button>
@@ -1396,12 +1383,8 @@ export default function CrosscheckPage() {
               </div>
 
               <div className="mt-4 rounded-xl border border-white/10 bg-black/25 p-3 text-[11px] text-white/55">
-                Paid tiers currently use Stripe <span className="text-white/80">Payment Links</span> for fastest production testing.
-                To auto-unlock after payment, set each Payment Link “After payment” redirect to:
-                <div className="mt-2 rounded-lg border border-white/10 bg-black/30 p-2 font-mono text-[10px] text-white/70">
-                  /crosscheck?tier=1&checkout=success<br />
-                  /crosscheck?tier=2&checkout=success
-                </div>
+                Paid tiers now use Stripe <b>Payment Links</b>. After payment, Stripe should redirect back to{" "}
+                <code>/crosscheck?tier=1|2&amp;session_id=...</code>, which activates the tier locally.
               </div>
             </div>
           </div>
@@ -1464,7 +1447,8 @@ export default function CrosscheckPage() {
                       <button onClick={() => loadRun(h)} className="w-full text-left">
                         <div className="text-xs font-semibold text-white/85 line-clamp-2">{h.title}</div>
                         <div className="mt-1 text-[11px] text-white/45">
-                          {new Date(h.createdAt).toLocaleDateString()} · {h.jurisdiction || "—"} · {h.confidence ? `Conf: ${h.confidence}` : "Conf: —"}
+                          {new Date(h.createdAt).toLocaleDateString()} · {h.jurisdiction || "—"} ·{" "}
+                          {h.confidence ? `Conf: ${h.confidence}` : "Conf: —"}
                           {h.thread?.length ? ` · Turns: ${Math.max(0, Math.floor(h.thread.length / 2))}` : ""}
                         </div>
                       </button>
