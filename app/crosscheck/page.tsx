@@ -60,17 +60,8 @@ const LS_KEY = "taxaipro_runs_v1";
 // Visible watermark to confirm prod deployment updated.
 const BUILD_WATERMARK = "FOLLOWUP_UI_ENABLED";
 
-// Keep tier locally for now (until Stripe/DB-backed tiers).
+// Keep tier locally for now (but we ALSO sync from Stripe on load).
 const LS_TIER_KEY = "taxaipro_tier";
-
-/**
- * ✅ Stripe Payment Links (source of truth)
- * If you create new links later, update only these two values.
- */
-const STRIPE_PAYMENT_LINKS = {
-  "1": "https://buy.stripe.com/bJe6oA47l0LXapTfMYffy04",
-  "2": "https://buy.stripe.com/bJefZabzNgKVgOhfMYffy05",
-} as const;
 
 /* ---------------- UI primitives ---------------- */
 
@@ -374,7 +365,7 @@ function buildQuestionForFormatting(thread: ThreadMessage[], fallbackQuestion: s
   return lines.join("\n");
 }
 
-/* ---------------- Tier helpers (client-side for now) ---------------- */
+/* ---------------- Tier helpers ---------------- */
 
 type Tier = "0" | "1" | "2";
 type PaidTier = Exclude<Tier, "0">;
@@ -467,10 +458,10 @@ export default function CrosscheckPage() {
   const [tier, setTier] = useState<Tier>("0");
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
-  // Payment link loading UI
+  // Checkout loading UI
   const [checkoutLoadingTier, setCheckoutLoadingTier] = useState<PaidTier | null>(null);
 
-  // NEW: live rate limit state (server authoritative)
+  // live rate limit state (server authoritative)
   const [rate, setRate] = useState<RateUi>({});
 
   const runFnRef = useRef<() => void>(() => {});
@@ -487,14 +478,13 @@ export default function CrosscheckPage() {
     try {
       const sp = new URLSearchParams(window.location.search);
 
-      // Expected patterns:
-      // - ?tier=1&session_id=cs_...
-      // - ?tier=2&checkout=success
       const t = sp.get("tier");
-      const hasCheckoutSignal = !!sp.get("session_id") || sp.get("checkout") === "success" || sp.get("paid") === "1";
+      const hasCheckoutSignal =
+        !!sp.get("session_id") || sp.get("checkout") === "success" || sp.get("paid") === "1";
 
       if ((t === "1" || t === "2") && hasCheckoutSignal) {
         setTierLocal(t);
+
         // Clean URL
         sp.delete("tier");
         sp.delete("checkout");
@@ -505,7 +495,6 @@ export default function CrosscheckPage() {
         window.history.replaceState({}, "", nextUrl);
       }
 
-      // Optional: auto-open plans modal if ?plans=1
       if (sp.get("plans") === "1") {
         setUpgradeOpen(true);
       }
@@ -515,10 +504,37 @@ export default function CrosscheckPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Load local history + local tier
   useEffect(() => {
     setHistory(safeParseRuns());
     setTier(readTier());
   }, []);
+
+  // ✅ Sync tier from Stripe on load (fixes: paid user signs in on new device -> should be Tier 1/2)
+  useEffect(() => {
+    let cancelled = false;
+
+    async function syncTierFromStripe() {
+      try {
+        const r = await fetch("/api/stripe/checkout", { method: "GET" });
+        if (!r.ok) return;
+        const j = (await r.json().catch(() => null)) as any;
+        const nextTier = j?.tier;
+        if (!cancelled && (nextTier === "1" || nextTier === "2")) {
+          setTierLocal(nextTier);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    // Only bother syncing if we are currently Tier 0
+    if (tier === "0") syncTierFromStripe();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tier]);
 
   const succeeded = resp?.meta?.succeeded ?? [];
   const failed = resp?.meta?.failed ?? [];
@@ -667,9 +683,9 @@ export default function CrosscheckPage() {
   }
 
   /**
-   * ✅ Payment Links checkout:
-   * - Redirect user to Stripe Payment Link for tier 1/2
-   * - Tier is persisted only AFTER Stripe returns to /crosscheck?tier=...&session_id=...
+   * ✅ Checkout (subscription) via server route:
+   * - POST /api/stripe/checkout { tier }
+   * - Redirect to Stripe-hosted checkout URL
    */
   async function startCheckout(target: PaidTier) {
     setError(null);
@@ -679,19 +695,25 @@ export default function CrosscheckPage() {
       return;
     }
 
-    const link = STRIPE_PAYMENT_LINKS[target];
-    if (!link) {
-      setError(`Missing Stripe Payment Link for tier ${target}.`);
-      return;
-    }
-
     setCheckoutLoadingTier(target);
-
     try {
-      // Direct redirect to Stripe Payment Link
-      window.location.href = link;
+      const r = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tier: target }),
+      });
+
+      const j = (await r.json().catch(() => null)) as any;
+
+      if (!r.ok || !j?.ok || !j?.url) {
+        setError(j?.error || `Checkout failed (${r.status})`);
+        return;
+      }
+
+      window.location.href = j.url;
+    } catch (e: any) {
+      setError(e?.message || "Checkout failed.");
     } finally {
-      // In practice, browser navigates away; this is only for completeness.
       setCheckoutLoadingTier(null);
     }
   }
@@ -714,7 +736,7 @@ export default function CrosscheckPage() {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-taxaipro-tier": tier, // TEMP: server reads this header
+          "x-taxaipro-tier": tier, // server reads this header
         },
         body: JSON.stringify({
           jurisdiction: jurisdiction.trim() || undefined,
@@ -917,6 +939,14 @@ export default function CrosscheckPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* ✅ Contact button */}
+            <button
+              onClick={() => (window.location.href = "/contact")}
+              className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
+            >
+              Contact
+            </button>
+
             <button
               onClick={() => setHistoryOpen(true)}
               className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
@@ -1074,7 +1104,11 @@ export default function CrosscheckPage() {
             <Card className="p-0">
               <details open={false} className="p-5">
                 <summary className="cursor-pointer select-none list-none">
-                  <SectionTitle title="Advanced" subtitle="Defaults, run overrides, and debug outputs." right={<Pill>Power users</Pill>} />
+                  <SectionTitle
+                    title="Advanced"
+                    subtitle="Defaults, run overrides, and debug outputs."
+                    right={<Pill>Power users</Pill>}
+                  />
                 </summary>
 
                 <div className="mt-4 space-y-4">
@@ -1110,7 +1144,9 @@ export default function CrosscheckPage() {
 
                   {resp?.providers?.length ? (
                     <details className="rounded-xl border border-white/10 bg-black/20 p-3">
-                      <summary className="cursor-pointer text-xs font-semibold text-white/70">Debug: provider outputs</summary>
+                      <summary className="cursor-pointer text-xs font-semibold text-white/70">
+                        Debug: provider outputs
+                      </summary>
                       <div className="mt-3 space-y-3">
                         {resp.providers.map((p, idx) => (
                           <div key={idx} className="rounded-xl border border-white/10 bg-black/30 p-3">
@@ -1119,10 +1155,13 @@ export default function CrosscheckPage() {
                                 <span className="font-semibold text-white/90">{p.provider}</span> · {p.model}
                               </div>
                               <div className="text-xs text-white/50">
-                                {p.status !== "ok" ? <span className="text-amber-200">({p.status})</span> : null} {p.ms}ms
+                                {p.status !== "ok" ? <span className="text-amber-200">({p.status})</span> : null}{" "}
+                                {p.ms}ms
                               </div>
                             </div>
-                            <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">{p.status === "ok" ? p.text : p.error}</div>
+                            <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">
+                              {p.status === "ok" ? p.text : p.error}
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -1191,7 +1230,12 @@ export default function CrosscheckPage() {
 
                 <button
                   onClick={() => {
-                    const base = outputStyle === "memo" ? "taxaipro-memo" : outputStyle === "email" ? "taxaipro-email" : "taxaipro-answer";
+                    const base =
+                      outputStyle === "memo"
+                        ? "taxaipro-memo"
+                        : outputStyle === "email"
+                        ? "taxaipro-email"
+                        : "taxaipro-answer";
                     downloadText(`${base}.txt`, displayText);
                   }}
                   className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
@@ -1210,7 +1254,9 @@ export default function CrosscheckPage() {
               </div>
 
               <div className="mt-4 rounded-2xl border border-white/10 bg-black/35 p-6 min-h-[480px]">
-                <pre className="whitespace-pre-wrap text-[15px] leading-relaxed text-white/92">{displayText || "—"}</pre>
+                <pre className="whitespace-pre-wrap text-[15px] leading-relaxed text-white/92">
+                  {displayText || "—"}
+                </pre>
               </div>
 
               {/* Follow-up card */}
@@ -1218,9 +1264,13 @@ export default function CrosscheckPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="text-xs font-semibold text-white/80">Follow-up</div>
-                    <div className="mt-1 text-[11px] text-white/50">Continues the same case: original question + last answer + your follow-up.</div>
+                    <div className="mt-1 text-[11px] text-white/50">
+                      Continues the same case: original question + last answer + your follow-up.
+                    </div>
                   </div>
-                  <Pill tone={hasBaselineAnswer ? "good" : "neutral"}>{hasBaselineAnswer ? "Case: ready" : "Run baseline first"}</Pill>
+                  <Pill tone={hasBaselineAnswer ? "good" : "neutral"}>
+                    {hasBaselineAnswer ? "Case: ready" : "Run baseline first"}
+                  </Pill>
                 </div>
 
                 <textarea
@@ -1286,7 +1336,9 @@ export default function CrosscheckPage() {
                 </div>
               </div>
 
-              <p className="mt-4 text-[11px] text-white/40">TaxAiPro generates drafts for triage only — not legal or tax advice.</p>
+              <p className="mt-4 text-[11px] text-white/40">
+                TaxAiPro generates drafts for triage only — not legal or tax advice.
+              </p>
             </Card>
 
             {(resp?.consensus?.disagreements ?? []).length ? (
@@ -1383,8 +1435,8 @@ export default function CrosscheckPage() {
               </div>
 
               <div className="mt-4 rounded-xl border border-white/10 bg-black/25 p-3 text-[11px] text-white/55">
-                Paid tiers now use Stripe <b>Payment Links</b>. After payment, Stripe should redirect back to{" "}
-                <code>/crosscheck?tier=1|2&amp;session_id=...</code>, which activates the tier locally.
+                Paid tiers use Stripe <b>Checkout</b>. After payment, Stripe redirects back to{" "}
+                <code>/crosscheck?tier=1|2&amp;session_id=...&amp;checkout=success</code>, which activates tier locally.
               </div>
             </div>
           </div>
