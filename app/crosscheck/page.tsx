@@ -1,4 +1,3 @@
-// app/crosscheck/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -474,16 +473,46 @@ export default function CrosscheckPage() {
   }
 
   // If Stripe success_url redirects back with tier in the URL, capture it and persist.
+  // ALSO: send subscription email once (no webhook approach).
   useEffect(() => {
     try {
       const sp = new URLSearchParams(window.location.search);
 
-      const t = sp.get("tier");
+      const t = sp.get("tier") as Tier | null;
+      const sessionId = sp.get("session_id");
       const hasCheckoutSignal =
-        !!sp.get("session_id") || sp.get("checkout") === "success" || sp.get("paid") === "1";
+        !!sessionId || sp.get("checkout") === "success" || sp.get("paid") === "1";
 
       if ((t === "1" || t === "2") && hasCheckoutSignal) {
         setTierLocal(t);
+
+        // ✅ Send subscription email once per session_id (dedupe via localStorage)
+        if (sessionId) {
+          const sentKey = `taxaipro_sub_email_sent_${sessionId}`;
+          const alreadySent = (() => {
+            try {
+              return localStorage.getItem(sentKey) === "1";
+            } catch {
+              return false;
+            }
+          })();
+
+          if (!alreadySent) {
+            fetch("/api/email/subscription", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ tier: t, session_id: sessionId }),
+            })
+              .then(() => {
+                try {
+                  localStorage.setItem(sentKey, "1");
+                } catch {}
+              })
+              .catch(() => {
+                // ignore
+              });
+          }
+        }
 
         // Clean URL
         sp.delete("tier");
@@ -510,13 +539,13 @@ export default function CrosscheckPage() {
     setTier(readTier());
   }, []);
 
-  // ✅ Sync tier from Stripe on load (fixes: paid user signs in on new device -> should be Tier 1/2)
+  // ✅ Sync tier from Stripe on load via your NEW billing endpoint (Tier 0 -> call /api/billing/tier)
   useEffect(() => {
     let cancelled = false;
 
-    async function syncTierFromStripe() {
+    async function syncTierFromBilling() {
       try {
-        const r = await fetch("/api/stripe/checkout", { method: "GET" });
+        const r = await fetch("/api/billing/tier", { method: "GET" });
         if (!r.ok) return;
         const j = (await r.json().catch(() => null)) as any;
         const nextTier = j?.tier;
@@ -528,8 +557,7 @@ export default function CrosscheckPage() {
       }
     }
 
-    // Only bother syncing if we are currently Tier 0
-    if (tier === "0") syncTierFromStripe();
+    if (tier === "0") syncTierFromBilling();
 
     return () => {
       cancelled = true;
@@ -855,6 +883,19 @@ export default function CrosscheckPage() {
     }
   }
 
+  async function logout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // ignore
+    } finally {
+      try {
+        localStorage.removeItem(LS_TIER_KEY);
+      } catch {}
+      window.location.href = "/login";
+    }
+  }
+
   runFnRef.current = run;
 
   useEffect(() => {
@@ -939,7 +980,6 @@ export default function CrosscheckPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {/* ✅ Contact button */}
             <button
               onClick={() => (window.location.href = "/contact")}
               className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
@@ -960,6 +1000,15 @@ export default function CrosscheckPage() {
               title="Plans & upgrades"
             >
               Plans
+            </button>
+
+            {/* ✅ Logout */}
+            <button
+              onClick={logout}
+              className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
+              title="Log out"
+            >
+              Logout
             </button>
 
             {runsLeft ? <Pill tone={runsPillTone as any}>Runs left: {runsLeft}</Pill> : null}

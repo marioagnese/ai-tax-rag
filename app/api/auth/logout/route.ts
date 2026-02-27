@@ -1,20 +1,19 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { SESSION_COOKIE_NAME } from "@/src/lib/auth/session";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
 export async function POST() {
-  const res = NextResponse.json({ ok: true });
+  const c: any = cookies();
+  // Next 15/16 cookies() may be async in some setups; handle both:
+  const store = typeof c?.then === "function" ? await c : c;
 
-  // Clear session cookie (preferred in route handlers)
-  res.cookies.set(SESSION_COOKIE_NAME, "", {
+  store.set(SESSION_COOKIE_NAME, "", {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
-    maxAge: 0,
+    expires: new Date(0),
   });
 
-  return res;
+  return NextResponse.json({ ok: true });
 }
