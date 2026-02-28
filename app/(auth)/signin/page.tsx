@@ -23,10 +23,31 @@ export default function SignInPage() {
     >
       <div className="absolute inset-0 bg-black/10" />
 
-      {/* Top-left logo */}
+      {/* Top-left logo + top-right links */}
       <header className="relative px-6 pt-6">
-        <div className="relative h-16 w-56 sm:h-18 sm:w-64 md:h-20 md:w-72">
-          <Image src="/taxaipro-logo.png" alt="TaxAiPro" fill priority className="object-contain" />
+        <div className="flex items-start justify-between gap-4">
+          <div className="relative h-16 w-56 sm:h-18 sm:w-64 md:h-20 md:w-72">
+            <Image src="/taxaipro-logo.png" alt="TaxAiPro" fill priority className="object-contain" />
+          </div>
+
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => router.push("/how-it-works")}
+              className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
+              title="How TaxAiPro works"
+            >
+              How it works
+            </button>
+
+            <button
+              type="button"
+              onClick={() => router.push("/contact")}
+              className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
+            >
+              Contact
+            </button>
+          </div>
         </div>
       </header>
 
