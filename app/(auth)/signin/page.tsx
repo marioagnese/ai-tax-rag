@@ -34,7 +34,7 @@ export default function SignInPage() {
             <button
               type="button"
               onClick={() => router.push("/how-it-works")}
-              className="rounded-xl border border-white/15 bg-black/80 px-3 py-2 text-xs text-white hover:bg-black/70"
+              className="rounded-xl border border-black/60 bg-black/95 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-black/40 hover:bg-black focus:outline-none focus:ring-2 focus:ring-white/20"
               title="How TaxAiPro works"
             >
               How it works
@@ -43,7 +43,7 @@ export default function SignInPage() {
             <button
               type="button"
               onClick={() => router.push("/contact")}
-              className="rounded-xl border border-white/15 bg-black/80 px-3 py-2 text-xs text-white hover:bg-black/70"
+              className="rounded-xl border border-black/60 bg-black/95 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-black/40 hover:bg-black focus:outline-none focus:ring-2 focus:ring-white/20"
             >
               Contact
             </button>
