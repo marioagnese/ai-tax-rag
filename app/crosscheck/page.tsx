@@ -984,6 +984,14 @@ export default function CrosscheckPage() {
 
           <div className="flex flex-wrap items-center gap-2">
             <button
+              onClick={() => (window.location.href = "/how-it-works")}
+              className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
+              title="How TaxAiPro works"
+            >
+              How it works
+            </button>
+
+            <button
               onClick={() => (window.location.href = "/contact")}
               className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
             >
