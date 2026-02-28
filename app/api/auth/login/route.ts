@@ -1,3 +1,4 @@
+// app/api/auth/login/route.ts
 import { NextResponse, type NextRequest } from "next/server";
 import { getAdminAuth, firebaseAdminConfigured } from "../../../../src/lib/firebase/admin";
 import { SESSION_COOKIE_NAME, mintSessionToken } from "../../../../src/lib/auth/session";
@@ -5,20 +6,26 @@ import { SESSION_COOKIE_NAME, mintSessionToken } from "../../../../src/lib/auth/
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/**
+ * Best-effort welcome email. Never blocks login.
+ * Uses internal token protection if configured.
+ */
 async function trySendWelcomeEmail(req: NextRequest, args: { email?: string; name?: string }) {
   const email = (args.email || "").trim();
   if (!email) return;
 
-  const name =
-    (args.name || "").trim() ||
-    email.split("@")[0] ||
-    "there";
+  const name = ((args.name || "").trim() || email.split("@")[0] || "there").trim();
 
   try {
     const url = new URL("/api/email/welcome", req.url);
+
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    const internal = (process.env.TAXAIPRO_INTERNAL_TOKEN || "").trim();
+    if (internal) headers["x-taxaipro-internal"] = internal;
+
     await fetch(url, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body: JSON.stringify({ email, name }),
     });
   } catch {
@@ -58,19 +65,14 @@ export async function POST(req: NextRequest) {
     }
 
     // ✅ Detect "first-time" user and send welcome email once
-    // Uses Firebase Auth metadata: creationTime vs lastSignInTime.
     try {
       const user = await adminAuth.getUser(decoded.uid);
       const created = user?.metadata?.creationTime || "";
       const last = user?.metadata?.lastSignInTime || "";
-
       const looksNew = !!created && (!last || created === last);
 
       if (looksNew) {
-        await trySendWelcomeEmail(req, {
-          email: decoded.email,
-          name: decoded.name,
-        });
+        await trySendWelcomeEmail(req, { email: decoded.email, name: decoded.name });
       }
     } catch {
       // best-effort; ignore user lookup failures

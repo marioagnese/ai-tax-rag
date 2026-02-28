@@ -1,3 +1,4 @@
+// app/crosscheck/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -59,7 +60,7 @@ const LS_KEY = "taxaipro_runs_v1";
 // Visible watermark to confirm prod deployment updated.
 const BUILD_WATERMARK = "FOLLOWUP_UI_ENABLED";
 
-// Keep tier locally for now (but we ALSO sync from Stripe on load).
+// Keep tier locally for now (but we ALSO sync from billing on load).
 const LS_TIER_KEY = "taxaipro_tier";
 
 /* ---------------- UI primitives ---------------- */
@@ -283,7 +284,9 @@ function safeParseRuns(): SavedRun[] {
           followups: Array.isArray(r.followups) ? (r.followups as any[]).map(String) : [],
           disagreements: Array.isArray(r.disagreements) ? (r.disagreements as any[]).map(String) : [],
           confidence:
-            r.confidence === "low" || r.confidence === "medium" || r.confidence === "high" ? r.confidence : undefined,
+            r.confidence === "low" || r.confidence === "medium" || r.confidence === "high"
+              ? r.confidence
+              : undefined,
           thread,
         };
       })
@@ -480,13 +483,12 @@ export default function CrosscheckPage() {
 
       const t = sp.get("tier") as Tier | null;
       const sessionId = sp.get("session_id");
-      const hasCheckoutSignal =
-        !!sessionId || sp.get("checkout") === "success" || sp.get("paid") === "1";
+      const hasCheckoutSignal = !!sessionId || sp.get("checkout") === "success" || sp.get("paid") === "1";
 
       if ((t === "1" || t === "2") && hasCheckoutSignal) {
         setTierLocal(t);
 
-        // ✅ Send subscription email once per session_id (dedupe via localStorage)
+        // Send subscription email once per session_id (dedupe via localStorage)
         if (sessionId) {
           const sentKey = `taxaipro_sub_email_sent_${sessionId}`;
           const alreadySent = (() => {
@@ -539,7 +541,7 @@ export default function CrosscheckPage() {
     setTier(readTier());
   }, []);
 
-  // ✅ Sync tier from Stripe on load via your NEW billing endpoint (Tier 0 -> call /api/billing/tier)
+  // Sync tier from billing endpoint (Tier 0 -> call /api/billing/tier)
   useEffect(() => {
     let cancelled = false;
 
@@ -711,7 +713,7 @@ export default function CrosscheckPage() {
   }
 
   /**
-   * ✅ Checkout (subscription) via server route:
+   * Checkout (subscription) via server route:
    * - POST /api/stripe/checkout { tier }
    * - Redirect to Stripe-hosted checkout URL
    */
@@ -906,8 +908,7 @@ export default function CrosscheckPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const systemTone =
-    failed.length > 0 && succeeded.length === 0 ? "bad" : failed.length > 0 ? "warn" : "good";
+  const systemTone = failed.length > 0 && succeeded.length === 0 ? "bad" : failed.length > 0 ? "warn" : "good";
 
   const systemLabel =
     failed.length > 0 && succeeded.length === 0
@@ -1002,7 +1003,7 @@ export default function CrosscheckPage() {
               Plans
             </button>
 
-            {/* ✅ Logout */}
+            {/* Logout */}
             <button
               onClick={logout}
               className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
@@ -1053,7 +1054,7 @@ export default function CrosscheckPage() {
                   <option value="Bolivia">Bolivia</option>
                   <option value="Puerto Rico">Puerto Rico</option>
                   <option value="Ecuador">Ecuador</option>
-                  <option value="Reublica Dominicana">Rep. Dominicana</option>
+                  <option value="Republica Dominicana">Rep. Dominicana</option>
                   <option value="Jamaica">Jamaica</option>
                 </optgroup>
 
@@ -1153,11 +1154,7 @@ export default function CrosscheckPage() {
             <Card className="p-0">
               <details open={false} className="p-5">
                 <summary className="cursor-pointer select-none list-none">
-                  <SectionTitle
-                    title="Advanced"
-                    subtitle="Defaults, run overrides, and debug outputs."
-                    right={<Pill>Power users</Pill>}
-                  />
+                  <SectionTitle title="Advanced" subtitle="Defaults, run overrides, and debug outputs." right={<Pill>Power users</Pill>} />
                 </summary>
 
                 <div className="mt-4 space-y-4">
@@ -1303,9 +1300,7 @@ export default function CrosscheckPage() {
               </div>
 
               <div className="mt-4 rounded-2xl border border-white/10 bg-black/35 p-6 min-h-[480px]">
-                <pre className="whitespace-pre-wrap text-[15px] leading-relaxed text-white/92">
-                  {displayText || "—"}
-                </pre>
+                <pre className="whitespace-pre-wrap text-[15px] leading-relaxed text-white/92">{displayText || "—"}</pre>
               </div>
 
               {/* Follow-up card */}
@@ -1385,9 +1380,7 @@ export default function CrosscheckPage() {
                 </div>
               </div>
 
-              <p className="mt-4 text-[11px] text-white/40">
-                TaxAiPro generates drafts for triage only — not legal or tax advice.
-              </p>
+              <p className="mt-4 text-[11px] text-white/40">TaxAiPro generates drafts for triage only — not legal or tax advice.</p>
             </Card>
 
             {(resp?.consensus?.disagreements ?? []).length ? (
@@ -1430,7 +1423,12 @@ export default function CrosscheckPage() {
               </div>
 
               <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-                <div className={cn("rounded-2xl border p-4", tier === "0" ? "border-white/25 bg-white/5" : "border-white/10 bg-black/25")}>
+                <div
+                  className={cn(
+                    "rounded-2xl border p-4",
+                    tier === "0" ? "border-white/25 bg-white/5" : "border-white/10 bg-black/25"
+                  )}
+                >
                   <div className="text-xs font-semibold text-white/85">Tier 0 — Simple</div>
                   <div className="mt-1 text-2xl font-semibold text-white">$0</div>
                   <div className="mt-1 text-xs text-white/60">Runs: 5/day</div>
@@ -1441,14 +1439,21 @@ export default function CrosscheckPage() {
                     }}
                     className={cn(
                       "mt-3 w-full rounded-xl px-3 py-2 text-xs font-semibold",
-                      tier === "0" ? "bg-white text-black" : "border border-white/15 bg-white/5 text-white/85 hover:bg-white/10"
+                      tier === "0"
+                        ? "bg-white text-black"
+                        : "border border-white/15 bg-white/5 text-white/85 hover:bg-white/10"
                     )}
                   >
                     {tier === "0" ? "Current" : "Start free"}
                   </button>
                 </div>
 
-                <div className={cn("rounded-2xl border p-4", tier === "1" ? "border-white/25 bg-white/5" : "border-white/10 bg-black/25")}>
+                <div
+                  className={cn(
+                    "rounded-2xl border p-4",
+                    tier === "1" ? "border-white/25 bg-white/5" : "border-white/10 bg-black/25"
+                  )}
+                >
                   <div className="text-xs font-semibold text-white/85">Tier 1 — Pro</div>
                   <div className="mt-1 text-2xl font-semibold text-white">$3.99</div>
                   <div className="mt-1 text-xs text-white/60">per month · 25/day</div>
@@ -1465,7 +1470,12 @@ export default function CrosscheckPage() {
                   </button>
                 </div>
 
-                <div className={cn("rounded-2xl border p-4", tier === "2" ? "border-white/25 bg-white/5" : "border-white/10 bg-black/25")}>
+                <div
+                  className={cn(
+                    "rounded-2xl border p-4",
+                    tier === "2" ? "border-white/25 bg-white/5" : "border-white/10 bg-black/25"
+                  )}
+                >
                   <div className="text-xs font-semibold text-white/85">Tier 2 — Unlimited</div>
                   <div className="mt-1 text-2xl font-semibold text-white">$15.99</div>
                   <div className="mt-1 text-xs text-white/60">per month · unlimited</div>
@@ -1512,7 +1522,10 @@ export default function CrosscheckPage() {
                 >
                   Cancel
                 </button>
-                <button onClick={doFullReset} className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-black hover:bg-white/90">
+                <button
+                  onClick={doFullReset}
+                  className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-black hover:bg-white/90"
+                >
                   Yes, reset
                 </button>
               </div>
@@ -1543,7 +1556,10 @@ export default function CrosscheckPage() {
                   history.map((h) => (
                     <div
                       key={h.id}
-                      className={cn("rounded-xl border border-white/10 bg-black/25 p-3", selectedId === h.id && "ring-1 ring-white/20")}
+                      className={cn(
+                        "rounded-xl border border-white/10 bg-black/25 p-3",
+                        selectedId === h.id && "ring-1 ring-white/20"
+                      )}
                     >
                       <button onClick={() => loadRun(h)} className="w-full text-left">
                         <div className="text-xs font-semibold text-white/85 line-clamp-2">{h.title}</div>
@@ -1571,7 +1587,9 @@ export default function CrosscheckPage() {
                     </div>
                   ))
                 ) : (
-                  <div className="rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-white/50">No saved runs yet.</div>
+                  <div className="rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-white/50">
+                    No saved runs yet.
+                  </div>
                 )}
               </div>
             </div>
