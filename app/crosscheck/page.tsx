@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type CrosscheckResponse = {
   ok: boolean;
@@ -426,6 +427,7 @@ function formatResetLocal(iso?: string) {
 /* ---------------- Page ---------------- */
 
 export default function CrosscheckPage() {
+  const router = useRouter();
   const [jurisdiction, setJurisdiction] = useState("Panama");
   const [facts, setFacts] = useState("");
   const [globalDefaults, setGlobalDefaults] = useState(
@@ -894,7 +896,7 @@ export default function CrosscheckPage() {
       try {
         localStorage.removeItem(LS_TIER_KEY);
       } catch {}
-      window.location.href = "/login";
+      router.replace("/signin");
     }
   }
 
