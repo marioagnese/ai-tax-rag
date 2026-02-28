@@ -64,6 +64,9 @@ const BUILD_WATERMARK = "FOLLOWUP_UI_ENABLED";
 // Keep tier locally for now (but we ALSO sync from billing on load).
 const LS_TIER_KEY = "taxaipro_tier";
 
+// Autosaved active conversation thread (ChatGPT-like)
+const LS_ACTIVE_THREAD = "taxaipro_active_thread_v1";
+
 /* ---------------- UI primitives ---------------- */
 
 function cn(...xs: Array<string | false | null | undefined>) {
@@ -294,6 +297,31 @@ function safeParseRuns(): SavedRun[] {
       .sort((a, b) => b.createdAt - a.createdAt);
   } catch {
     return [];
+  }
+}
+
+function loadActiveThread(): ThreadMessage[] {
+  try {
+    const raw = localStorage.getItem(LS_ACTIVE_THREAD);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return (parsed as any[])
+      .map(normalizeThreadMessage)
+      .filter((m): m is ThreadMessage => !!m)
+      .sort((a, b) => a.createdAt - b.createdAt);
+  } catch {
+    return [];
+  }
+}
+
+function persistActiveThread(thread: ThreadMessage[]) {
+  try {
+    // Keep last 200 messages to avoid unbounded growth
+    localStorage.setItem(LS_ACTIVE_THREAD, JSON.stringify(thread.slice(-200)));
+  } catch {
+    // ignore
   }
 }
 
@@ -537,11 +565,17 @@ export default function CrosscheckPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load local history + local tier
+  // Load local history + local tier + active thread (autosaved)
   useEffect(() => {
     setHistory(safeParseRuns());
     setTier(readTier());
+    setThread(loadActiveThread());
   }, []);
+
+  // Autosave thread (ChatGPT-like) so users don’t lose prior answers
+  useEffect(() => {
+    persistActiveThread(thread);
+  }, [thread]);
 
   // Sync tier from billing endpoint (Tier 0 -> call /api/billing/tier)
   useEffect(() => {
@@ -760,7 +794,8 @@ export default function CrosscheckPage() {
       return;
     }
 
-    setThread([newMsg("user", q)]);
+    const userMsg = newMsg("user", q);
+    setThread((t) => [...t, userMsg]);
 
     setLoading(true);
     try {
@@ -895,6 +930,7 @@ export default function CrosscheckPage() {
     } finally {
       try {
         localStorage.removeItem(LS_TIER_KEY);
+        localStorage.removeItem(LS_ACTIVE_THREAD);
       } catch {}
       router.replace("/signin");
     }
