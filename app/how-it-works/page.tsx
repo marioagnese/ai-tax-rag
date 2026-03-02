@@ -24,7 +24,17 @@ export default function HowItWorksPage() {
           <div>
             <div className="text-2xl font-semibold text-white/95">How TaxAiPro works</div>
             <div className="mt-2 text-sm text-white/60">
-              Conservative tax triage drafts. Not legal or tax advice.
+              A conservative, multi-model workflow for tax triage and drafting. Not legal or tax advice.
+            </div>
+
+            <div className="mt-6 text-sm leading-relaxed text-white/75 max-w-3xl">
+              Tax questions often depend on small facts, jurisdiction-specific rules, and exceptions. Single-model AI
+              answers can be useful, but they may omit caveats or express undue confidence.
+              <br />
+              <br />
+              TaxAiPro is designed to reduce uncertainty by running multiple leading language models in parallel,
+              comparing their outputs, and producing one conservative consensus draft with explicit assumptions, caveats,
+              and missing facts to validate.
             </div>
           </div>
 
@@ -37,50 +47,73 @@ export default function HowItWorksPage() {
         </div>
 
         <div className="mt-8 grid grid-cols-1 gap-4">
-          <Card title="1) Basic flow">
+          <Card title="1) Purpose (what TaxAiPro is for)">
             <ul className="list-disc pl-5 space-y-2">
-              <li><b>Pick a jurisdiction</b> (and add treaty context in Facts if relevant).</li>
-              <li><b>Paste Facts</b> as bullets (entities, flow, timing, thresholds).</li>
-              <li><b>Run validation</b> to generate a conservative baseline answer.</li>
-              <li><b>Save</b> if you want this run preserved in <b>History</b> (this device only).</li>
+              <li>Drafts conservative tax triage outputs to help structure complex issues quickly.</li>
+              <li>Surfaces assumptions, caveats, and missing facts so you can validate efficiently.</li>
+              <li>Highlights areas of uncertainty when model outputs diverge.</li>
+              <li>Supports structured refinement through follow-up analysis.</li>
             </ul>
           </Card>
 
-          <Card title="2) Follow-ups (how the thread works)">
+          <Card title="2) Basic workflow">
             <ul className="list-disc pl-5 space-y-2">
-              <li>Follow-up continues the same case using: <b>Original question + last consensus answer + your follow-up</b>.</li>
-              <li>Follow-up is meant to refine assumptions, fill missing facts, and test deltas.</li>
-              <li><b>Important:</b> the working thread is client-side. If you refresh or reset without saving, you can lose it.</li>
+              <li>
+                <b>Choose a jurisdiction.</b>
+              </li>
+              <li>
+                <b>Ask a focused question.</b>
+              </li>
+              <li>
+                <b>Add relevant facts</b> (entities, timing, transaction flow, thresholds).
+              </li>
+              <li>
+                <b>Run validation</b> to generate a conservative consensus answer.
+              </li>
+              <li>Refine by adding missing facts and running follow-ups.</li>
             </ul>
           </Card>
 
-          <Card title="3) Saving + History (critical)">
+          <Card title="3) Follow-ups (how the conversation works)">
             <ul className="list-disc pl-5 space-y-2">
-              <li><b>History saves to localStorage</b> on this device/browser only (not synced).</li>
-              <li>If you want to keep a baseline answer, <b>Save right after Run</b>.</li>
-              <li>Starting a new question or running follow-ups will update the current “working” output state.</li>
-              <li>If you need an export: switch Output style (Answer/Memo/Email) then <b>Copy</b> or <b>Download</b>.</li>
+              <li>Follow-ups continue the same case and build a structured thread, similar to a chat.</li>
+              <li>Each follow-up uses the original question, prior consensus output, and your new input.</li>
+              <li>Best use: test a change in facts, clarify ambiguity, or challenge an assumption.</li>
+              <li>Keep follow-ups specific (e.g., “If X applies, does that change Y?”).</li>
             </ul>
           </Card>
 
-          <Card title="4) Plans + limits">
+          <Card title="4) Saving, history, and exports">
             <ul className="list-disc pl-5 space-y-2">
-              <li>Tier affects daily run limits (Tier 2 is unlimited).</li>
-              <li>After Stripe checkout, you’re redirected back and tier is synced.</li>
-              <li>If you hit a limit, the app will prompt you to upgrade.</li>
+              <li>Your active conversation thread is automatically saved on this device while you are logged in.</li>
+              <li>For privacy, the local thread is cleared upon logout.</li>
+              <li>
+                You may use <b>History</b> to preserve named or bookmarked cases on this device.
+              </li>
+              <li>
+                To export: switch Output style (Answer / Memo / Email) and then <b>Copy</b> or <b>Download</b>.
+              </li>
             </ul>
           </Card>
 
-          <Card title="5) What to be careful with">
+          <Card title="5) Plans and limits">
             <ul className="list-disc pl-5 space-y-2">
-              <li><b>Don’t paste sensitive data</b> (SSNs, account numbers, secrets).</li>
-              <li>Model output can be wrong or incomplete—always validate with primary sources.</li>
-              <li>If facts are missing, treat the output as a decision tree, not a conclusion.</li>
+              <li>Plan tier determines daily run limits (Tier 2 offers unlimited runs).</li>
+              <li>After Stripe checkout, you are redirected back and your tier is synced.</li>
+              <li>If you reach a limit, the app will prompt you to upgrade.</li>
+            </ul>
+          </Card>
+
+          <Card title="6) Data handling and limitations">
+            <ul className="list-disc pl-5 space-y-2">
+              <li>Do not paste sensitive data (SSNs, account numbers, credentials, confidential client data).</li>
+              <li>Outputs may be incomplete or incorrect—always validate with primary sources or professional judgment.</li>
+              <li>Where facts are missing, treat the output as a structured decision tree, not a final conclusion.</li>
             </ul>
           </Card>
 
           <div className="rounded-2xl border border-white/10 bg-black/25 p-5 text-[11px] text-white/55">
-            Tip: A good workflow is <b>Run → Paste missing facts → Run again → Save</b>.
+            Suggested workflow: <b>Run → review missing facts → add facts → re-run → export or save the case.</b>
           </div>
         </div>
       </div>
