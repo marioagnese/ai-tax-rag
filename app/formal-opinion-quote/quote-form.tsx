@@ -24,7 +24,11 @@ function cn(...xs: Array<string | false | null | undefined>) {
 }
 
 function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return <div className={cn("rounded-2xl border border-white/10 bg-white/[0.035] backdrop-blur-sm", className)}>{children}</div>;
+  return (
+    <div className={cn("rounded-2xl border border-white/10 bg-white/[0.035] backdrop-blur-sm", className)}>
+      {children}
+    </div>
+  );
 }
 
 function readJsonLS<T>(key: string): T | null {
@@ -42,18 +46,17 @@ function normalizeThread(raw: any[] | null): QuoteThreadMsg[] | undefined {
 
   const cleaned: QuoteThreadMsg[] = [];
   for (const m of raw) {
-    const text = String(m?.text ?? "").trim();
+    const text = String((m as any)?.text ?? "").trim();
     if (!text) continue;
 
-    const role: "user" | "assistant" = m?.role === "assistant" ? "assistant" : "user";
-    const createdAtNum = Number(m?.createdAt);
+    const role: "user" | "assistant" = (m as any)?.role === "assistant" ? "assistant" : "user";
+    const createdAtNum = Number((m as any)?.createdAt);
     const createdAt = Number.isFinite(createdAtNum) ? createdAtNum : undefined;
 
     cleaned.push({ role, text, createdAt });
   }
 
   if (!cleaned.length) return undefined;
-  // Keep the last 30 messages to avoid huge payloads
   return cleaned.slice(-30);
 }
 
@@ -120,12 +123,14 @@ export default function QuoteForm() {
       });
 
       const j = (await r.json().catch(() => null)) as any;
+
       if (!r.ok || !j?.ok) {
         setError(j?.error || `Request failed (${r.status})`);
         return;
       }
 
       setOk(true);
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (e: any) {
       setError(e?.message || "Request failed.");
     } finally {
@@ -138,7 +143,15 @@ export default function QuoteForm() {
       <div className="grid grid-cols-1 gap-4">
         {ok ? (
           <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 p-3 text-sm text-emerald-100">
-            Submitted. We’ll email you with a quote + next steps.
+            <div>Submitted. We’ll email you with a quote + next steps.</div>
+            <div className="mt-3">
+              <a
+                href="/crosscheck"
+                className="inline-flex items-center rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
+              >
+                ← Back to Crosscheck
+              </a>
+            </div>
           </div>
         ) : null}
 
@@ -160,6 +173,7 @@ export default function QuoteForm() {
           <div>
             <div className="text-xs font-semibold text-white/80">Email</div>
             <input
+              type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="mt-2 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-white/20"
