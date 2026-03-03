@@ -11,6 +11,8 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/* ---------------- Env helpers ---------------- */
+
 function env(name: string): string {
   return process.env[name] || "";
 }
@@ -21,6 +23,8 @@ function requireEnv(name: string) {
   return v;
 }
 
+/* ---------------- Types ---------------- */
+
 type CrosscheckUiBody = {
   jurisdiction?: string;
   facts?: string;
@@ -28,9 +32,40 @@ type CrosscheckUiBody = {
   question?: string;
   timeoutMs?: number;
   maxTokens?: number;
-  // allow extra keys but we will ignore them
   [k: string]: unknown;
 };
+
+type ProviderResult = {
+  provider: string;
+  model: string;
+  status: "ok" | "error" | "timeout";
+  ms: number;
+  text?: string;
+  error?: string;
+};
+
+type CrosscheckResponse = {
+  ok: boolean;
+  meta?: {
+    attempted?: Array<{ provider: string; model: string }>;
+    succeeded?: Array<{ provider: string; model: string }>;
+    failed?: Array<{ provider: string; model: string }>;
+    runtime_ms?: number;
+  };
+  consensus?: {
+    answer?: string;
+    caveats?: string[];
+    followups?: string[];
+    disagreements?: string[];
+    confidence?: "low" | "medium" | "high";
+  };
+  providers?: ProviderResult[];
+  error?: string;
+};
+
+type ChatMsg = { role: "system" | "user" | "assistant"; content: string };
+
+/* ---------------- Sanitization ---------------- */
 
 function sanitizeBody(raw: unknown): CrosscheckUiBody {
   const b: CrosscheckUiBody = raw && typeof raw === "object" ? (raw as any) : {};
@@ -40,7 +75,6 @@ function sanitizeBody(raw: unknown): CrosscheckUiBody {
   const constraints = typeof b.constraints === "string" ? b.constraints : undefined;
   const question = typeof b.question === "string" ? b.question.trim() : undefined;
 
-  // clamp to sane bounds (avoid accidental huge values)
   const timeoutMs =
     typeof b.timeoutMs === "number" && Number.isFinite(b.timeoutMs)
       ? Math.max(1_000, Math.min(120_000, Math.floor(b.timeoutMs)))
@@ -51,7 +85,6 @@ function sanitizeBody(raw: unknown): CrosscheckUiBody {
       ? Math.max(64, Math.min(8_192, Math.floor(b.maxTokens)))
       : undefined;
 
-  // only forward known inputs
   return {
     jurisdiction: jurisdiction || undefined,
     facts: typeof facts === "string" ? facts : undefined,
@@ -62,17 +95,164 @@ function sanitizeBody(raw: unknown): CrosscheckUiBody {
   };
 }
 
+/* ---------------- Rate-limit headers ---------------- */
+
 function applyRateLimitHeaders(h: Headers, meta?: RateLimitMeta) {
   if (!meta) return;
 
-  // Standard-ish pattern for client UX:
-  // -1 means unlimited
   h.set("x-taxaipro-tier", String(meta.tier));
   h.set("x-ratelimit-limit", String(meta.limit));
   h.set("x-ratelimit-used", String(meta.used));
   h.set("x-ratelimit-remaining", String(meta.remaining));
   h.set("x-ratelimit-reset", meta.resetAt);
 }
+
+/* ---------------- Provider calls (OpenAI-compatible) ---------------- */
+
+async function callChatCompletions(args: {
+  provider: string;
+  baseURL: string;
+  apiKey: string;
+  model: string;
+  messages: ChatMsg[];
+  temperature: number;
+  timeoutMs: number;
+  maxTokens?: number;
+}): Promise<ProviderResult> {
+  const started = Date.now();
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), args.timeoutMs);
+
+  try {
+    const url = args.baseURL.replace(/\/+$/, "") + "/chat/completions";
+
+    const r = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${args.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: args.model,
+        messages: args.messages,
+        temperature: args.temperature,
+        max_tokens: args.maxTokens,
+      }),
+      signal: ctrl.signal,
+      cache: "no-store",
+    });
+
+    const ms = Date.now() - started;
+    const text = await r.text();
+
+    if (!r.ok) {
+      return {
+        provider: args.provider,
+        model: args.model,
+        status: "error",
+        ms,
+        error: `HTTP ${r.status}: ${text.slice(0, 500)}`,
+      };
+    }
+
+    let json: any = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = null;
+    }
+
+    const content = String(json?.choices?.[0]?.message?.content ?? "").trim();
+
+    if (!content) {
+      return {
+        provider: args.provider,
+        model: args.model,
+        status: "error",
+        ms,
+        error: "Empty response content.",
+      };
+    }
+
+    return {
+      provider: args.provider,
+      model: args.model,
+      status: "ok",
+      ms,
+      text: content,
+    };
+  } catch (e: any) {
+    const ms = Date.now() - started;
+    const aborted = e?.name === "AbortError";
+    return {
+      provider: args.provider,
+      model: args.model,
+      status: aborted ? "timeout" : "error",
+      ms,
+      error: aborted ? "Timed out" : (e?.message || "Request failed"),
+    };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+function buildMessages(body: CrosscheckUiBody): ChatMsg[] {
+  const sysParts: string[] = [];
+  if (body.constraints?.trim()) sysParts.push(body.constraints.trim());
+  if (body.jurisdiction?.trim()) sysParts.push(`Jurisdiction: ${body.jurisdiction.trim()}`);
+  if (body.facts?.trim()) sysParts.push(`Facts:\n${body.facts.trim()}`);
+
+  const system = sysParts.length ? sysParts.join("\n\n") : "Be conservative. Avoid overclaiming.";
+  const user = body.question?.trim() || "";
+
+  return [
+    { role: "system", content: system },
+    { role: "user", content: user },
+  ];
+}
+
+function buildConsensus(providers: ProviderResult[]): CrosscheckResponse["consensus"] {
+  const oks = providers.filter((p) => p.status === "ok" && p.text?.trim());
+  const fails = providers.filter((p) => p.status !== "ok");
+
+  if (!oks.length) {
+    return {
+      answer: "",
+      caveats: [],
+      followups: [],
+      disagreements: [],
+      confidence: "low",
+    };
+  }
+
+  // Conservative baseline consensus:
+  // Prefer OpenAI if present, else first successful.
+  const openai = oks.find((p) => p.provider === "openai");
+  const chosen = openai ?? oks[0];
+
+  // Basic "disagreements" signal:
+  const unique = Array.from(
+    new Set(oks.map((p) => (p.text || "").slice(0, 240).replace(/\s+/g, " ").trim()))
+  ).filter(Boolean);
+
+  const disagreements =
+    unique.length > 1
+      ? unique.slice(0, 3).map((u, i) => `Model disagreement #${i + 1}: ${u}${u.length >= 240 ? "…" : ""}`)
+      : [];
+
+  const confidence: "low" | "medium" | "high" =
+    oks.length >= 3 && fails.length === 0 ? "high" : oks.length >= 2 ? "medium" : "low";
+
+  return {
+    answer: chosen.text!,
+    caveats: [],
+    followups: [],
+    disagreements,
+    confidence,
+  };
+}
+
+/* ---------------- Route ---------------- */
 
 export async function POST(req: NextRequest) {
   let rlMeta: RateLimitMeta | undefined;
@@ -82,8 +262,6 @@ export async function POST(req: NextRequest) {
     await requireSessionUser();
 
     // ---- Rate limit (tier 0/1/2) ----
-    // TEMP: tier comes from header x-taxaipro-tier (0|1|2), default 0.
-    // Later: derive tier from user record (Stripe subscription).
     const tier = getTierFromRequest(req as unknown as Request);
     const clientId = getClientId(req as unknown as Request);
 
@@ -103,32 +281,87 @@ export async function POST(req: NextRequest) {
       return res;
     }
 
-    const key = requireEnv("CROSSCHECK_KEY");
-    const url = new URL("/api/crosscheck", req.nextUrl.origin);
+    const timeoutMs = body.timeoutMs ?? 35_000;
+    const maxTokens = body.maxTokens ?? 1_200;
+    const messages = buildMessages(body);
 
-    const upstream = await fetch(url.toString(), {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-crosscheck-key": key,
+    // ---- Provider config ----
+    // NOTE: change these models if you want. These are sane defaults.
+    const providersToRun = [
+      {
+        provider: "openai",
+        baseURL: "https://api.openai.com/v1",
+        apiKey: requireEnv("OPENAI_API_KEY"),
+        model: env("OPENAI_MODEL") || "gpt-4o-mini",
       },
-      body: JSON.stringify(body),
-      cache: "no-store",
+      {
+        provider: "perplexity",
+        baseURL: env("PERPLEXITY_BASE_URL") || "https://api.perplexity.ai",
+        apiKey: requireEnv("PERPLEXITY_API_KEY"),
+        model: env("PERPLEXITY_MODEL") || "sonar-pro",
+      },
+      {
+        provider: "xai",
+        baseURL: env("XAI_BASE_URL") || "https://api.x.ai",
+        apiKey: requireEnv("XAI_API_KEY"),
+        model: env("XAI_MODEL") || "grok-2-latest",
+      },
+    ];
+
+    const startedAll = Date.now();
+
+    const settled = await Promise.allSettled(
+      providersToRun.map((p) =>
+        callChatCompletions({
+          provider: p.provider,
+          baseURL: p.baseURL,
+          apiKey: p.apiKey,
+          model: p.model,
+          messages,
+          temperature: 0.2,
+          timeoutMs,
+          maxTokens,
+        })
+      )
+    );
+
+    const results: ProviderResult[] = settled.map((s, i) => {
+      if (s.status === "fulfilled") return s.value;
+      return {
+        provider: providersToRun[i].provider,
+        model: providersToRun[i].model,
+        status: "error",
+        ms: Date.now() - startedAll,
+        error: String((s.reason as any)?.message ?? s.reason ?? "error"),
+      };
     });
 
-    const text = await upstream.text();
+    const attempted = providersToRun.map((p) => ({ provider: p.provider, model: p.model }));
+    const succeeded = results
+      .filter((r) => r.status === "ok")
+      .map((r) => ({ provider: r.provider, model: r.model }));
+    const failed = results
+      .filter((r) => r.status !== "ok")
+      .map((r) => ({ provider: r.provider, model: r.model }));
 
-    // Pass-through upstream body + status, but prevent caching.
-    // Also attach rate-limit headers so the UI can show remaining/reset even on success.
-    const res = new NextResponse(text, {
-      status: upstream.status,
-      headers: {
-        "content-type": upstream.headers.get("content-type") || "application/json",
-        "cache-control": "no-store, max-age=0",
+    const response: CrosscheckResponse = {
+      ok: succeeded.length > 0,
+      meta: {
+        attempted,
+        succeeded,
+        failed,
+        runtime_ms: Date.now() - startedAll,
       },
-    });
+      consensus: buildConsensus(results),
+      providers: results,
+      error: succeeded.length > 0 ? undefined : "All providers failed.",
+    };
 
+    const status = response.ok ? 200 : 502;
+
+    const res = NextResponse.json(response, { status });
     applyRateLimitHeaders(res.headers, rlMeta);
+    res.headers.set("cache-control", "no-store, max-age=0");
     return res;
   } catch (err: any) {
     const msg = err?.message || "Unknown error";
@@ -140,17 +373,12 @@ export async function POST(req: NextRequest) {
       return res;
     }
 
-    // rate limit
     if (msg === "RATE_LIMIT") {
       const status = typeof err?.status === "number" ? err.status : 429;
       const meta = (err?.meta as RateLimitMeta | undefined) || rlMeta;
 
       const res = NextResponse.json(
-        {
-          ok: false,
-          error: "Daily usage limit reached for your tier.",
-          meta,
-        },
+        { ok: false, error: "Daily usage limit reached for your tier.", meta },
         { status }
       );
       applyRateLimitHeaders(res.headers, meta);
