@@ -129,8 +129,8 @@ async function callChatCompletions(args: {
     const r = await fetch(url, {
       method: "POST",
       headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${args.apiKey}`,
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${args.apiKey}`,
       },
       body: JSON.stringify({
         model: args.model,
@@ -151,7 +151,7 @@ async function callChatCompletions(args: {
         model: args.model,
         status: "error",
         ms,
-        error: `HTTP ${r.status}: ${text.slice(0, 500)}`,
+        error: `HTTP ${r.status}: ${text.slice(0, 800)}`,
       };
     }
 
@@ -189,12 +189,14 @@ async function callChatCompletions(args: {
       model: args.model,
       status: aborted ? "timeout" : "error",
       ms,
-      error: aborted ? "Timed out" : (e?.message || "Request failed"),
+      error: aborted ? "Timed out" : e?.message || "Request failed",
     };
   } finally {
     clearTimeout(t);
   }
 }
+
+/* ---------------- Prompt building ---------------- */
 
 function buildMessages(body: CrosscheckUiBody): ChatMsg[] {
   const sysParts: string[] = [];
@@ -211,6 +213,8 @@ function buildMessages(body: CrosscheckUiBody): ChatMsg[] {
   ];
 }
 
+/* ---------------- Consensus (simple + conservative) ---------------- */
+
 function buildConsensus(providers: ProviderResult[]): CrosscheckResponse["consensus"] {
   const oks = providers.filter((p) => p.status === "ok" && p.text?.trim());
   const fails = providers.filter((p) => p.status !== "ok");
@@ -225,12 +229,10 @@ function buildConsensus(providers: ProviderResult[]): CrosscheckResponse["consen
     };
   }
 
-  // Conservative baseline consensus:
-  // Prefer OpenAI if present, else first successful.
+  // Prefer OpenAI if present (stable baseline), else first success.
   const openai = oks.find((p) => p.provider === "openai");
   const chosen = openai ?? oks[0];
 
-  // Basic "disagreements" signal:
   const unique = Array.from(
     new Set(oks.map((p) => (p.text || "").slice(0, 240).replace(/\s+/g, " ").trim()))
   ).filter(Boolean);
@@ -252,16 +254,27 @@ function buildConsensus(providers: ProviderResult[]): CrosscheckResponse["consen
   };
 }
 
+/* ---------------- xAI model normalization ---------------- */
+
+function normalizeXaiModel(maybe: string) {
+  const m = (maybe || "").trim();
+  if (!m) return "grok-4-1-fast";
+
+  // Many people guess "grok-4-latest" / "grok-2-latest".
+  // If you pass those, xAI may return a 404. Normalize to a known Grok 4 family model.
+  if (/-latest$/i.test(m)) return "grok-4-1-fast";
+
+  return m;
+}
+
 /* ---------------- Route ---------------- */
 
 export async function POST(req: NextRequest) {
   let rlMeta: RateLimitMeta | undefined;
 
   try {
-    // must be logged in to use the UI route
     await requireSessionUser();
 
-    // ---- Rate limit (tier 0/1/2) ----
     const tier = getTierFromRequest(req as unknown as Request);
     const clientId = getClientId(req as unknown as Request);
 
@@ -285,14 +298,12 @@ export async function POST(req: NextRequest) {
     const maxTokens = body.maxTokens ?? 1_200;
     const messages = buildMessages(body);
 
-    // ---- Provider config ----
-    // NOTE: change these models if you want. These are sane defaults.
     const providersToRun = [
       {
         provider: "openai",
-        baseURL: "https://api.openai.com/v1",
+        baseURL: env("OPENAI_BASE_URL") || "https://api.openai.com/v1",
         apiKey: requireEnv("OPENAI_API_KEY"),
-        model: env("OPENAI_MODEL") || "gpt-4o-mini",
+        model: env("OPENAI_MODEL") || "gpt-4.1-mini",
       },
       {
         provider: "perplexity",
@@ -300,13 +311,13 @@ export async function POST(req: NextRequest) {
         apiKey: requireEnv("PERPLEXITY_API_KEY"),
         model: env("PERPLEXITY_MODEL") || "sonar-pro",
       },
-      { 
+      {
         provider: "xai",
         baseURL: env("XAI_BASE_URL") || "https://api.x.ai/v1",
         apiKey: requireEnv("XAI_API_KEY"),
-        model: env("XAI_MODEL") || "grok-4-latest",
+        model: normalizeXaiModel(env("XAI_MODEL") || "grok-4-1-fast"),
       },
-    ];
+    ] as const;
 
     const startedAll = Date.now();
 
@@ -337,12 +348,8 @@ export async function POST(req: NextRequest) {
     });
 
     const attempted = providersToRun.map((p) => ({ provider: p.provider, model: p.model }));
-    const succeeded = results
-      .filter((r) => r.status === "ok")
-      .map((r) => ({ provider: r.provider, model: r.model }));
-    const failed = results
-      .filter((r) => r.status !== "ok")
-      .map((r) => ({ provider: r.provider, model: r.model }));
+    const succeeded = results.filter((r) => r.status === "ok").map((r) => ({ provider: r.provider, model: r.model }));
+    const failed = results.filter((r) => r.status !== "ok").map((r) => ({ provider: r.provider, model: r.model }));
 
     const response: CrosscheckResponse = {
       ok: succeeded.length > 0,
@@ -377,10 +384,7 @@ export async function POST(req: NextRequest) {
       const status = typeof err?.status === "number" ? err.status : 429;
       const meta = (err?.meta as RateLimitMeta | undefined) || rlMeta;
 
-      const res = NextResponse.json(
-        { ok: false, error: "Daily usage limit reached for your tier.", meta },
-        { status }
-      );
+      const res = NextResponse.json({ ok: false, error: "Daily usage limit reached for your tier.", meta }, { status });
       applyRateLimitHeaders(res.headers, meta);
       res.headers.set("cache-control", "no-store, max-age=0");
       return res;
