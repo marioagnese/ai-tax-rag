@@ -65,8 +65,8 @@ export default function SignInPage() {
 
                 <p className="mt-5 text-sm md:text-base text-white/78 leading-relaxed">
                   TaxAiPro runs multiple models in parallel, crosschecks where they agree and disagree, then rewrites{" "}
-                  <span className="text-white font-medium">one conservative answer</span> with explicit assumptions, caveats,
-                  and missing facts.
+                  <span className="text-white font-medium">one conservative answer</span> with explicit assumptions,
+                  caveats, and missing facts.
                 </p>
 
                 <div className="mt-4 text-sm text-white/70">
@@ -91,40 +91,22 @@ export default function SignInPage() {
               </div>
             </div>
 
-            {/* Right: 60-second demo video */}
+            {/* Right: Clean square demo video (no chrome) */}
             <div className="lg:col-span-6">
-              <div className="rounded-3xl border border-white/10 bg-black/40 backdrop-blur-sm p-4 md:p-5 shadow-2xl shadow-black/40">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold text-white/90">60-second demo</div>
-                    <div className="mt-1 text-xs text-white/60">
-                      See how crosscheck turns model disagreement into a single conservative draft.
-                    </div>
+              <div className="w-full max-w-[520px] ml-auto">
+                {/* fully transparent container */}
+                <div className="rounded-3xl border border-white/10 bg-transparent p-2">
+                  <div className="aspect-square w-full overflow-hidden rounded-2xl border border-white/10 bg-black/30">
+                    <video
+                      className="h-full w-full object-cover"
+                      controls
+                      playsInline
+                      preload="metadata"
+                    >
+                      <source src="/demo-60s.mp4" type="video/mp4" />
+                      Your browser does not support the video tag.
+                    </video>
                   </div>
-
-                  <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-white/75">
-                    Demo
-                  </span>
-                </div>
-
-                <div className="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-black/40">
-                  {/* Change src to your actual video path in /public */}
-                  <video
-                    className="w-full h-auto"
-                    controls
-                    playsInline
-                    preload="metadata"
-                    // poster="/demo-poster.png" // optional if you have it
-                  >
-                    <source src="/demo-60s.mp4" type="video/mp4" />
-                    {/* Optional: add a webm for better compression if you have it */}
-                    {/* <source src="/demo-60s.webm" type="video/webm" /> */}
-                    Your browser does not support the video tag.
-                  </video>
-                </div>
-
-                <div className="mt-3 text-[11px] text-white/55">
-                  Tip: Keep the demo fast—question → missing facts → re-run → memo/email export.
                 </div>
               </div>
             </div>
