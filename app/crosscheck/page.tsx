@@ -490,7 +490,6 @@ export default function CrosscheckPage() {
 
   // UI controls for this redesign
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
-  const [demoOpen, setDemoOpen] = useState(true);
 
   const runFnRef = useRef<() => void>(() => {});
 
@@ -1139,61 +1138,6 @@ export default function CrosscheckPage() {
             ) : null}
           </div>
         ) : null}
-
-        {/* Demo video (60 seconds) */}
-        <div className="mt-4">
-          <Card className="p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-semibold text-white/90">60-second demo</div>
-                <div className="mt-0.5 text-xs text-white/55">
-                  What this does, and how tax teams use it in real life.
-                </div>
-              </div>
-              <button
-                onClick={() => setDemoOpen((v) => !v)}
-                className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/70 hover:bg-white/5"
-              >
-                {demoOpen ? "Hide" : "Show"}
-              </button>
-            </div>
-
-            {demoOpen ? (
-              <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-12">
-                <div className="lg:col-span-7">
-                  {/* Put your video here: /public/demo-60s.mp4 */}
-                  <video
-                    className="w-full rounded-2xl border border-white/10 bg-black/40"
-                    controls
-                    preload="metadata"
-                    playsInline
-                    src="/demo-60s.mp4"
-                  />
-                  <div className="mt-2 text-[11px] text-white/45">
-                    Tip: place the file at <code className="text-white/70">public/demo-60s.mp4</code> and redeploy.
-                  </div>
-                </div>
-
-                <div className="lg:col-span-5">
-                  <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
-                    <div className="text-xs font-semibold text-white/80">Positioning</div>
-                    <div className="mt-2 text-sm text-white/80 leading-relaxed">
-                      TaxAiPro is a conservative triage layer: it surfaces assumptions, missing facts, and
-                      decision thresholds — fast — so tax leads can decide what’s worth deeper research.
-                    </div>
-                    <div className="mt-3 space-y-2 text-sm text-white/75">
-                      <div>• Bottom-line first (executive readable)</div>
-                      <div>• Highlights uncertainty + disagreement</div>
-                      <div>• Turns “unknowns” into an actionable fact-request list</div>
-                      <div>• Optional: formal opinion quote when stakes are high</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-          </Card>
-        </div>
-
         <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-12">
           {/* LEFT: Inputs */}
           <div className="lg:col-span-4 space-y-4">
