@@ -57,11 +57,6 @@ type SavedRun = {
 };
 
 const LS_KEY = "taxaipro_runs_v1";
-
-// Visible watermark to confirm prod deployment updated.
-// CHANGE THIS STRING whenever you push and want to confirm Vercel is serving the latest.
-const BUILD_WATERMARK = "PREMIUM_CTA_VISIBLE_V1";
-
 const LS_TIER_KEY = "taxaipro_tier";
 const LS_ACTIVE_THREAD = "taxaipro_active_thread_v1";
 
@@ -449,7 +444,6 @@ function formatResetLocal(iso?: string) {
 export default function CrosscheckPage() {
   const router = useRouter();
 
-  // internal navigation helper (more reliable than window.location in Next)
   const go = (path: string) => {
     try {
       router.push(path);
@@ -490,10 +484,13 @@ export default function CrosscheckPage() {
 
   const [tier, setTier] = useState<Tier>("0");
   const [upgradeOpen, setUpgradeOpen] = useState(false);
-
   const [checkoutLoadingTier, setCheckoutLoadingTier] = useState<PaidTier | null>(null);
 
   const [rate, setRate] = useState<RateUi>({});
+
+  // UI controls for this redesign
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [demoOpen, setDemoOpen] = useState(true);
 
   const runFnRef = useRef<() => void>(() => {});
 
@@ -549,11 +546,8 @@ export default function CrosscheckPage() {
         window.history.replaceState({}, "", nextUrl);
       }
 
-      if (sp.get("plans") === "1") {
-        setUpgradeOpen(true);
-      }
+      if (sp.get("plans") === "1") setUpgradeOpen(true);
     } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -613,7 +607,7 @@ export default function CrosscheckPage() {
 
     if (outputStyle === "memo") return formatMemo(base);
     if (outputStyle === "email") return formatEmail(base);
-    return (resp?.consensus?.answer || "Your consensus answer will appear here.").trim();
+    return (resp?.consensus?.answer || "Your answer will appear here.").trim();
   }, [outputStyle, resp, jurisdiction, facts, effectiveQuestionForOutput]);
 
   function loadRun(r: SavedRun) {
@@ -919,6 +913,7 @@ export default function CrosscheckPage() {
 
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
+      // keep shortcut, but don't advertise it in UI
       if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") runFnRef.current?.();
     };
     window.addEventListener("keydown", onKey);
@@ -926,18 +921,16 @@ export default function CrosscheckPage() {
   }, []);
 
   const systemTone = failed.length > 0 && succeeded.length === 0 ? "bad" : failed.length > 0 ? "warn" : "good";
-
   const systemLabel =
     failed.length > 0 && succeeded.length === 0
-      ? "System: degraded"
+      ? "Degraded"
       : failed.length > 0
-      ? "System: partial"
+      ? "Partial"
       : resp
-      ? "System: healthy"
-      : "System: —";
+      ? "Healthy"
+      : "—";
 
   const hasBaselineAnswer = !!resp?.consensus?.answer?.trim();
-  const threadTurns = thread.length;
 
   const hasUnsavedWork = useMemo(() => {
     return !!(
@@ -955,51 +948,93 @@ export default function CrosscheckPage() {
 
   const resetLocal = formatResetLocal(rate.resetAt);
 
-  const runsPillTone =
-    typeof rate.remaining === "number"
-      ? rate.remaining === -1
-        ? "good"
-        : rate.remaining <= 0
-        ? "bad"
-        : rate.remaining <= 1
-        ? "warn"
-        : "neutral"
-      : "neutral";
-
-  // Premium CTA visibility logic (always visible, stronger if low confidence / missing facts / disagreements)
+  // Premium CTA signal
   const missingFactsCount = (resp?.consensus?.followups ?? []).length;
   const disagreementsCount = (resp?.consensus?.disagreements ?? []).length;
   const showStrongPremium =
     confidence === "low" || disagreementsCount > 0 || missingFactsCount > 0 || (resp && !resp.consensus?.answer?.trim());
 
+  // Example prompts (3)
+  const EXAMPLES = useMemo(
+    () => [
+      {
+        label: "US inbound services — WHT + PE risk",
+        jurisdiction: "United States",
+        question:
+          "A foreign parent provides management services to a US subsidiary. What are the key US federal tax risks (WHT, PE/ECI, transfer pricing documentation), and what facts change the conclusion?",
+        facts: [
+          "• Foreign parent has no US entity; services delivered remotely + occasional US travel",
+          "• Service fee: cost-plus 7% paid quarterly",
+          "• Contract governs services; no US employees on US payroll",
+          "• Need: ECI/PE indicators, Form W-8/W-9 positions, TP support outline",
+        ].join("\n"),
+      },
+      {
+        label: "Brazil imports — ICMS/PIS/COFINS stack (triage)",
+        jurisdiction: "Brazil",
+        question:
+          "Importing equipment into Brazil for resale: outline the main taxes (II, IPI, PIS/COFINS-Import, ICMS) and the top levers (NCM, ex-tarifário, special regimes). Provide a conservative decision tree.",
+        facts: [
+          "• Importer is a Brazilian CNPJ under Lucro Real",
+          "• Goods are capital equipment (NCM TBD)",
+          "• Destination state: SP",
+          "• CIF known; goal is to estimate landed cost range + missing facts list",
+        ].join("\n"),
+      },
+      {
+        label: "LATAM holding — treaty + source rules",
+        jurisdiction: "Panama",
+        question:
+          "A Panama company invoices foreign clients for consulting services. Is it Panama-source income? Any local corporate tax exposure, substance concerns, or foreign withholding risk (treaty / domestic law)?",
+        facts: [
+          "• Services performed by employees located outside Panama",
+          "• Panama entity has director + bank account; minimal local ops",
+          "• Clients located in LATAM + US",
+          "• Need: where services performed, contract terms, withholding regimes by client country",
+        ].join("\n"),
+      },
+    ],
+    []
+  );
+
+  function applyExample(i: number) {
+    const ex = EXAMPLES[i];
+    if (!ex) return;
+    setJurisdiction(ex.jurisdiction);
+    setQuestion(ex.question);
+    setFacts(ex.facts);
+    // keep defaults; clear overrides
+    setRunOverrides("");
+    // clear output/thread for clean start
+    setResp(null);
+    setError(null);
+    setThread([]);
+    setFollowUp("");
+  }
+
   return (
     <div className="min-h-screen text-white bg-[#070A12]">
+      {/* subtle background */}
       <div className="pointer-events-none fixed inset-0 opacity-80">
         <div className="absolute -top-48 left-1/2 h-[560px] w-[560px] -translate-x-1/2 rounded-full bg-white/10 blur-3xl" />
         <div className="absolute bottom-[-220px] right-[-140px] h-[560px] w-[560px] rounded-full bg-white/5 blur-3xl" />
       </div>
 
       <div className="relative mx-auto max-w-7xl px-4 py-6">
+        {/* HEADER (cleaner, less telemetry) */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <img
               src="/taxaipro-logo.png"
               alt="TaxAiPro"
-              className="h-20 w-20 rounded-xl object-contain border border-white/10 bg-white/5"
+              className="h-16 w-16 rounded-xl object-contain border border-white/10 bg-white/5"
             />
             <div>
-              <div className="mt-1 text-xs text-white/55">Multi Model Conservative Tax Triage</div>
-              <div className="mt-1 text-[10px] text-white/35">Build: {BUILD_WATERMARK}</div>
+              <div className="text-sm font-semibold text-white/90">TaxAiPro</div>
+              <div className="mt-0.5 text-xs text-white/55">Built by a tax executive — for tax executives</div>
               <div className="mt-1 text-[11px] text-white/55">
-                {tierLabel(tier)} · {tierPrice(tier)} · {tierDailyRuns(tier)} runs
+                Conservative multi-model triage · {tierLabel(tier)} · {tierPrice(tier)} · {tierDailyRuns(tier)}
               </div>
-
-              {runsLeft ? (
-                <div className="mt-1 text-[11px] text-white/55">
-                  Runs left today: <span className="text-white/85">{runsLeft}</span>
-                  {resetLocal ? <span className="text-white/40"> · Resets {resetLocal}</span> : null}
-                </div>
-              ) : null}
             </div>
           </div>
 
@@ -1007,16 +1042,8 @@ export default function CrosscheckPage() {
             <button
               onClick={() => go("/how-it-works")}
               className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
-              title="How TaxAiPro works"
             >
               How it works
-            </button>
-
-            <button
-              onClick={() => go("/contact")}
-              className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
-            >
-              Contact
             </button>
 
             <button
@@ -1034,18 +1061,17 @@ export default function CrosscheckPage() {
               Plans
             </button>
 
-            {/* ✅ PREMIUM entry point (make it obvious) */}
             <button
               onClick={() => go("/formal-opinion-quote")}
               className={cn(
-                "rounded-xl border px-3 py-2 text-xs hover:bg-white/10",
+                "rounded-xl border px-3 py-2 text-xs font-semibold",
                 showStrongPremium
-                  ? "border-amber-400/30 bg-amber-400/10 text-amber-100"
-                  : "border-white/15 bg-white/5 text-white/85"
+                  ? "border-amber-400/30 bg-amber-400/10 text-amber-100 hover:bg-amber-400/15"
+                  : "border-white/15 bg-white/5 text-white/85 hover:bg-white/10"
               )}
-              title="Premium: request a formal opinion quote"
+              title="Premium: request formal opinion quote"
             >
-              Premium
+              Request formal opinion
             </button>
 
             <button
@@ -1056,22 +1082,120 @@ export default function CrosscheckPage() {
               Logout
             </button>
 
-            {runsLeft ? <Pill tone={runsPillTone as any}>Runs left: {runsLeft}</Pill> : null}
-            {resetLocal ? <Pill>Resets: {resetLocal}</Pill> : null}
-
-            <Pill>⌘/Ctrl + Enter</Pill>
-            {runtimeMs != null ? <Pill>{runtimeMs}ms</Pill> : null}
-            <Pill tone={resp ? (systemTone as any) : "neutral"}>{systemLabel}</Pill>
+            {/* minimal, non-noisy status */}
             {confidence ? (
               <Pill tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}>
                 Confidence: {confidence}
               </Pill>
             ) : null}
-            {threadTurns ? <Pill>Thread: {Math.max(0, Math.floor(threadTurns / 2))} turns</Pill> : null}
+
+            <button
+              onClick={() => setDiagnosticsOpen((v) => !v)}
+              className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/70 hover:bg-white/5"
+              title="Diagnostics (telemetry)"
+            >
+              {diagnosticsOpen ? "Hide diagnostics" : "Diagnostics"}
+            </button>
           </div>
         </div>
 
+        {/* Diagnostics drawer (telemetry hidden by default) */}
+        {diagnosticsOpen ? (
+          <div className="mt-3 rounded-2xl border border-white/10 bg-black/25 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Pill tone={resp ? (systemTone as any) : "neutral"}>System: {systemLabel}</Pill>
+              {runtimeMs != null ? <Pill>{runtimeMs}ms</Pill> : <Pill>—</Pill>}
+              {runsLeft ? <Pill>Runs left: {runsLeft}</Pill> : <Pill>Runs left: —</Pill>}
+              {resetLocal ? <Pill>Resets: {resetLocal}</Pill> : <Pill>Resets: —</Pill>}
+              <Pill>Thread msgs: {thread.length}</Pill>
+              <Pill>Models ok: {succeeded.length}</Pill>
+              <Pill tone={failed.length ? "warn" : "neutral"}>Models failed: {failed.length}</Pill>
+            </div>
+
+            {/* keep provider outputs hidden under Advanced too, but this is a quick access */}
+            {resp?.providers?.length ? (
+              <details className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3">
+                <summary className="cursor-pointer text-xs font-semibold text-white/70">
+                  Provider outputs (debug)
+                </summary>
+                <div className="mt-3 space-y-3">
+                  {resp.providers.map((p, idx) => (
+                    <div key={idx} className="rounded-xl border border-white/10 bg-black/30 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-xs text-white/70">
+                          <span className="font-semibold text-white/90">{p.provider}</span> · {p.model}
+                        </div>
+                        <div className="text-xs text-white/50">
+                          {p.status !== "ok" ? <span className="text-amber-200">({p.status})</span> : null} {p.ms}ms
+                        </div>
+                      </div>
+                      <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">
+                        {p.status === "ok" ? p.text : p.error}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* Demo video (60 seconds) */}
+        <div className="mt-4">
+          <Card className="p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-white/90">60-second demo</div>
+                <div className="mt-0.5 text-xs text-white/55">
+                  What this does, and how tax teams use it in real life.
+                </div>
+              </div>
+              <button
+                onClick={() => setDemoOpen((v) => !v)}
+                className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/70 hover:bg-white/5"
+              >
+                {demoOpen ? "Hide" : "Show"}
+              </button>
+            </div>
+
+            {demoOpen ? (
+              <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-12">
+                <div className="lg:col-span-7">
+                  {/* Put your video here: /public/demo-60s.mp4 */}
+                  <video
+                    className="w-full rounded-2xl border border-white/10 bg-black/40"
+                    controls
+                    preload="metadata"
+                    playsInline
+                    src="/demo-60s.mp4"
+                  />
+                  <div className="mt-2 text-[11px] text-white/45">
+                    Tip: place the file at <code className="text-white/70">public/demo-60s.mp4</code> and redeploy.
+                  </div>
+                </div>
+
+                <div className="lg:col-span-5">
+                  <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
+                    <div className="text-xs font-semibold text-white/80">Positioning</div>
+                    <div className="mt-2 text-sm text-white/80 leading-relaxed">
+                      TaxAiPro is a conservative triage layer: it surfaces assumptions, missing facts, and
+                      decision thresholds — fast — so tax leads can decide what’s worth deeper research.
+                    </div>
+                    <div className="mt-3 space-y-2 text-sm text-white/75">
+                      <div>• Bottom-line first (executive readable)</div>
+                      <div>• Highlights uncertainty + disagreement</div>
+                      <div>• Turns “unknowns” into an actionable fact-request list</div>
+                      <div>• Optional: formal opinion quote when stakes are high</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </Card>
+        </div>
+
         <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-12">
+          {/* LEFT: Inputs */}
           <div className="lg:col-span-4 space-y-4">
             <Card className="p-5">
               <SectionTitle title="Jurisdiction" subtitle="Country / state. Add treaty context in Facts if relevant." />
@@ -1108,18 +1232,40 @@ export default function CrosscheckPage() {
               </select>
             </Card>
 
+            {/* Example prompts */}
             <Card className="p-5">
-              <SectionTitle title="Your question" subtitle="Keep it short; Place relevant details in Facts." />
+              <SectionTitle title="Example prompts" subtitle="One click loads a realistic tax executive prompt." />
+              <div className="mt-3 grid grid-cols-1 gap-2">
+                {EXAMPLES.map((ex, i) => (
+                  <button
+                    key={i}
+                    onClick={() => applyExample(i)}
+                    className="rounded-2xl border border-white/10 bg-black/25 px-3 py-3 text-left hover:bg-white/5"
+                  >
+                    <div className="text-xs font-semibold text-white/85">{ex.label}</div>
+                    <div className="mt-1 text-[11px] text-white/55">
+                      Loads Jurisdiction + Question + Facts
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </Card>
+
+            <Card className="p-5">
+              <SectionTitle
+                title="Case question"
+                subtitle="Write it like you would ask a senior tax manager. Keep details in Facts."
+              />
               <textarea
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
                 className="mt-3 min-h-[140px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm outline-none focus:border-white/20"
-                placeholder="Example: If a Panama company invoices a foreign client for consulting services, is it Panama-source income? Any withholding exposure?"
+                placeholder="Example: Does this create withholding exposure or PE/ECI risk? What facts change the result?"
               />
 
               <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-xs text-white/50">
-                  Tip: Run once → review “Missing facts” → paste → re-run for higher confidence.
+                  Workflow: Run → review Missing facts → paste into Facts → re-run.
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -1128,7 +1274,7 @@ export default function CrosscheckPage() {
                     disabled={loading}
                     className="h-10 rounded-xl bg-white px-4 text-sm font-semibold text-black hover:bg-white/90 disabled:opacity-50"
                   >
-                    {loading ? "Running…" : "Run validation"}
+                    {loading ? "Running…" : "Run"}
                   </button>
 
                   <button
@@ -1149,24 +1295,24 @@ export default function CrosscheckPage() {
               ) : null}
 
               <div className="mt-3 flex items-center justify-between gap-2">
-                <div className="text-[11px] text-white/45">Thread is client-side only (saved in History if you Save).</div>
+                <div className="text-[11px] text-white/45">Thread is client-side only (saved if you Save).</div>
                 <button
                   onClick={requestReset}
                   className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
-                  title="Resets the whole current case state."
+                  title="Resets the current case state."
                 >
-                  Reset thread
+                  Reset case
                 </button>
               </div>
             </Card>
 
             <Card className="p-0">
-              <details open={false} className="p-5">
+              <details open className="p-5">
                 <summary className="cursor-pointer select-none list-none">
                   <SectionTitle
-                    title="Facts (recommended)"
-                    subtitle="Paste bullets. After Run 1, paste “Missing facts” here."
-                    right={<Pill>Optional</Pill>}
+                    title="Facts"
+                    subtitle="Bullets only. This is what improves accuracy most."
+                    right={<Pill>Recommended</Pill>}
                   />
                 </summary>
 
@@ -1177,13 +1323,13 @@ export default function CrosscheckPage() {
                   placeholder={[
                     "• Entity type, residency, ownership",
                     "• Transaction flow + timing + amounts",
-                    "• Where title passes / who performs services",
-                    "• Thresholds (PE, withholding, VAT registration, etc.)",
+                    "• Where title passes / where services performed",
+                    "• Thresholds (PE, WHT, VAT registration, etc.)",
                   ].join("\n")}
                 />
 
                 <div className="mt-3 flex items-center justify-between gap-3">
-                  <div className="text-[11px] text-white/45">Use bullets. Keep sources/links if you have them.</div>
+                  <div className="text-[11px] text-white/45">Paste “Missing facts” here, then re-run.</div>
                   <button
                     onClick={applyMissingFactsToFacts}
                     disabled={!(resp?.consensus?.followups ?? []).length}
@@ -1198,11 +1344,7 @@ export default function CrosscheckPage() {
             <Card className="p-0">
               <details open={false} className="p-5">
                 <summary className="cursor-pointer select-none list-none">
-                  <SectionTitle
-                    title="Advanced"
-                    subtitle="Defaults, run overrides, and debug outputs."
-                    right={<Pill>Power users</Pill>}
-                  />
+                  <SectionTitle title="Advanced" subtitle="Defaults + run overrides (power users)." right={<Pill>Optional</Pill>} />
                 </summary>
 
                 <div className="mt-4 space-y-4">
@@ -1218,7 +1360,7 @@ export default function CrosscheckPage() {
 
                   <div>
                     <div className="text-xs font-semibold text-white/70">Run overrides</div>
-                    <div className="mt-1 text-[11px] text-white/45">Only for this run (e.g., “assume X”).</div>
+                    <div className="mt-1 text-[11px] text-white/45">Only for this run (e.g., “focus only on withholding”).</div>
                     <textarea
                       value={runOverrides}
                       onChange={(e) => setRunOverrides(e.target.value)}
@@ -1236,9 +1378,10 @@ export default function CrosscheckPage() {
                     </div>
                   </div>
 
+                  {/* keep debug in Advanced too (redundant by design) */}
                   {resp?.providers?.length ? (
                     <details className="rounded-xl border border-white/10 bg-black/20 p-3">
-                      <summary className="cursor-pointer text-xs font-semibold text-white/70">Debug: provider outputs</summary>
+                      <summary className="cursor-pointer text-xs font-semibold text-white/70">Provider outputs (debug)</summary>
                       <div className="mt-3 space-y-3">
                         {resp.providers.map((p, idx) => (
                           <div key={idx} className="rounded-xl border border-white/10 bg-black/30 p-3">
@@ -1264,11 +1407,12 @@ export default function CrosscheckPage() {
             </Card>
           </div>
 
+          {/* RIGHT: Output */}
           <div className="lg:col-span-8 space-y-4">
             <Card className="p-5">
               <SectionTitle
                 title="Output"
-                subtitle="Switch style, then copy or download."
+                subtitle="Export-ready: Answer, Memo, or Email draft."
                 right={
                   <div className="flex items-center gap-2">
                     <button
@@ -1323,7 +1467,11 @@ export default function CrosscheckPage() {
                 <button
                   onClick={() => {
                     const base =
-                      outputStyle === "memo" ? "taxaipro-memo" : outputStyle === "email" ? "taxaipro-email" : "taxaipro-answer";
+                      outputStyle === "memo"
+                        ? "taxaipro-memo"
+                        : outputStyle === "email"
+                        ? "taxaipro-email"
+                        : "taxaipro-answer";
                     downloadText(`${base}.txt`, displayText);
                   }}
                   className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
@@ -1331,22 +1479,8 @@ export default function CrosscheckPage() {
                   Download
                 </button>
 
-                {/* ✅ PREMIUM CTA (always visible) */}
-                <button
-                  onClick={() => go("/formal-opinion-quote")}
-                  className={cn(
-                    "ml-auto rounded-xl border px-3 py-2 text-xs font-semibold",
-                    showStrongPremium
-                      ? "border-amber-400/30 bg-amber-400/10 text-amber-100 hover:bg-amber-400/15"
-                      : "border-white/15 bg-white/5 text-white/85 hover:bg-white/10"
-                  )}
-                  title="Premium: request formal opinion quote"
-                >
-                  Request formal opinion (Premium)
-                </button>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  {resp ? <Pill tone={systemTone as any}>{systemLabel}</Pill> : null}
+                <div className="ml-auto flex items-center gap-2">
+                  {resp ? <Pill tone={systemTone as any}>System: {systemLabel}</Pill> : <Pill>System: —</Pill>}
                   {confidence ? (
                     <Pill tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}>
                       Confidence: {confidence}
@@ -1359,9 +1493,9 @@ export default function CrosscheckPage() {
                 <div className="mt-3 rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <div className="text-xs font-semibold text-amber-100">Premium option available</div>
+                      <div className="text-xs font-semibold text-amber-100">Premium option (defensible write-up)</div>
                       <div className="mt-1 text-[11px] text-white/60">
-                        If you need a defensible write-up (structured facts + issues + conclusions + caveats), request a formal opinion quote.
+                        When stakes are high: structured facts → issues → conclusions → caveats, with a quote request.
                         {missingFactsCount ? ` Missing facts flagged: ${missingFactsCount}.` : ""}
                         {disagreementsCount ? ` Model disagreements: ${disagreementsCount}.` : ""}
                       </div>
@@ -1380,7 +1514,7 @@ export default function CrosscheckPage() {
                       className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
                       title="Switch to memo format"
                     >
-                      Switch to Memo format
+                      Switch to Memo
                     </button>
                   </div>
                 </div>
@@ -1390,27 +1524,25 @@ export default function CrosscheckPage() {
                 <pre className="whitespace-pre-wrap text-[15px] leading-relaxed text-white/92">{displayText || "—"}</pre>
               </div>
 
-              {/* Follow-up card */}
+              {/* Follow-up */}
               <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="text-xs font-semibold text-white/80">Follow-up</div>
-                    <div className="mt-1 text-[11px] text-white/50">
-                      Continues the same case: original question + last answer + your follow-up.
-                    </div>
+                    <div className="mt-1 text-[11px] text-white/50">Continues the same case with context.</div>
                   </div>
-                  <Pill tone={hasBaselineAnswer ? "good" : "neutral"}>{hasBaselineAnswer ? "Case: ready" : "Run baseline first"}</Pill>
+                  <Pill tone={hasBaselineAnswer ? "good" : "neutral"}>{hasBaselineAnswer ? "Ready" : "Run first"}</Pill>
                 </div>
 
                 <textarea
                   value={followUp}
                   onChange={(e) => setFollowUp(e.target.value)}
                   className="mt-3 min-h-[90px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm outline-none focus:border-white/20"
-                  placeholder="Example: If the services are performed partly in Panama (management), does that change source rules or PE exposure?"
+                  placeholder="Example: If services are performed partly in-country, does that change source rules / PE risk?"
                 />
 
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="text-[11px] text-white/45">Client-side thread for now. Later: DB + messages[] API.</div>
+                  <div className="text-[11px] text-white/45">Client-side thread for now.</div>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={runFollowUp}
