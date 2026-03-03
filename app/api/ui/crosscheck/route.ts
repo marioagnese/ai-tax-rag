@@ -14,7 +14,8 @@ export const dynamic = "force-dynamic";
 /* ---------------- Env helpers ---------------- */
 
 function env(name: string): string {
-  return process.env[name] || "";
+  // Trim to avoid Vercel env var whitespace/newline bugs.
+  return (process.env[name] || "").trim();
 }
 
 function requireEnv(name: string) {
@@ -70,10 +71,12 @@ type ChatMsg = { role: "system" | "user" | "assistant"; content: string };
 function sanitizeBody(raw: unknown): CrosscheckUiBody {
   const b: CrosscheckUiBody = raw && typeof raw === "object" ? (raw as any) : {};
 
-  const jurisdiction = typeof b.jurisdiction === "string" ? b.jurisdiction.trim() : undefined;
+  const jurisdiction =
+    typeof b.jurisdiction === "string" ? b.jurisdiction.trim() : undefined;
   const facts = typeof b.facts === "string" ? b.facts : undefined;
   const constraints = typeof b.constraints === "string" ? b.constraints : undefined;
-  const question = typeof b.question === "string" ? b.question.trim() : undefined;
+  const question =
+    typeof b.question === "string" ? b.question.trim() : undefined;
 
   const timeoutMs =
     typeof b.timeoutMs === "number" && Number.isFinite(b.timeoutMs)
@@ -109,6 +112,26 @@ function applyRateLimitHeaders(h: Headers, meta?: RateLimitMeta) {
 
 /* ---------------- Provider calls (OpenAI-compatible) ---------------- */
 
+function normalizeBaseForProvider(provider: string, baseURL: string) {
+  const base = (baseURL || "").trim().replace(/\/+$/, "");
+
+  // Defaults if env not set
+  if (!base) {
+    if (provider === "openai") return "https://api.openai.com/v1";
+    if (provider === "perplexity") return "https://api.perplexity.ai";
+    if (provider === "xai") return "https://api.x.ai/v1";
+    return "";
+  }
+
+  // xAI: allow env to be https://api.x.ai OR https://api.x.ai/v1
+  if (provider === "xai") {
+    return base.endsWith("/v1") ? base : `${base}/v1`;
+  }
+
+  // OpenAI / Perplexity: treat base as-is; our caller appends /chat/completions
+  return base;
+}
+
 async function callChatCompletions(args: {
   provider: string;
   baseURL: string;
@@ -124,10 +147,8 @@ async function callChatCompletions(args: {
   const t = setTimeout(() => ctrl.abort(), args.timeoutMs);
 
   try {
-    // ✅ Force /v1 even if baseURL is set to https://api.x.ai
-    const base = args.baseURL.replace(/\/+$/, "");
-    const baseV1 = base.endsWith("/v1") ? base : `${base}/v1`;
-    const url = `${baseV1}/chat/completions`;
+    const base = normalizeBaseForProvider(args.provider, args.baseURL);
+    const url = `${base.replace(/\/+$/, "")}/chat/completions`;
 
     const r = await fetch(url, {
       method: "POST",
@@ -205,10 +226,13 @@ async function callChatCompletions(args: {
 function buildMessages(body: CrosscheckUiBody): ChatMsg[] {
   const sysParts: string[] = [];
   if (body.constraints?.trim()) sysParts.push(body.constraints.trim());
-  if (body.jurisdiction?.trim()) sysParts.push(`Jurisdiction: ${body.jurisdiction.trim()}`);
+  if (body.jurisdiction?.trim())
+    sysParts.push(`Jurisdiction: ${body.jurisdiction.trim()}`);
   if (body.facts?.trim()) sysParts.push(`Facts:\n${body.facts.trim()}`);
 
-  const system = sysParts.length ? sysParts.join("\n\n") : "Be conservative. Avoid overclaiming.";
+  const system = sysParts.length
+    ? sysParts.join("\n\n")
+    : "Be conservative. Avoid overclaiming.";
   const user = body.question?.trim() || "";
 
   return [
@@ -219,7 +243,9 @@ function buildMessages(body: CrosscheckUiBody): ChatMsg[] {
 
 /* ---------------- Consensus (simple + conservative) ---------------- */
 
-function buildConsensus(providers: ProviderResult[]): CrosscheckResponse["consensus"] {
+function buildConsensus(
+  providers: ProviderResult[]
+): CrosscheckResponse["consensus"] {
   const oks = providers.filter((p) => p.status === "ok" && p.text?.trim());
   const fails = providers.filter((p) => p.status !== "ok");
 
@@ -233,22 +259,34 @@ function buildConsensus(providers: ProviderResult[]): CrosscheckResponse["consen
     };
   }
 
+  // Prefer OpenAI if present (stable baseline), else first success.
   const openai = oks.find((p) => p.provider === "openai");
   const chosen = openai ?? oks[0];
 
   const unique = Array.from(
-    new Set(oks.map((p) => (p.text || "").slice(0, 240).replace(/\s+/g, " ").trim()))
-  ).filter(Boolean);
+    new Set(
+      oks
+        .map((p) => (p.text || "").slice(0, 240).replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+    )
+  );
 
   const disagreements =
     unique.length > 1
       ? unique
           .slice(0, 3)
-          .map((u, i) => `Model disagreement #${i + 1}: ${u}${u.length >= 240 ? "…" : ""}`)
+          .map(
+            (u, i) =>
+              `Model disagreement #${i + 1}: ${u}${u.length >= 240 ? "…" : ""}`
+          )
       : [];
 
   const confidence: "low" | "medium" | "high" =
-    oks.length >= 3 && fails.length === 0 ? "high" : oks.length >= 2 ? "medium" : "low";
+    oks.length >= 3 && fails.length === 0
+      ? "high"
+      : oks.length >= 2
+      ? "medium"
+      : "low";
 
   return {
     answer: chosen.text!,
@@ -263,11 +301,10 @@ function buildConsensus(providers: ProviderResult[]): CrosscheckResponse["consen
 
 function normalizeXaiModel(maybe: string) {
   const m = (maybe || "").trim();
-  if (!m) return "grok-4-1-fast";
+  if (!m) return "grok-4-1-fast-reasoning"; // safe default
 
-  // If someone sets an invalid guessed "grok-*-latest", normalize to a known model.
-  // (If you later confirm a -latest alias exists, remove this.)
-  if (/grok-\d+-latest$/i.test(m)) return "grok-4-1-fast";
+  // People guess grok-*-latest; normalize to a known available alias
+  if (/-latest$/i.test(m)) return "grok-4-1-fast-reasoning";
 
   return m;
 }
@@ -278,8 +315,10 @@ export async function POST(req: NextRequest) {
   let rlMeta: RateLimitMeta | undefined;
 
   try {
+    // Must be logged in to use the UI route
     await requireSessionUser();
 
+    // ---- Rate limit (tier 0/1/2) ----
     const tier = getTierFromRequest(req as unknown as Request);
     const clientId = getClientId(req as unknown as Request);
 
@@ -293,7 +332,10 @@ export async function POST(req: NextRequest) {
     const body = sanitizeBody(raw);
 
     if (!body.question) {
-      const res = NextResponse.json({ ok: false, error: "Missing 'question'." }, { status: 400 });
+      const res = NextResponse.json(
+        { ok: false, error: "Missing 'question'." },
+        { status: 400 }
+      );
       applyRateLimitHeaders(res.headers, rlMeta);
       res.headers.set("cache-control", "no-store, max-age=0");
       return res;
@@ -303,6 +345,7 @@ export async function POST(req: NextRequest) {
     const maxTokens = body.maxTokens ?? 1_200;
     const messages = buildMessages(body);
 
+    // ---- Provider config ----
     const providersToRun = [
       {
         provider: "openai",
@@ -318,9 +361,10 @@ export async function POST(req: NextRequest) {
       },
       {
         provider: "xai",
-        baseURL: env("XAI_BASE_URL") || "https://api.x.ai", // can be with or without /v1 now
+        // can be https://api.x.ai OR https://api.x.ai/v1 — we normalize to /v1
+        baseURL: env("XAI_BASE_URL") || "https://api.x.ai",
         apiKey: requireEnv("XAI_API_KEY"),
-        model: normalizeXaiModel(env("XAI_MODEL") || "grok-4-1-fast"),
+        model: normalizeXaiModel(env("XAI_MODEL") || "grok-4-1-fast-reasoning"),
       },
     ] as const;
 
@@ -352,7 +396,10 @@ export async function POST(req: NextRequest) {
       };
     });
 
-    const attempted = providersToRun.map((p) => ({ provider: p.provider, model: p.model }));
+    const attempted = providersToRun.map((p) => ({
+      provider: p.provider,
+      model: p.model,
+    }));
     const succeeded = results
       .filter((r) => r.status === "ok")
       .map((r) => ({ provider: r.provider, model: r.model }));
@@ -383,7 +430,10 @@ export async function POST(req: NextRequest) {
     const msg = err?.message || "Unknown error";
 
     if (msg === "UNAUTHORIZED") {
-      const res = NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+      const res = NextResponse.json(
+        { ok: false, error: "Unauthorized" },
+        { status: 401 }
+      );
       applyRateLimitHeaders(res.headers, rlMeta);
       res.headers.set("cache-control", "no-store, max-age=0");
       return res;
@@ -393,7 +443,10 @@ export async function POST(req: NextRequest) {
       const status = typeof err?.status === "number" ? err.status : 429;
       const meta = (err?.meta as RateLimitMeta | undefined) || rlMeta;
 
-      const res = NextResponse.json({ ok: false, error: "Daily usage limit reached for your tier.", meta }, { status });
+      const res = NextResponse.json(
+        { ok: false, error: "Daily usage limit reached for your tier.", meta },
+        { status }
+      );
       applyRateLimitHeaders(res.headers, meta);
       res.headers.set("cache-control", "no-store, max-age=0");
       return res;
