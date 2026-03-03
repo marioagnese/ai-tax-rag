@@ -300,11 +300,11 @@ export async function POST(req: NextRequest) {
         apiKey: requireEnv("PERPLEXITY_API_KEY"),
         model: env("PERPLEXITY_MODEL") || "sonar-pro",
       },
-      {
+      { 
         provider: "xai",
-        baseURL: env("XAI_BASE_URL") || "https://api.x.ai",
+        baseURL: env("XAI_BASE_URL") || "https://api.x.ai/v1",
         apiKey: requireEnv("XAI_API_KEY"),
-        model: env("XAI_MODEL") || "grok-2-latest",
+        model: env("XAI_MODEL") || "grok-4-latest",
       },
     ];
 
