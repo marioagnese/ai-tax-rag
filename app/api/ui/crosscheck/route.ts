@@ -124,19 +124,23 @@ async function callChatCompletions(args: {
   const t = setTimeout(() => ctrl.abort(), args.timeoutMs);
 
   try {
-    const url = args.baseURL.replace(/\/+$/, "") + "/chat/completions";
+    // ✅ Force /v1 even if baseURL is set to https://api.x.ai
+    const base = args.baseURL.replace(/\/+$/, "");
+    const baseV1 = base.endsWith("/v1") ? base : `${base}/v1`;
+    const url = `${baseV1}/chat/completions`;
 
     const r = await fetch(url, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${args.apiKey}`,
+        "content-type": "application/json",
+        authorization: `Bearer ${args.apiKey}`,
       },
       body: JSON.stringify({
         model: args.model,
         messages: args.messages,
         temperature: args.temperature,
         max_tokens: args.maxTokens,
+        stream: false,
       }),
       signal: ctrl.signal,
       cache: "no-store",
@@ -229,7 +233,6 @@ function buildConsensus(providers: ProviderResult[]): CrosscheckResponse["consen
     };
   }
 
-  // Prefer OpenAI if present (stable baseline), else first success.
   const openai = oks.find((p) => p.provider === "openai");
   const chosen = openai ?? oks[0];
 
@@ -239,7 +242,9 @@ function buildConsensus(providers: ProviderResult[]): CrosscheckResponse["consen
 
   const disagreements =
     unique.length > 1
-      ? unique.slice(0, 3).map((u, i) => `Model disagreement #${i + 1}: ${u}${u.length >= 240 ? "…" : ""}`)
+      ? unique
+          .slice(0, 3)
+          .map((u, i) => `Model disagreement #${i + 1}: ${u}${u.length >= 240 ? "…" : ""}`)
       : [];
 
   const confidence: "low" | "medium" | "high" =
@@ -260,9 +265,9 @@ function normalizeXaiModel(maybe: string) {
   const m = (maybe || "").trim();
   if (!m) return "grok-4-1-fast";
 
-  // Many people guess "grok-4-latest" / "grok-2-latest".
-  // If you pass those, xAI may return a 404. Normalize to a known Grok 4 family model.
-  if (/-latest$/i.test(m)) return "grok-4-1-fast";
+  // If someone sets an invalid guessed "grok-*-latest", normalize to a known model.
+  // (If you later confirm a -latest alias exists, remove this.)
+  if (/grok-\d+-latest$/i.test(m)) return "grok-4-1-fast";
 
   return m;
 }
@@ -313,7 +318,7 @@ export async function POST(req: NextRequest) {
       },
       {
         provider: "xai",
-        baseURL: env("XAI_BASE_URL") || "https://api.x.ai/v1",
+        baseURL: env("XAI_BASE_URL") || "https://api.x.ai", // can be with or without /v1 now
         apiKey: requireEnv("XAI_API_KEY"),
         model: normalizeXaiModel(env("XAI_MODEL") || "grok-4-1-fast"),
       },
@@ -348,8 +353,12 @@ export async function POST(req: NextRequest) {
     });
 
     const attempted = providersToRun.map((p) => ({ provider: p.provider, model: p.model }));
-    const succeeded = results.filter((r) => r.status === "ok").map((r) => ({ provider: r.provider, model: r.model }));
-    const failed = results.filter((r) => r.status !== "ok").map((r) => ({ provider: r.provider, model: r.model }));
+    const succeeded = results
+      .filter((r) => r.status === "ok")
+      .map((r) => ({ provider: r.provider, model: r.model }));
+    const failed = results
+      .filter((r) => r.status !== "ok")
+      .map((r) => ({ provider: r.provider, model: r.model }));
 
     const response: CrosscheckResponse = {
       ok: succeeded.length > 0,
