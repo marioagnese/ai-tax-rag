@@ -460,7 +460,6 @@ export default function CrosscheckPage() {
       "Be conservative; avoid overclaiming.",
       "Start with a bottom-line first.",
       "List assumptions, missing facts, and caveats.",
-      "If multiple outcomes exist, show decision tree / thresholds.",
     ].join("\n")
   );
   const [runOverrides, setRunOverrides] = useState("");
@@ -488,7 +487,6 @@ export default function CrosscheckPage() {
 
   const [rate, setRate] = useState<RateUi>({});
 
-  // UI controls for this redesign
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
 
   const runFnRef = useRef<() => void>(() => {});
@@ -912,7 +910,6 @@ export default function CrosscheckPage() {
 
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
-      // keep shortcut, but don't advertise it in UI
       if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") runFnRef.current?.();
     };
     window.addEventListener("keydown", onKey);
@@ -947,7 +944,7 @@ export default function CrosscheckPage() {
 
   const resetLocal = formatResetLocal(rate.resetAt);
 
-  // Premium CTA signal
+  // Premium signal remains ONLY for header highlight (no in-answer box)
   const missingFactsCount = (resp?.consensus?.followups ?? []).length;
   const disagreementsCount = (resp?.consensus?.disagreements ?? []).length;
   const showStrongPremium =
@@ -972,7 +969,7 @@ export default function CrosscheckPage() {
         label: "Brazil imports — ICMS/PIS/COFINS stack (triage)",
         jurisdiction: "Brazil",
         question:
-          "Importing equipment into Brazil for resale: outline the main taxes (II, IPI, PIS/COFINS-Import, ICMS) and the top levers (NCM, ex-tarifário, special regimes). Provide a conservative decision tree.",
+          "Importing equipment into Brazil for resale: outline the main taxes (II, IPI, PIS/COFINS-Import, ICMS) and the top levers (NCM, ex-tarifário, special regimes). Keep it conservative and list missing facts.",
         facts: [
           "• Importer is a Brazilian CNPJ under Lucro Real",
           "• Goods are capital equipment (NCM TBD)",
@@ -1002,9 +999,7 @@ export default function CrosscheckPage() {
     setJurisdiction(ex.jurisdiction);
     setQuestion(ex.question);
     setFacts(ex.facts);
-    // keep defaults; clear overrides
     setRunOverrides("");
-    // clear output/thread for clean start
     setResp(null);
     setError(null);
     setThread([]);
@@ -1020,7 +1015,7 @@ export default function CrosscheckPage() {
       </div>
 
       <div className="relative mx-auto max-w-7xl px-4 py-6">
-        {/* HEADER (cleaner, less telemetry) */}
+        {/* HEADER */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <img
@@ -1081,7 +1076,6 @@ export default function CrosscheckPage() {
               Logout
             </button>
 
-            {/* minimal, non-noisy status */}
             {confidence ? (
               <Pill tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}>
                 Confidence: {confidence}
@@ -1098,7 +1092,7 @@ export default function CrosscheckPage() {
           </div>
         </div>
 
-        {/* Diagnostics drawer (telemetry hidden by default) */}
+        {/* Diagnostics drawer */}
         {diagnosticsOpen ? (
           <div className="mt-3 rounded-2xl border border-white/10 bg-black/25 p-4">
             <div className="flex flex-wrap items-center gap-2">
@@ -1111,7 +1105,6 @@ export default function CrosscheckPage() {
               <Pill tone={failed.length ? "warn" : "neutral"}>Models failed: {failed.length}</Pill>
             </div>
 
-            {/* keep provider outputs hidden under Advanced too, but this is a quick access */}
             {resp?.providers?.length ? (
               <details className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3">
                 <summary className="cursor-pointer text-xs font-semibold text-white/70">
@@ -1138,6 +1131,7 @@ export default function CrosscheckPage() {
             ) : null}
           </div>
         ) : null}
+
         <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-12">
           {/* LEFT: Inputs */}
           <div className="lg:col-span-4 space-y-4">
@@ -1176,30 +1170,8 @@ export default function CrosscheckPage() {
               </select>
             </Card>
 
-            {/* Example prompts */}
             <Card className="p-5">
-              <SectionTitle title="Example prompts" subtitle="One click loads a realistic tax executive prompt." />
-              <div className="mt-3 grid grid-cols-1 gap-2">
-                {EXAMPLES.map((ex, i) => (
-                  <button
-                    key={i}
-                    onClick={() => applyExample(i)}
-                    className="rounded-2xl border border-white/10 bg-black/25 px-3 py-3 text-left hover:bg-white/5"
-                  >
-                    <div className="text-xs font-semibold text-white/85">{ex.label}</div>
-                    <div className="mt-1 text-[11px] text-white/55">
-                      Loads Jurisdiction + Question + Facts
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </Card>
-
-            <Card className="p-5">
-              <SectionTitle
-                title="Case question"
-                subtitle="Write it like you would ask a senior tax manager. Keep details in Facts."
-              />
+              <SectionTitle title="Question" subtitle="One clear question. Details go in Facts." />
               <textarea
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
@@ -1208,9 +1180,7 @@ export default function CrosscheckPage() {
               />
 
               <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-xs text-white/50">
-                  Workflow: Run → review Missing facts → paste into Facts → re-run.
-                </div>
+                <div className="text-xs text-white/50">Workflow: Run → review Missing facts → paste into Facts → re-run.</div>
 
                 <div className="flex items-center gap-2">
                   <button
@@ -1253,11 +1223,7 @@ export default function CrosscheckPage() {
             <Card className="p-0">
               <details open className="p-5">
                 <summary className="cursor-pointer select-none list-none">
-                  <SectionTitle
-                    title="Facts"
-                    subtitle="Bullets only. This is what improves accuracy most."
-                    right={<Pill>Recommended</Pill>}
-                  />
+                  <SectionTitle title="Facts" subtitle="Bullets. Most important input." right={<Pill>Recommended</Pill>} />
                 </summary>
 
                 <textarea
@@ -1281,6 +1247,28 @@ export default function CrosscheckPage() {
                   >
                     Paste missing facts
                   </button>
+                </div>
+              </details>
+            </Card>
+
+            {/* Examples (collapsed, after Facts) */}
+            <Card className="p-0">
+              <details className="p-5">
+                <summary className="cursor-pointer select-none list-none">
+                  <SectionTitle title="Examples" subtitle="Optional. Click to preload Question + Facts." right={<Pill>Optional</Pill>} />
+                </summary>
+
+                <div className="mt-4 grid grid-cols-1 gap-2">
+                  {EXAMPLES.map((ex, i) => (
+                    <button
+                      key={i}
+                      onClick={() => applyExample(i)}
+                      className="rounded-2xl border border-white/10 bg-black/25 px-3 py-3 text-left hover:bg-white/5"
+                    >
+                      <div className="text-xs font-semibold text-white/85">{ex.label}</div>
+                      <div className="mt-1 text-[11px] text-white/55">Preloads Jurisdiction + Question + Facts</div>
+                    </button>
+                  ))}
                 </div>
               </details>
             </Card>
@@ -1322,7 +1310,6 @@ export default function CrosscheckPage() {
                     </div>
                   </div>
 
-                  {/* keep debug in Advanced too (redundant by design) */}
                   {resp?.providers?.length ? (
                     <details className="rounded-xl border border-white/10 bg-black/20 p-3">
                       <summary className="cursor-pointer text-xs font-semibold text-white/70">Provider outputs (debug)</summary>
@@ -1425,44 +1412,8 @@ export default function CrosscheckPage() {
 
                 <div className="ml-auto flex items-center gap-2">
                   {resp ? <Pill tone={systemTone as any}>System: {systemLabel}</Pill> : <Pill>System: —</Pill>}
-                  {confidence ? (
-                    <Pill tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}>
-                      Confidence: {confidence}
-                    </Pill>
-                  ) : null}
                 </div>
               </div>
-
-              {showStrongPremium ? (
-                <div className="mt-3 rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-xs font-semibold text-amber-100">Premium option (defensible write-up)</div>
-                      <div className="mt-1 text-[11px] text-white/60">
-                        When stakes are high: structured facts → issues → conclusions → caveats, with a quote request.
-                        {missingFactsCount ? ` Missing facts flagged: ${missingFactsCount}.` : ""}
-                        {disagreementsCount ? ` Model disagreements: ${disagreementsCount}.` : ""}
-                      </div>
-                    </div>
-                    <Pill tone="warn">Premium</Pill>
-                  </div>
-                  <div className="mt-3 flex items-center gap-2">
-                    <button
-                      onClick={() => go("/formal-opinion-quote")}
-                      className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-black hover:bg-white/90"
-                    >
-                      Open quote form
-                    </button>
-                    <button
-                      onClick={() => setOutputStyle("memo")}
-                      className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
-                      title="Switch to memo format"
-                    >
-                      Switch to Memo
-                    </button>
-                  </div>
-                </div>
-              ) : null}
 
               <div className="mt-4 rounded-2xl border border-white/10 bg-black/35 p-6 min-h-[480px]">
                 <pre className="whitespace-pre-wrap text-[15px] leading-relaxed text-white/92">{displayText || "—"}</pre>
@@ -1541,7 +1492,9 @@ export default function CrosscheckPage() {
                 </div>
               </div>
 
-              <p className="mt-4 text-[11px] text-white/40">TaxAiPro generates drafts for triage only — not legal or tax advice.</p>
+              <p className="mt-4 text-[11px] text-white/40">
+                TaxAiPro generates drafts for triage only — not legal or tax advice.
+              </p>
             </Card>
 
             {(resp?.consensus?.disagreements ?? []).length ? (
@@ -1700,7 +1653,10 @@ export default function CrosscheckPage() {
                   history.map((h) => (
                     <div
                       key={h.id}
-                      className={cn("rounded-xl border border-white/10 bg-black/25 p-3", selectedId === h.id && "ring-1 ring-white/20")}
+                      className={cn(
+                        "rounded-xl border border-white/10 bg-black/25 p-3",
+                        selectedId === h.id && "ring-1 ring-white/20"
+                      )}
                     >
                       <button onClick={() => loadRun(h)} className="w-full text-left">
                         <div className="text-xs font-semibold text-white/85 line-clamp-2">{h.title}</div>
