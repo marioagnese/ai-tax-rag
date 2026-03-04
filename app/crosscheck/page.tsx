@@ -59,6 +59,7 @@ type SavedRun = {
 const LS_KEY = "taxaipro_runs_v1";
 const LS_TIER_KEY = "taxaipro_tier";
 const LS_ACTIVE_THREAD = "taxaipro_active_thread_v1";
+const LS_CORP_KEY = "taxaipro_corp_v1";
 
 /* ---------------- UI primitives ---------------- */
 
@@ -439,6 +440,17 @@ function formatResetLocal(iso?: string) {
   return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
+function hasCorpActive(): boolean {
+  try {
+    const raw = localStorage.getItem(LS_CORP_KEY);
+    if (!raw) return false;
+    const j = JSON.parse(raw);
+    return !!j?.active;
+  } catch {
+    return false;
+  }
+}
+
 /* ---------------- Page ---------------- */
 
 export default function CrosscheckPage() {
@@ -489,6 +501,9 @@ export default function CrosscheckPage() {
 
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
 
+  // Examples drawer state (collapsed by default)
+  const [examplesOpen, setExamplesOpen] = useState(false);
+
   const runFnRef = useRef<() => void>(() => {});
 
   function setTierLocal(next: Tier) {
@@ -502,12 +517,41 @@ export default function CrosscheckPage() {
     try {
       const sp = new URLSearchParams(window.location.search);
 
-      const t = sp.get("tier") as Tier | null;
+      // Accept: tier=0|1|2 (existing) AND tier=corp (new)
+      const t = sp.get("tier");
       const sessionId = sp.get("session_id");
+
       const hasCheckoutSignal = !!sessionId || sp.get("checkout") === "success" || sp.get("paid") === "1";
 
-      if ((t === "1" || t === "2") && hasCheckoutSignal) {
-        setTierLocal(t);
+      if (t === "corp" && hasCheckoutSignal) {
+        // Corporate implies Tier 2 Unlimited for the current device
+        setTierLocal("2");
+
+        // Set a small local corp flag (MVP)
+        try {
+          const corp = {
+            active: true,
+            seatsTotal: 5,
+            createdAt: Date.now(),
+            sessionId,
+            invites: [],
+          };
+          localStorage.setItem(LS_CORP_KEY, JSON.stringify(corp));
+        } catch {}
+
+        // Clean URL
+        sp.delete("tier");
+        sp.delete("checkout");
+        sp.delete("paid");
+        sp.delete("session_id");
+        const qs = sp.toString();
+        const nextUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+        window.history.replaceState({}, "", nextUrl);
+      }
+
+      const t2 = sp.get("tier") as Tier | null;
+      if ((t2 === "1" || t2 === "2") && hasCheckoutSignal) {
+        setTierLocal(t2);
 
         if (sessionId) {
           const sentKey = `taxaipro_sub_email_sent_${sessionId}`;
@@ -523,7 +567,7 @@ export default function CrosscheckPage() {
             fetch("/api/email/subscription", {
               method: "POST",
               headers: { "content-type": "application/json" },
-              body: JSON.stringify({ tier: t, session_id: sessionId }),
+              body: JSON.stringify({ tier: t2, session_id: sessionId }),
             })
               .then(() => {
                 try {
@@ -944,7 +988,7 @@ export default function CrosscheckPage() {
 
   const resetLocal = formatResetLocal(rate.resetAt);
 
-  // Premium signal remains ONLY for header highlight (no in-answer box)
+  // Premium highlight logic (HEADER ONLY)
   const missingFactsCount = (resp?.consensus?.followups ?? []).length;
   const disagreementsCount = (resp?.consensus?.disagreements ?? []).length;
   const showStrongPremium =
@@ -978,7 +1022,7 @@ export default function CrosscheckPage() {
         ].join("\n"),
       },
       {
-        label: "LATAM holding — treaty + source rules",
+        label: "LATAM holding — source rules triage",
         jurisdiction: "Panama",
         question:
           "A Panama company invoices foreign clients for consulting services. Is it Panama-source income? Any local corporate tax exposure, substance concerns, or foreign withholding risk (treaty / domestic law)?",
@@ -1004,7 +1048,10 @@ export default function CrosscheckPage() {
     setError(null);
     setThread([]);
     setFollowUp("");
+    setExamplesOpen(false);
   }
+
+  const corpActive = hasCorpActive();
 
   return (
     <div className="min-h-screen text-white bg-[#070A12]">
@@ -1027,7 +1074,10 @@ export default function CrosscheckPage() {
               <div className="text-sm font-semibold text-white/90">TaxAiPro</div>
               <div className="mt-0.5 text-xs text-white/55">Built by a tax executive — for tax executives</div>
               <div className="mt-1 text-[11px] text-white/55">
-                Conservative multi-model triage · {tierLabel(tier)} · {tierPrice(tier)} · {tierDailyRuns(tier)}
+                Conservative multi-model triage · {tierLabel(tier)}
+                {corpActive ? <span className="text-emerald-100"> · Corporate</span> : null}
+                {" · "}
+                {tierPrice(tier)} · {tierDailyRuns(tier)}
               </div>
             </div>
           </div>
@@ -1053,6 +1103,14 @@ export default function CrosscheckPage() {
               title="Plans & upgrades"
             >
               Plans
+            </button>
+
+            <button
+              onClick={() => go("/corporate")}
+              className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
+              title="Corporate plan"
+            >
+              Corporate
             </button>
 
             <button
@@ -1107,9 +1165,7 @@ export default function CrosscheckPage() {
 
             {resp?.providers?.length ? (
               <details className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3">
-                <summary className="cursor-pointer text-xs font-semibold text-white/70">
-                  Provider outputs (debug)
-                </summary>
+                <summary className="cursor-pointer text-xs font-semibold text-white/70">Provider outputs (debug)</summary>
                 <div className="mt-3 space-y-3">
                   {resp.providers.map((p, idx) => (
                     <div key={idx} className="rounded-xl border border-white/10 bg-black/30 p-3">
@@ -1170,8 +1226,12 @@ export default function CrosscheckPage() {
               </select>
             </Card>
 
+            {/* Case question */}
             <Card className="p-5">
-              <SectionTitle title="Question" subtitle="One clear question. Details go in Facts." />
+              <SectionTitle
+                title="Case question"
+                subtitle="One clear question. Put detail in Facts. Use Examples if you want a template."
+              />
               <textarea
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
@@ -1179,8 +1239,39 @@ export default function CrosscheckPage() {
                 placeholder="Example: Does this create withholding exposure or PE/ECI risk? What facts change the result?"
               />
 
+              {/* Examples moved BELOW question (collapsed) */}
+              <div className="mt-3">
+                <details open={examplesOpen} className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                  <summary
+                    className="cursor-pointer select-none list-none text-xs font-semibold text-white/70"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setExamplesOpen((v) => !v);
+                    }}
+                  >
+                    {examplesOpen ? "Hide examples" : "Show examples"}
+                    <span className="ml-2 text-[11px] text-white/45">Load a full template (Jurisdiction + Question + Facts)</span>
+                  </summary>
+
+                  {examplesOpen ? (
+                    <div className="mt-3 grid grid-cols-1 gap-2">
+                      {EXAMPLES.map((ex, i) => (
+                        <button
+                          key={i}
+                          onClick={() => applyExample(i)}
+                          className="rounded-2xl border border-white/10 bg-black/25 px-3 py-3 text-left hover:bg-white/5"
+                        >
+                          <div className="text-xs font-semibold text-white/85">{ex.label}</div>
+                          <div className="mt-1 text-[11px] text-white/55">Click to load</div>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </details>
+              </div>
+
               <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-xs text-white/50">Workflow: Run → review Missing facts → paste into Facts → re-run.</div>
+                <div className="text-xs text-white/50">Run → review Missing facts → paste into Facts → re-run.</div>
 
                 <div className="flex items-center gap-2">
                   <button
@@ -1223,7 +1314,11 @@ export default function CrosscheckPage() {
             <Card className="p-0">
               <details open className="p-5">
                 <summary className="cursor-pointer select-none list-none">
-                  <SectionTitle title="Facts" subtitle="Bullets. Most important input." right={<Pill>Recommended</Pill>} />
+                  <SectionTitle
+                    title="Facts"
+                    subtitle="Bullets only. This is what improves accuracy most."
+                    right={<Pill>Recommended</Pill>}
+                  />
                 </summary>
 
                 <textarea
@@ -1247,28 +1342,6 @@ export default function CrosscheckPage() {
                   >
                     Paste missing facts
                   </button>
-                </div>
-              </details>
-            </Card>
-
-            {/* Examples (collapsed, after Facts) */}
-            <Card className="p-0">
-              <details className="p-5">
-                <summary className="cursor-pointer select-none list-none">
-                  <SectionTitle title="Examples" subtitle="Optional. Click to preload Question + Facts." right={<Pill>Optional</Pill>} />
-                </summary>
-
-                <div className="mt-4 grid grid-cols-1 gap-2">
-                  {EXAMPLES.map((ex, i) => (
-                    <button
-                      key={i}
-                      onClick={() => applyExample(i)}
-                      className="rounded-2xl border border-white/10 bg-black/25 px-3 py-3 text-left hover:bg-white/5"
-                    >
-                      <div className="text-xs font-semibold text-white/85">{ex.label}</div>
-                      <div className="mt-1 text-[11px] text-white/55">Preloads Jurisdiction + Question + Facts</div>
-                    </button>
-                  ))}
                 </div>
               </details>
             </Card>
@@ -1412,8 +1485,15 @@ export default function CrosscheckPage() {
 
                 <div className="ml-auto flex items-center gap-2">
                   {resp ? <Pill tone={systemTone as any}>System: {systemLabel}</Pill> : <Pill>System: —</Pill>}
+                  {confidence ? (
+                    <Pill tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}>
+                      Confidence: {confidence}
+                    </Pill>
+                  ) : null}
                 </div>
               </div>
+
+              {/* Premium box REMOVED (per request) */}
 
               <div className="mt-4 rounded-2xl border border-white/10 bg-black/35 p-6 min-h-[480px]">
                 <pre className="whitespace-pre-wrap text-[15px] leading-relaxed text-white/92">{displayText || "—"}</pre>
@@ -1492,9 +1572,7 @@ export default function CrosscheckPage() {
                 </div>
               </div>
 
-              <p className="mt-4 text-[11px] text-white/40">
-                TaxAiPro generates drafts for triage only — not legal or tax advice.
-              </p>
+              <p className="mt-4 text-[11px] text-white/40">TaxAiPro generates drafts for triage only — not legal or tax advice.</p>
             </Card>
 
             {(resp?.consensus?.disagreements ?? []).length ? (
@@ -1512,12 +1590,12 @@ export default function CrosscheckPage() {
           </div>
         </div>
 
-        {/* Upgrade modal */}
+        {/* Plans modal */}
         {upgradeOpen ? (
           <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" onMouseDown={() => setUpgradeOpen(false)}>
             <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
             <div
-              className="absolute left-1/2 top-1/2 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-white/10 bg-[#070A12]/95 p-5 shadow-2xl"
+              className="absolute left-1/2 top-1/2 w-[92vw] max-w-2xl -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-white/10 bg-[#070A12]/95 p-5 shadow-2xl"
               onMouseDown={(e) => e.stopPropagation()}
             >
               <div className="flex items-start justify-between gap-3">
@@ -1536,7 +1614,7 @@ export default function CrosscheckPage() {
                 </button>
               </div>
 
-              <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
                 <div className={cn("rounded-2xl border p-4", tier === "0" ? "border-white/25 bg-white/5" : "border-white/10 bg-black/25")}>
                   <div className="text-xs font-semibold text-white/85">Tier 0 — Simple</div>
                   <div className="mt-1 text-2xl font-semibold text-white">$0</div>
@@ -1588,11 +1666,26 @@ export default function CrosscheckPage() {
                     {tier === "2" ? "Current" : checkoutLoadingTier === "2" ? "Opening Stripe…" : "Choose Tier 2"}
                   </button>
                 </div>
+
+                <div className={cn("rounded-2xl border p-4", corpActive ? "border-emerald-500/30 bg-emerald-500/10" : "border-white/10 bg-black/25")}>
+                  <div className="text-xs font-semibold text-white/85">Corporate — 5 seats</div>
+                  <div className="mt-1 text-2xl font-semibold text-white">$69.95</div>
+                  <div className="mt-1 text-xs text-white/60">per month · Tier 2 for team</div>
+                  <button
+                    onClick={() => go("/corporate")}
+                    className={cn(
+                      "mt-3 w-full rounded-xl px-3 py-2 text-xs font-semibold",
+                      corpActive ? "bg-white text-black" : "bg-white text-black hover:bg-white/90"
+                    )}
+                  >
+                    {corpActive ? "Manage Corporate" : "Open Corporate"}
+                  </button>
+                </div>
               </div>
 
               <div className="mt-4 rounded-xl border border-white/10 bg-black/25 p-3 text-[11px] text-white/55">
-                Paid tiers use Stripe <b>Checkout</b>. After payment, Stripe redirects back to{" "}
-                <code>/crosscheck?tier=1|2&amp;session_id=...&amp;checkout=success</code>, which activates tier locally.
+                Paid tiers use Stripe Checkout/Payment Links. Corporate redirects back with{" "}
+                <code>?tier=corp&amp;session_id=...</code> which activates Tier 2 locally (MVP).
               </div>
             </div>
           </div>
@@ -1653,10 +1746,7 @@ export default function CrosscheckPage() {
                   history.map((h) => (
                     <div
                       key={h.id}
-                      className={cn(
-                        "rounded-xl border border-white/10 bg-black/25 p-3",
-                        selectedId === h.id && "ring-1 ring-white/20"
-                      )}
+                      className={cn("rounded-xl border border-white/10 bg-black/25 p-3", selectedId === h.id && "ring-1 ring-white/20")}
                     >
                       <button onClick={() => loadRun(h)} className="w-full text-left">
                         <div className="text-xs font-semibold text-white/85 line-clamp-2">{h.title}</div>

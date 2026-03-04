@@ -1,7 +1,7 @@
 // app/(auth)/signup/page.tsx
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { firebaseClientConfigured, getFirebaseAuth } from "@/src/lib/firebase/client";
@@ -11,10 +11,14 @@ import {
   sendEmailVerification,
 } from "firebase/auth";
 
-// Firestore (adjust import path if your project wraps Firestore differently)
 import { getFirestore, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
 type ApiResp = { ok: true } | { ok: false; error?: string };
+
+const LS_TIER_KEY = "taxaipro_tier";
+const LS_CORP_PENDING = "taxaipro_corp_pending_v1";
+
+type CorpPending = { corp: true; invite: string; createdAt: number };
 
 async function mintSession(idToken: string) {
   const res = await fetch("/api/auth/login", {
@@ -24,10 +28,7 @@ async function mintSession(idToken: string) {
   });
 
   const data = (await res.json().catch(() => ({}))) as ApiResp;
-
-  if (!res.ok || !data.ok) {
-    throw new Error((data as any)?.error || `Login failed (${res.status})`);
-  }
+  if (!res.ok || !data.ok) throw new Error((data as any)?.error || `Login failed (${res.status})`);
 }
 
 function isEmailInUse(err: any) {
@@ -43,6 +44,32 @@ function isWrongPassword(err: any) {
   return code === "auth/wrong-password";
 }
 
+function readPendingCorp(): CorpPending | null {
+  try {
+    const raw = localStorage.getItem(LS_CORP_PENDING);
+    if (!raw) return null;
+    const j = JSON.parse(raw);
+    if (!j?.corp || !j?.invite) return null;
+    if (Date.now() - Number(j.createdAt || 0) > 2 * 60 * 60 * 1000) return null; // 2h expiry
+    return j as CorpPending;
+  } catch {
+    return null;
+  }
+}
+
+function setPendingCorp(invite: string) {
+  try {
+    const payload: CorpPending = { corp: true, invite, createdAt: Date.now() };
+    localStorage.setItem(LS_CORP_PENDING, JSON.stringify(payload));
+  } catch {}
+}
+
+function clearPendingCorp() {
+  try {
+    localStorage.removeItem(LS_CORP_PENDING);
+  } catch {}
+}
+
 export default function SignupPage() {
   const router = useRouter();
 
@@ -53,23 +80,43 @@ export default function SignupPage() {
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
 
-  // Mode: signup first; allow switch to login
   const [mode, setMode] = useState<"signup" | "login">("signup");
 
-  // Auth
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  // Professional profile
   const [fullName, setFullName] = useState("");
   const [company, setCompany] = useState("");
   const [roleTitle, setRoleTitle] = useState("");
   const [country, setCountry] = useState("");
 
-  // Waiver
   const [accepted, setAccepted] = useState(false);
 
+  const [corpInvite, setCorpInvite] = useState<string | null>(null);
+
   const disable = busy || !configured;
+
+  // Capture corporate invite if present: /signup?corp=1&invite=TOKEN
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const corp = sp.get("corp");
+      const invite = sp.get("invite");
+
+      if (corp === "1" && invite) {
+        setPendingCorp(invite);
+        setCorpInvite(invite);
+
+        const url = new URL(window.location.href);
+        url.searchParams.delete("corp");
+        url.searchParams.delete("invite");
+        window.history.replaceState({}, "", url.toString());
+      } else {
+        const pending = readPendingCorp();
+        if (pending?.invite) setCorpInvite(pending.invite);
+      }
+    } catch {}
+  }, []);
 
   async function saveProfileIfMissing(uid: string, userEmail: string) {
     const db = getFirestore();
@@ -97,15 +144,11 @@ export default function SignupPage() {
     setError("");
     setInfo("");
 
-    if (!auth) {
-      setError("Firebase client is not configured (.env.local / Vercel env vars).");
-      return;
-    }
+    if (!auth) return setError("Firebase client is not configured (.env.local / Vercel env vars).");
 
     if (!email.trim()) return setError("Please enter your email.");
     if (!password || password.length < 6) return setError("Password must be at least 6 characters.");
 
-    // Only require profile + waiver for signup
     if (mode === "signup") {
       if (!fullName.trim()) return setError("Please enter your full name.");
       if (!company.trim()) return setError("Please enter your company.");
@@ -128,19 +171,15 @@ export default function SignupPage() {
           throw err;
         }
 
-        // Save profile + waiver acceptance
         await saveProfileIfMissing(userCred.user.uid, userCred.user.email || email.trim());
 
-        // Acknowledgement email (no enforcement of verification)
         try {
           await sendEmailVerification(userCred.user);
           setInfo("Account created. We sent a confirmation email (no action required).");
         } catch {
-          // Ignore email failures; do not block onboarding
           setInfo("Account created. (Email acknowledgement could not be sent.)");
         }
       } else {
-        // login
         try {
           userCred = await signInWithEmailAndPassword(auth, email.trim(), password);
         } catch (err: any) {
@@ -156,10 +195,18 @@ export default function SignupPage() {
       const idToken = await userCred.user.getIdToken(true);
       await mintSession(idToken);
 
-      // Default everyone to Tier 0 on first successful login/signup.
-      // Later: replace with tier read from Firestore/Stripe subscription record.
+      // Tier assignment:
+      // Corporate invite => Tier 2
+      // Else keep existing tier, otherwise set Tier 0
       try {
-        localStorage.setItem("taxaipro_tier", "0");
+        const pending = readPendingCorp();
+        if (pending?.invite) {
+          localStorage.setItem(LS_TIER_KEY, "2");
+          clearPendingCorp();
+        } else {
+          const existing = localStorage.getItem(LS_TIER_KEY);
+          if (existing !== "1" && existing !== "2") localStorage.setItem(LS_TIER_KEY, "0");
+        }
       } catch {}
 
       router.replace("/crosscheck");
@@ -228,6 +275,12 @@ export default function SignupPage() {
                 ? "Professional access (one-time setup). Then you can log in anytime."
                 : "Welcome back. Log in to continue to Crosscheck."}
             </p>
+
+            {corpInvite ? (
+              <div className="mt-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-sm text-emerald-100">
+                Corporate invite detected — your account will be enabled as <b>Tier 2 (Unlimited)</b> after signup/login.
+              </div>
+            ) : null}
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-4">
               {mode === "signup" ? (
