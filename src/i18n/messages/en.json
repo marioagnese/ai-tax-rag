@@ -1,0 +1,14 @@
+{
+  "common": {
+    "language": "Language",
+    "disclaimer": "TaxAiPro provides research assistance and does not provide legal advice."
+  },
+  "nav": {
+    "crosscheck": "Crosscheck",
+    "corporate": "Corporate",
+    "plans": "Plans",
+    "contact": "Contact",
+    "signup": "Sign up",
+    "login": "Log in"
+  }
+}

@@ -90,12 +90,25 @@ function Pill({
   );
 }
 
-function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return (
-    <div className={cn("rounded-2xl border border-white/10 bg-white/[0.035] backdrop-blur-sm", className)}>
-      {children}
-    </div>
-  );
+/**
+ * Card now supports a "paper" variant for readability.
+ * - dark: original look
+ * - paper: white/off-white surface with dark text
+ */
+function Card({
+  children,
+  className = "",
+  variant = "dark",
+}: {
+  children: React.ReactNode;
+  className?: string;
+  variant?: "dark" | "paper";
+}) {
+  const base = "rounded-2xl border";
+  const dark = "border-white/10 bg-white/[0.035] backdrop-blur-sm";
+  const paper = "border-zinc-200 bg-white text-zinc-900 shadow-sm";
+
+  return <div className={cn(base, variant === "paper" ? paper : dark, className)}>{children}</div>;
 }
 
 function SectionTitle({
@@ -282,9 +295,7 @@ function safeParseRuns(): SavedRun[] {
           followups: Array.isArray(r.followups) ? (r.followups as any[]).map(String) : [],
           disagreements: Array.isArray(r.disagreements) ? (r.disagreements as any[]).map(String) : [],
           confidence:
-            r.confidence === "low" || r.confidence === "medium" || r.confidence === "high"
-              ? r.confidence
-              : undefined,
+            r.confidence === "low" || r.confidence === "medium" || r.confidence === "high" ? r.confidence : undefined,
           thread,
         };
       })
@@ -779,7 +790,9 @@ export default function CrosscheckPage() {
     try {
       const r = await fetch("/api/stripe/checkout", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+        },
         body: JSON.stringify({ tier: target }),
       });
 
@@ -962,13 +975,7 @@ export default function CrosscheckPage() {
 
   const systemTone = failed.length > 0 && succeeded.length === 0 ? "bad" : failed.length > 0 ? "warn" : "good";
   const systemLabel =
-    failed.length > 0 && succeeded.length === 0
-      ? "Degraded"
-      : failed.length > 0
-      ? "Partial"
-      : resp
-      ? "Healthy"
-      : "—";
+    failed.length > 0 && succeeded.length === 0 ? "Degraded" : failed.length > 0 ? "Partial" : resp ? "Healthy" : "—";
 
   const hasBaselineAnswer = !!resp?.consensus?.answer?.trim();
 
@@ -1177,9 +1184,7 @@ export default function CrosscheckPage() {
                           {p.status !== "ok" ? <span className="text-amber-200">({p.status})</span> : null} {p.ms}ms
                         </div>
                       </div>
-                      <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">
-                        {p.status === "ok" ? p.text : p.error}
-                      </div>
+                      <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">{p.status === "ok" ? p.text : p.error}</div>
                     </div>
                   ))}
                 </div>
@@ -1228,10 +1233,7 @@ export default function CrosscheckPage() {
 
             {/* Case question */}
             <Card className="p-5">
-              <SectionTitle
-                title="Case question"
-                subtitle="One clear question. Put detail in Facts. Use Examples if you want a template."
-              />
+              <SectionTitle title="Case question" subtitle="One clear question. Put detail in Facts. Use Examples if you want a template." />
               <textarea
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
@@ -1250,7 +1252,9 @@ export default function CrosscheckPage() {
                     }}
                   >
                     {examplesOpen ? "Hide examples" : "Show examples"}
-                    <span className="ml-2 text-[11px] text-white/45">Load a full template (Jurisdiction + Question + Facts)</span>
+                    <span className="ml-2 text-[11px] text-white/45">
+                      Load a full template (Jurisdiction + Question + Facts)
+                    </span>
                   </summary>
 
                   {examplesOpen ? (
@@ -1314,11 +1318,7 @@ export default function CrosscheckPage() {
             <Card className="p-0">
               <details open className="p-5">
                 <summary className="cursor-pointer select-none list-none">
-                  <SectionTitle
-                    title="Facts"
-                    subtitle="Bullets only. This is what improves accuracy most."
-                    right={<Pill>Recommended</Pill>}
-                  />
+                  <SectionTitle title="Facts" subtitle="Bullets only. This is what improves accuracy most." right={<Pill>Recommended</Pill>} />
                 </summary>
 
                 <textarea
@@ -1398,9 +1398,7 @@ export default function CrosscheckPage() {
                                 {p.ms}ms
                               </div>
                             </div>
-                            <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">
-                              {p.status === "ok" ? p.text : p.error}
-                            </div>
+                            <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">{p.status === "ok" ? p.text : p.error}</div>
                           </div>
                         ))}
                       </div>
@@ -1423,9 +1421,7 @@ export default function CrosscheckPage() {
                       onClick={() => setOutputStyle("answer")}
                       className={cn(
                         "rounded-full px-3 py-1 text-xs border",
-                        outputStyle === "answer"
-                          ? "bg-white text-black border-white"
-                          : "border-white/15 text-white/80 hover:bg-white/5"
+                        outputStyle === "answer" ? "bg-white text-black border-white" : "border-white/15 text-white/80 hover:bg-white/5"
                       )}
                     >
                       Answer
@@ -1434,9 +1430,7 @@ export default function CrosscheckPage() {
                       onClick={() => setOutputStyle("memo")}
                       className={cn(
                         "rounded-full px-3 py-1 text-xs border",
-                        outputStyle === "memo"
-                          ? "bg-white text-black border-white"
-                          : "border-white/15 text-white/80 hover:bg-white/5"
+                        outputStyle === "memo" ? "bg-white text-black border-white" : "border-white/15 text-white/80 hover:bg-white/5"
                       )}
                     >
                       Memo
@@ -1445,9 +1439,7 @@ export default function CrosscheckPage() {
                       onClick={() => setOutputStyle("email")}
                       className={cn(
                         "rounded-full px-3 py-1 text-xs border",
-                        outputStyle === "email"
-                          ? "bg-white text-black border-white"
-                          : "border-white/15 text-white/80 hover:bg-white/5"
+                        outputStyle === "email" ? "bg-white text-black border-white" : "border-white/15 text-white/80 hover:bg-white/5"
                       )}
                     >
                       Email
@@ -1470,12 +1462,7 @@ export default function CrosscheckPage() {
 
                 <button
                   onClick={() => {
-                    const base =
-                      outputStyle === "memo"
-                        ? "taxaipro-memo"
-                        : outputStyle === "email"
-                        ? "taxaipro-email"
-                        : "taxaipro-answer";
+                    const base = outputStyle === "memo" ? "taxaipro-memo" : outputStyle === "email" ? "taxaipro-email" : "taxaipro-answer";
                     downloadText(`${base}.txt`, displayText);
                   }}
                   className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
@@ -1486,17 +1473,16 @@ export default function CrosscheckPage() {
                 <div className="ml-auto flex items-center gap-2">
                   {resp ? <Pill tone={systemTone as any}>System: {systemLabel}</Pill> : <Pill>System: —</Pill>}
                   {confidence ? (
-                    <Pill tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}>
-                      Confidence: {confidence}
-                    </Pill>
+                    <Pill tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}>Confidence: {confidence}</Pill>
                   ) : null}
                 </div>
               </div>
 
-              {/* Premium box REMOVED (per request) */}
-
-              <div className="mt-4 rounded-2xl border border-white/10 bg-black/35 p-6 min-h-[480px]">
-                <pre className="whitespace-pre-wrap text-[15px] leading-relaxed text-white/92">{displayText || "—"}</pre>
+              {/* Paper-like output surface */}
+              <div className="mt-4 rounded-2xl border border-zinc-200 bg-white p-6 min-h-[480px] shadow-sm">
+                <pre className="whitespace-pre-wrap text-[15px] leading-relaxed text-zinc-900">
+                  {displayText || "—"}
+                </pre>
               </div>
 
               {/* Follow-up */}
@@ -1673,10 +1659,7 @@ export default function CrosscheckPage() {
                   <div className="mt-1 text-xs text-white/60">per month · Tier 2 for team</div>
                   <button
                     onClick={() => go("/corporate")}
-                    className={cn(
-                      "mt-3 w-full rounded-xl px-3 py-2 text-xs font-semibold",
-                      corpActive ? "bg-white text-black" : "bg-white text-black hover:bg-white/90"
-                    )}
+                    className={cn("mt-3 w-full rounded-xl px-3 py-2 text-xs font-semibold", corpActive ? "bg-white text-black" : "bg-white text-black hover:bg-white/90")}
                   >
                     {corpActive ? "Manage Corporate" : "Open Corporate"}
                   </button>
@@ -1684,8 +1667,7 @@ export default function CrosscheckPage() {
               </div>
 
               <div className="mt-4 rounded-xl border border-white/10 bg-black/25 p-3 text-[11px] text-white/55">
-                Paid tiers use Stripe Checkout/Payment Links. Corporate redirects back with{" "}
-                <code>?tier=corp&amp;session_id=...</code> which activates Tier 2 locally (MVP).
+                Paid tiers use Stripe Checkout/Payment Links. Corporate redirects back with <code>?tier=corp&amp;session_id=...</code> which activates Tier 2 locally (MVP).
               </div>
             </div>
           </div>
@@ -1706,16 +1688,10 @@ export default function CrosscheckPage() {
               </div>
 
               <div className="mt-4 flex items-center justify-end gap-2">
-                <button
-                  onClick={() => setConfirmResetOpen(false)}
-                  className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
-                >
+                <button onClick={() => setConfirmResetOpen(false)} className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10">
                   Cancel
                 </button>
-                <button
-                  onClick={doFullReset}
-                  className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-black hover:bg-white/90"
-                >
+                <button onClick={doFullReset} className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-black hover:bg-white/90">
                   Yes, reset
                 </button>
               </div>
@@ -1727,10 +1703,7 @@ export default function CrosscheckPage() {
         {historyOpen ? (
           <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" onMouseDown={() => setHistoryOpen(false)}>
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-            <div
-              className="absolute right-0 top-0 h-full w-[92vw] max-w-md border-l border-white/10 bg-[#070A12]/95 p-4"
-              onMouseDown={(e) => e.stopPropagation()}
-            >
+            <div className="absolute right-0 top-0 h-full w-[92vw] max-w-md border-l border-white/10 bg-[#070A12]/95 p-4" onMouseDown={(e) => e.stopPropagation()}>
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-sm font-semibold text-white/90">Case history</div>
@@ -1744,15 +1717,11 @@ export default function CrosscheckPage() {
               <div className="mt-4 space-y-2 overflow-auto pr-1" style={{ maxHeight: "calc(100vh - 84px)" }}>
                 {history.length ? (
                   history.map((h) => (
-                    <div
-                      key={h.id}
-                      className={cn("rounded-xl border border-white/10 bg-black/25 p-3", selectedId === h.id && "ring-1 ring-white/20")}
-                    >
+                    <div key={h.id} className={cn("rounded-xl border border-white/10 bg-black/25 p-3", selectedId === h.id && "ring-1 ring-white/20")}>
                       <button onClick={() => loadRun(h)} className="w-full text-left">
                         <div className="text-xs font-semibold text-white/85 line-clamp-2">{h.title}</div>
                         <div className="mt-1 text-[11px] text-white/45">
-                          {new Date(h.createdAt).toLocaleDateString()} · {h.jurisdiction || "—"} ·{" "}
-                          {h.confidence ? `Conf: ${h.confidence}` : "Conf: —"}
+                          {new Date(h.createdAt).toLocaleDateString()} · {h.jurisdiction || "—"} · {h.confidence ? `Conf: ${h.confidence}` : "Conf: —"}
                           {h.thread?.length ? ` · Turns: ${Math.max(0, Math.floor(h.thread.length / 2))}` : ""}
                         </div>
                       </button>

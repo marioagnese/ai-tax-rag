@@ -1,0 +1,14 @@
+{
+  "common": {
+    "language": "Idioma",
+    "disclaimer": "O TaxAiPro fornece assistência de pesquisa e não oferece aconselhamento jurídico."
+  },
+  "nav": {
+    "crosscheck": "Crosscheck",
+    "corporate": "Corporativo",
+    "plans": "Planos",
+    "contact": "Contato",
+    "signup": "Cadastrar",
+    "login": "Entrar"
+  }
+}

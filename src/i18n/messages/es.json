@@ -1,0 +1,14 @@
+{
+  "common": {
+    "language": "Idioma",
+    "disclaimer": "TaxAiPro brinda asistencia de investigación y no ofrece asesoría legal."
+  },
+  "nav": {
+    "crosscheck": "Verificación",
+    "corporate": "Corporativo",
+    "plans": "Planes",
+    "contact": "Contacto",
+    "signup": "Registrarse",
+    "login": "Iniciar sesión"
+  }
+}
