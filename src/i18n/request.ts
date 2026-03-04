@@ -1,20 +1,16 @@
-import { notFound } from "next/navigation";
 import { getRequestConfig } from "next-intl/server";
+import { notFound } from "next/navigation";
 
 const SUPPORTED = ["en", "es", "pt"] as const;
-type SupportedLocale = (typeof SUPPORTED)[number];
+type Locale = (typeof SUPPORTED)[number];
 
-function isSupportedLocale(v: unknown): v is SupportedLocale {
-  return typeof v === "string" && (SUPPORTED as readonly string[]).includes(v);
-}
+export default getRequestConfig(async ({ requestLocale }) => {
+  const locale = (await requestLocale) as Locale | undefined;
 
-export default getRequestConfig(async ({ locale }) => {
-  const resolved: SupportedLocale = isSupportedLocale(locale) ? locale : "en";
-
-  if (!isSupportedLocale(resolved)) notFound();
+  if (!locale || !SUPPORTED.includes(locale)) notFound();
 
   return {
-    locale: resolved,
-    messages: (await import(`./messages/${resolved}.json`)).default
+    locale,
+    messages: (await import(`../../messages/${locale}.json`)).default,
   };
 });
