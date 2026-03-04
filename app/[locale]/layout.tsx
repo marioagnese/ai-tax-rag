@@ -4,7 +4,7 @@ import Link from "next/link";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages } from "next-intl/server";
 
-import LanguageToggle from "@/components/LanguageToggle";
+import LanguageToggle from "./components/LanguageToggle";
 
 export const metadata: Metadata = {
   title: "TaxAiPro",
