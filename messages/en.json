@@ -1,5 +1,22 @@
 {
-  "app": {
-    "name": "TaxAiPro"
+  "auth": {
+    "signin": {
+      "howItWorks": "How it works",
+      "howItWorksTitle": "How TaxAiPro works",
+      "contact": "Contact",
+      "headline": "Multi-model tax analysis,",
+      "subheadline": "built to reduce uncertainty.",
+      "bodyPrefix": "TaxAiPro runs multiple models in parallel, crosschecks where they agree and disagree, then rewrites",
+      "bodyEmphasis": "one conservative answer",
+      "bodySuffix": "with explicit assumptions, caveats, and missing facts.",
+      "builtBy": "Built by a tax executive",
+      "for": "for",
+      "forWhom": "tax executives",
+      "cta": "Sign in to try it",
+      "ctaHint": "Create your account once, then log in anytime.",
+      "firebaseMissing": "Firebase is not configured in env vars",
+      "disclaimer": "Drafts for triage only — not legal or tax advice.",
+      "videoFallback": "Your browser does not support the video tag."
+    }
   }
 }

@@ -1,5 +1,22 @@
 {
-  "app": {
-    "name": "TaxAiPro"
+  "auth": {
+    "signin": {
+      "howItWorks": "Cómo funciona",
+      "howItWorksTitle": "Cómo funciona TaxAiPro",
+      "contact": "Contacto",
+      "headline": "Análisis fiscal multimodelo,",
+      "subheadline": "diseñado para reducir la incertidumbre.",
+      "bodyPrefix": "TaxAiPro ejecuta varios modelos en paralelo, compara dónde coinciden y dónde difieren, y luego reescribe",
+      "bodyEmphasis": "una respuesta conservadora",
+      "bodySuffix": "con supuestos explícitos, advertencias y datos faltantes.",
+      "builtBy": "Creado por un ejecutivo fiscal",
+      "for": "para",
+      "forWhom": "ejecutivos fiscales",
+      "cta": "Inicia sesión para probarlo",
+      "ctaHint": "Crea tu cuenta una sola vez y luego inicia sesión cuando quieras.",
+      "firebaseMissing": "Firebase no está configurado en las variables de entorno",
+      "disclaimer": "Borradores solo para evaluación — no es asesoría legal ni fiscal.",
+      "videoFallback": "Tu navegador no admite la etiqueta de video."
+    }
   }
 }

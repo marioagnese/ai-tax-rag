@@ -1,13 +1,15 @@
-// app/(auth)/signin/page.tsx
+// app/[locale]/(auth)/signin/page.tsx
 "use client";
 
 import React, { useMemo } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { firebaseClientConfigured } from "@/src/lib/firebase/client";
 
 export default function SignInPage() {
   const router = useRouter();
+  const t = useTranslations("auth.signin");
   const configured = useMemo(() => firebaseClientConfigured(), []);
 
   return (
@@ -27,7 +29,13 @@ export default function SignInPage() {
       <header className="relative px-6 pt-6">
         <div className="flex items-start justify-between gap-4">
           <div className="relative h-16 w-56 sm:h-18 sm:w-64 md:h-20 md:w-72">
-            <Image src="/taxaipro-logo.png" alt="TaxAiPro" fill priority className="object-contain" />
+            <Image
+              src="/taxaipro-logo.png"
+              alt="TaxAiPro"
+              fill
+              priority
+              className="object-contain"
+            />
           </div>
 
           <div className="flex items-center gap-2 pt-1">
@@ -35,9 +43,9 @@ export default function SignInPage() {
               type="button"
               onClick={() => router.push("/how-it-works")}
               className="rounded-xl border border-black/60 bg-black/95 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-black/40 hover:bg-black focus:outline-none focus:ring-2 focus:ring-white/20"
-              title="How TaxAiPro works"
+              title={t("howItWorksTitle")}
             >
-              How it works
+              {t("howItWorks")}
             </button>
 
             <button
@@ -45,7 +53,7 @@ export default function SignInPage() {
               onClick={() => router.push("/contact")}
               className="rounded-xl border border-black/60 bg-black/95 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-black/40 hover:bg-black focus:outline-none focus:ring-2 focus:ring-white/20"
             >
-              Contact
+              {t("contact")}
             </button>
           </div>
         </div>
@@ -59,19 +67,27 @@ export default function SignInPage() {
             <div className="lg:col-span-6">
               <div className="rounded-3xl border border-white/10 bg-black/45 backdrop-blur-sm px-6 py-7 md:px-8 md:py-8 shadow-2xl shadow-black/40">
                 <h1 className="text-4xl md:text-5xl font-semibold tracking-tight leading-[1.05]">
-                  Multi-model tax analysis,
-                  <span className="block text-white/65">built to reduce uncertainty.</span>
+                  {t("headline")}
+                  <span className="block text-white/65">{t("subheadline")}</span>
                 </h1>
 
                 <p className="mt-5 text-sm md:text-base text-white/78 leading-relaxed">
-                  TaxAiPro runs multiple models in parallel, crosschecks where they agree and disagree, then rewrites{" "}
-                  <span className="text-white font-medium">one conservative answer</span> with explicit assumptions,
-                  caveats, and missing facts.
+                  {t("bodyPrefix")}{" "}
+                  <span className="text-white font-medium">
+                    {t("bodyEmphasis")}
+                  </span>{" "}
+                  {t("bodySuffix")}
                 </p>
 
                 <div className="mt-4 text-sm text-white/70">
-                  <span className="text-white/85 font-medium">Built by a tax executive</span> for{" "}
-                  <span className="text-white/85 font-medium">tax executives</span>.
+                  <span className="text-white/85 font-medium">
+                    {t("builtBy")}
+                  </span>{" "}
+                  {t("for")}{" "}
+                  <span className="text-white/85 font-medium">
+                    {t("forWhom")}
+                  </span>
+                  .
                 </div>
 
                 <div className="mt-7 flex flex-col sm:flex-row gap-3 sm:items-center">
@@ -80,21 +96,23 @@ export default function SignInPage() {
                     onClick={() => router.push("/signup")}
                     className="h-11 px-5 rounded-xl bg-white text-black font-medium hover:bg-white/90 disabled:opacity-50"
                     disabled={!configured}
-                    title={!configured ? "Firebase is not configured in env vars" : ""}
+                    title={!configured ? t("firebaseMissing") : ""}
                   >
-                    Sign in to try it
+                    {t("cta")}
                   </button>
-                  <div className="text-sm text-white/65">Create your account once, then log in anytime.</div>
+
+                  <div className="text-sm text-white/65">{t("ctaHint")}</div>
                 </div>
 
-                <div className="mt-8 text-xs text-white/55">Drafts for triage only — not legal or tax advice.</div>
+                <div className="mt-8 text-xs text-white/55">
+                  {t("disclaimer")}
+                </div>
               </div>
             </div>
 
             {/* Right: Clean square demo video (no chrome) */}
             <div className="lg:col-span-6">
               <div className="w-full max-w-[520px] ml-auto">
-                {/* fully transparent container */}
                 <div className="rounded-3xl border border-white/10 bg-transparent p-2">
                   <div className="aspect-square w-full overflow-hidden rounded-2xl border border-white/10 bg-black/30">
                     <video
@@ -104,7 +122,7 @@ export default function SignInPage() {
                       preload="metadata"
                     >
                       <source src="/demo-60s.mp4" type="video/mp4" />
-                      Your browser does not support the video tag.
+                      {t("videoFallback")}
                     </video>
                   </div>
                 </div>

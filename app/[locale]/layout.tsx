@@ -4,6 +4,9 @@ import type { Metadata } from "next";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages, setRequestLocale } from "next-intl/server";
 
+// Client component (safe to render from a Server Component)
+import LanguageToggle from "./components/LanguageToggle";
+
 export const metadata: Metadata = {
   title: "TaxAiPro",
   description: "AI-powered international tax research assistant",
@@ -21,7 +24,7 @@ export default async function LocaleLayout({
   params,
 }: {
   children: React.ReactNode;
-  params: any; // <- avoids Next/Turbopack type mismatch
+  params: any; // avoids Next/Turbopack params typing mismatch
 }) {
   const locale = await resolveLocale(params);
 
@@ -32,6 +35,11 @@ export default async function LocaleLayout({
     <html lang={locale}>
       <body>
         <NextIntlClientProvider locale={locale} messages={messages}>
+          {/* Always visible toggle for any /[locale] route */}
+          <div className="fixed right-4 top-4 z-50">
+            <LanguageToggle />
+          </div>
+
           {children}
         </NextIntlClientProvider>
       </body>
