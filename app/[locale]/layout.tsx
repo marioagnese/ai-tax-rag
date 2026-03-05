@@ -9,14 +9,21 @@ export const metadata: Metadata = {
   description: "AI-powered international tax research assistant",
 };
 
+async function resolveLocale(params: any): Promise<string> {
+  // Handles either: params = { locale: "en" } OR params = Promise<{ locale: "en" }>
+  const p = params && typeof params?.then === "function" ? await params : params;
+  const locale = typeof p?.locale === "string" ? p.locale : "en";
+  return locale;
+}
+
 export default async function LocaleLayout({
   children,
   params,
 }: {
   children: React.ReactNode;
-  params: Promise<{ locale: string }>;
+  params: any; // <- avoids Next/Turbopack type mismatch
 }) {
-  const { locale } = await params;
+  const locale = await resolveLocale(params);
 
   setRequestLocale(locale);
   const messages = await getMessages();
