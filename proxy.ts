@@ -4,13 +4,14 @@ import { NextRequest, NextResponse } from "next/server";
 const intlMiddleware = createMiddleware({
   locales: ["en", "es", "pt"],
   defaultLocale: "en",
-  localePrefix: "as-needed"
+  // 🔒 Stabilizer: prevents /en/* ↔ /* canonical redirect ping-pong
+  localePrefix: "always",
 });
 
 export default function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // 🚫 Never localize auth pages
+  // 🚫 Never localize auth pages (keep your original behavior)
   if (
     pathname === "/signin" ||
     pathname === "/signup" ||
@@ -28,5 +29,5 @@ export default function proxy(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next|.*\\..*).*)"]
+  matcher: ["/((?!api|_next|.*\\..*).*)"],
 };
