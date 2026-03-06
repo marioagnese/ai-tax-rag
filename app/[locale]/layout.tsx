@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages, setRequestLocale } from "next-intl/server";
 
-// Client component (safe to render from a Server Component)
+// Client component (OK to render from a Server Component)
 import LanguageToggle from "./components/LanguageToggle";
 
 export const metadata: Metadata = {
@@ -34,12 +34,13 @@ export default async function LocaleLayout({
   return (
     <html lang={locale}>
       <body>
-        <NextIntlClientProvider locale={locale} messages={messages}>
-          {/* Always visible toggle for any /[locale] route */}
-          <div className="fixed right-4 top-4 z-50">
-            <LanguageToggle />
-          </div>
+        {/* Global language toggle for any /[locale] route.
+            Positioned lower to avoid overlapping header buttons on auth pages. */}
+        <div className="fixed right-6 top-20 z-50">
+          <LanguageToggle />
+        </div>
 
+        <NextIntlClientProvider locale={locale} messages={messages}>
           {children}
         </NextIntlClientProvider>
       </body>
