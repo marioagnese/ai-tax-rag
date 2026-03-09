@@ -1,8 +1,9 @@
-// app/crosscheck/page.tsx
+/// app/[locale]/crosscheck/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import { useMessages } from "next-intl";
 
 type CrosscheckResponse = {
   ok: boolean;
@@ -90,11 +91,6 @@ function Pill({
   );
 }
 
-/**
- * Card now supports a "paper" variant for readability.
- * - dark: original look
- * - paper: white/off-white surface with dark text
- */
 function Card({
   children,
   className = "",
@@ -295,7 +291,9 @@ function safeParseRuns(): SavedRun[] {
           followups: Array.isArray(r.followups) ? (r.followups as any[]).map(String) : [],
           disagreements: Array.isArray(r.disagreements) ? (r.disagreements as any[]).map(String) : [],
           confidence:
-            r.confidence === "low" || r.confidence === "medium" || r.confidence === "high" ? r.confidence : undefined,
+            r.confidence === "low" || r.confidence === "medium" || r.confidence === "high"
+              ? r.confidence
+              : undefined,
           thread,
         };
       })
@@ -434,7 +432,7 @@ type RateUi = {
   tier?: Tier;
   limit?: number;
   used?: number;
-  remaining?: number; // -1 unlimited
+  remaining?: number;
   resetAt?: string;
 };
 
@@ -466,12 +464,41 @@ function hasCorpActive(): boolean {
 
 export default function CrosscheckPage() {
   const router = useRouter();
+  const params = useParams<{ locale?: string }>();
+  const locale = typeof params?.locale === "string" ? params.locale : "en";
+  const messages = useMessages() as Record<string, any>;
+
+  const tm = React.useCallback(
+    (key: string, fallback: string) => {
+      const parts = key.split(".");
+      let cur: any = messages;
+      for (const part of parts) {
+        if (cur && typeof cur === "object" && part in cur) {
+          cur = cur[part];
+        } else {
+          return fallback;
+        }
+      }
+      return typeof cur === "string" ? cur : fallback;
+    },
+    [messages]
+  );
+
+  const localizePath = React.useCallback(
+    (path: string) => {
+      if (!path.startsWith("/")) return `/${locale}/${path}`;
+      if (path.startsWith(`/${locale}`)) return path;
+      return `/${locale}${path}`;
+    },
+    [locale]
+  );
 
   const go = (path: string) => {
+    const nextPath = localizePath(path);
     try {
-      router.push(path);
+      router.push(nextPath);
     } catch {
-      window.location.href = path;
+      window.location.href = nextPath;
     }
   };
 
@@ -511,8 +538,6 @@ export default function CrosscheckPage() {
   const [rate, setRate] = useState<RateUi>({});
 
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
-
-  // Examples drawer state (collapsed by default)
   const [examplesOpen, setExamplesOpen] = useState(false);
 
   const runFnRef = useRef<() => void>(() => {});
@@ -527,18 +552,13 @@ export default function CrosscheckPage() {
   useEffect(() => {
     try {
       const sp = new URLSearchParams(window.location.search);
-
-      // Accept: tier=0|1|2 (existing) AND tier=corp (new)
       const t = sp.get("tier");
       const sessionId = sp.get("session_id");
-
       const hasCheckoutSignal = !!sessionId || sp.get("checkout") === "success" || sp.get("paid") === "1";
 
       if (t === "corp" && hasCheckoutSignal) {
-        // Corporate implies Tier 2 Unlimited for the current device
         setTierLocal("2");
 
-        // Set a small local corp flag (MVP)
         try {
           const corp = {
             active: true,
@@ -550,7 +570,6 @@ export default function CrosscheckPage() {
           localStorage.setItem(LS_CORP_KEY, JSON.stringify(corp));
         } catch {}
 
-        // Clean URL
         sp.delete("tier");
         sp.delete("checkout");
         sp.delete("paid");
@@ -659,8 +678,8 @@ export default function CrosscheckPage() {
 
     if (outputStyle === "memo") return formatMemo(base);
     if (outputStyle === "email") return formatEmail(base);
-    return (resp?.consensus?.answer || "Your answer will appear here.").trim();
-  }, [outputStyle, resp, jurisdiction, facts, effectiveQuestionForOutput]);
+    return (resp?.consensus?.answer || tm("crosscheck.outputPlaceholder", "Your answer will appear here.")).trim();
+  }, [outputStyle, resp, jurisdiction, facts, effectiveQuestionForOutput, tm]);
 
   function loadRun(r: SavedRun) {
     setSelectedId(r.id);
@@ -734,7 +753,7 @@ export default function CrosscheckPage() {
     if (!followups.length) return;
     const block = followups.map((f) => `• ${f}`).join("\n");
     const prefix = facts.trim() ? `${facts.trim()}\n\n` : "";
-    setFacts(`${prefix}Missing facts to confirm:\n${block}\n`);
+    setFacts(`${prefix}${tm("crosscheck.missingFactsBlockTitle", "Missing facts to confirm:")}\n${block}\n`);
   }
 
   function requestReset() {
@@ -817,7 +836,7 @@ export default function CrosscheckPage() {
 
     const q = question.trim();
     if (!q) {
-      setError("Type a question first.");
+      setError(tm("crosscheck.errors.typeQuestion", "Type a question first."));
       return;
     }
 
@@ -864,7 +883,7 @@ export default function CrosscheckPage() {
       const ans = (parsed?.consensus?.answer || "").trim();
       if (ans) setThread((t) => [...t, newMsg("assistant", ans)]);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Request failed.";
+      const msg = e instanceof Error ? e.message : tm("crosscheck.errors.requestFailed", "Request failed.");
       setError(msg);
     } finally {
       setLoading(false);
@@ -876,18 +895,18 @@ export default function CrosscheckPage() {
 
     const follow = followUp.trim();
     if (!follow) {
-      setError("Type a follow-up first.");
+      setError(tm("crosscheck.errors.typeFollowup", "Type a follow-up first."));
       return;
     }
     const prior = (resp?.consensus?.answer || "").trim();
     if (!prior) {
-      setError("Run the initial question first to create a baseline answer.");
+      setError(tm("crosscheck.errors.runInitialFirst", "Run the initial question first to create a baseline answer."));
       return;
     }
 
     const baseQ = question.trim();
     if (!baseQ) {
-      setError("Type an original question first.");
+      setError(tm("crosscheck.errors.typeOriginalQuestion", "Type an original question first."));
       return;
     }
 
@@ -942,7 +961,7 @@ export default function CrosscheckPage() {
       if (ans) setThread((t) => [...t, newMsg("assistant", ans)]);
       setFollowUp("");
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Request failed.";
+      const msg = e instanceof Error ? e.message : tm("crosscheck.errors.requestFailed", "Request failed.");
       setError(msg);
     } finally {
       setFollowUpLoading(false);
@@ -959,7 +978,7 @@ export default function CrosscheckPage() {
         localStorage.removeItem(LS_TIER_KEY);
         localStorage.removeItem(LS_ACTIVE_THREAD);
       } catch {}
-      router.replace("/signin");
+      router.replace(localizePath("/signin"));
     }
   }
 
@@ -975,7 +994,13 @@ export default function CrosscheckPage() {
 
   const systemTone = failed.length > 0 && succeeded.length === 0 ? "bad" : failed.length > 0 ? "warn" : "good";
   const systemLabel =
-    failed.length > 0 && succeeded.length === 0 ? "Degraded" : failed.length > 0 ? "Partial" : resp ? "Healthy" : "—";
+    failed.length > 0 && succeeded.length === 0
+      ? tm("crosscheck.system.degraded", "Degraded")
+      : failed.length > 0
+      ? tm("crosscheck.system.partial", "Partial")
+      : resp
+      ? tm("crosscheck.system.healthy", "Healthy")
+      : "—";
 
   const hasBaselineAnswer = !!resp?.consensus?.answer?.trim();
 
@@ -990,58 +1015,72 @@ export default function CrosscheckPage() {
     );
   }, [question, facts, runOverrides, followUp, thread.length, resp]);
 
-  const runsLeft =
-    typeof rate.remaining === "number" ? (rate.remaining === -1 ? "∞" : String(rate.remaining)) : null;
-
+  const runsLeft = typeof rate.remaining === "number" ? (rate.remaining === -1 ? "∞" : String(rate.remaining)) : null;
   const resetLocal = formatResetLocal(rate.resetAt);
 
-  // Premium highlight logic (HEADER ONLY)
   const missingFactsCount = (resp?.consensus?.followups ?? []).length;
   const disagreementsCount = (resp?.consensus?.disagreements ?? []).length;
   const showStrongPremium =
     confidence === "low" || disagreementsCount > 0 || missingFactsCount > 0 || (resp && !resp.consensus?.answer?.trim());
 
-  // Example prompts (3)
   const EXAMPLES = useMemo(
     () => [
       {
-        label: "US inbound services — WHT + PE risk",
+        label: tm("crosscheck.examples.usInbound.label", "US inbound services — WHT + PE risk"),
         jurisdiction: "United States",
-        question:
-          "A foreign parent provides management services to a US subsidiary. What are the key US federal tax risks (WHT, PE/ECI, transfer pricing documentation), and what facts change the conclusion?",
+        question: tm(
+          "crosscheck.examples.usInbound.question",
+          "A foreign parent provides management services to a US subsidiary. What are the key US federal tax risks (WHT, PE/ECI, transfer pricing documentation), and what facts change the conclusion?"
+        ),
         facts: [
-          "• Foreign parent has no US entity; services delivered remotely + occasional US travel",
-          "• Service fee: cost-plus 7% paid quarterly",
-          "• Contract governs services; no US employees on US payroll",
-          "• Need: ECI/PE indicators, Form W-8/W-9 positions, TP support outline",
+          tm(
+            "crosscheck.examples.usInbound.fact1",
+            "• Foreign parent has no US entity; services delivered remotely + occasional US travel"
+          ),
+          tm("crosscheck.examples.usInbound.fact2", "• Service fee: cost-plus 7% paid quarterly"),
+          tm("crosscheck.examples.usInbound.fact3", "• Contract governs services; no US employees on US payroll"),
+          tm(
+            "crosscheck.examples.usInbound.fact4",
+            "• Need: ECI/PE indicators, Form W-8/W-9 positions, TP support outline"
+          ),
         ].join("\n"),
       },
       {
-        label: "Brazil imports — ICMS/PIS/COFINS stack (triage)",
+        label: tm("crosscheck.examples.brazilImports.label", "Brazil imports — ICMS/PIS/COFINS stack (triage)"),
         jurisdiction: "Brazil",
-        question:
-          "Importing equipment into Brazil for resale: outline the main taxes (II, IPI, PIS/COFINS-Import, ICMS) and the top levers (NCM, ex-tarifário, special regimes). Keep it conservative and list missing facts.",
+        question: tm(
+          "crosscheck.examples.brazilImports.question",
+          "Importing equipment into Brazil for resale: outline the main taxes (II, IPI, PIS/COFINS-Import, ICMS) and the top levers (NCM, ex-tarifário, special regimes). Keep it conservative and list missing facts."
+        ),
         facts: [
-          "• Importer is a Brazilian CNPJ under Lucro Real",
-          "• Goods are capital equipment (NCM TBD)",
-          "• Destination state: SP",
-          "• CIF known; goal is to estimate landed cost range + missing facts list",
+          tm("crosscheck.examples.brazilImports.fact1", "• Importer is a Brazilian CNPJ under Lucro Real"),
+          tm("crosscheck.examples.brazilImports.fact2", "• Goods are capital equipment (NCM TBD)"),
+          tm("crosscheck.examples.brazilImports.fact3", "• Destination state: SP"),
+          tm(
+            "crosscheck.examples.brazilImports.fact4",
+            "• CIF known; goal is to estimate landed cost range + missing facts list"
+          ),
         ].join("\n"),
       },
       {
-        label: "LATAM holding — source rules triage",
+        label: tm("crosscheck.examples.latamHolding.label", "LATAM holding — source rules triage"),
         jurisdiction: "Panama",
-        question:
-          "A Panama company invoices foreign clients for consulting services. Is it Panama-source income? Any local corporate tax exposure, substance concerns, or foreign withholding risk (treaty / domestic law)?",
+        question: tm(
+          "crosscheck.examples.latamHolding.question",
+          "A Panama company invoices foreign clients for consulting services. Is it Panama-source income? Any local corporate tax exposure, substance concerns, or foreign withholding risk (treaty / domestic law)?"
+        ),
         facts: [
-          "• Services performed by employees located outside Panama",
-          "• Panama entity has director + bank account; minimal local ops",
-          "• Clients located in LATAM + US",
-          "• Need: where services performed, contract terms, withholding regimes by client country",
+          tm("crosscheck.examples.latamHolding.fact1", "• Services performed by employees located outside Panama"),
+          tm("crosscheck.examples.latamHolding.fact2", "• Panama entity has director + bank account; minimal local ops"),
+          tm("crosscheck.examples.latamHolding.fact3", "• Clients located in LATAM + US"),
+          tm(
+            "crosscheck.examples.latamHolding.fact4",
+            "• Need: where services performed, contract terms, withholding regimes by client country"
+          ),
         ].join("\n"),
       },
     ],
-    []
+    [tm]
   );
 
   function applyExample(i: number) {
@@ -1062,14 +1101,12 @@ export default function CrosscheckPage() {
 
   return (
     <div className="min-h-screen text-white bg-[#070A12]">
-      {/* subtle background */}
       <div className="pointer-events-none fixed inset-0 opacity-80">
         <div className="absolute -top-48 left-1/2 h-[560px] w-[560px] -translate-x-1/2 rounded-full bg-white/10 blur-3xl" />
         <div className="absolute bottom-[-220px] right-[-140px] h-[560px] w-[560px] rounded-full bg-white/5 blur-3xl" />
       </div>
 
       <div className="relative mx-auto max-w-7xl px-4 py-6">
-        {/* HEADER */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <img
@@ -1079,10 +1116,12 @@ export default function CrosscheckPage() {
             />
             <div>
               <div className="text-sm font-semibold text-white/90">TaxAiPro</div>
-              <div className="mt-0.5 text-xs text-white/55">Built by a tax executive — for tax executives</div>
+              <div className="mt-0.5 text-xs text-white/55">
+                {tm("crosscheck.header.builtBy", "Built by a tax executive — for tax executives")}
+              </div>
               <div className="mt-1 text-[11px] text-white/55">
-                Conservative multi-model triage · {tierLabel(tier)}
-                {corpActive ? <span className="text-emerald-100"> · Corporate</span> : null}
+                {tm("crosscheck.header.tagline", "Conservative multi-model triage")} · {tierLabel(tier)}
+                {corpActive ? <span className="text-emerald-100"> · {tm("crosscheck.header.corporate", "Corporate")}</span> : null}
                 {" · "}
                 {tierPrice(tier)} · {tierDailyRuns(tier)}
               </div>
@@ -1094,30 +1133,30 @@ export default function CrosscheckPage() {
               onClick={() => go("/how-it-works")}
               className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
             >
-              How it works
+              {tm("crosscheck.nav.howItWorks", "How it works")}
             </button>
 
             <button
               onClick={() => setHistoryOpen(true)}
               className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
             >
-              History
+              {tm("crosscheck.nav.history", "History")}
             </button>
 
             <button
               onClick={() => setUpgradeOpen(true)}
               className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
-              title="Plans & upgrades"
+              title={tm("crosscheck.nav.plansTitle", "Plans & upgrades")}
             >
-              Plans
+              {tm("crosscheck.nav.plans", "Plans")}
             </button>
 
             <button
               onClick={() => go("/corporate")}
               className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
-              title="Corporate plan"
+              title={tm("crosscheck.nav.corporateTitle", "Corporate plan")}
             >
-              Corporate
+              {tm("crosscheck.nav.corporate", "Corporate")}
             </button>
 
             <button
@@ -1128,51 +1167,58 @@ export default function CrosscheckPage() {
                   ? "border-amber-400/30 bg-amber-400/10 text-amber-100 hover:bg-amber-400/15"
                   : "border-white/15 bg-white/5 text-white/85 hover:bg-white/10"
               )}
-              title="Premium: request formal opinion quote"
+              title={tm("crosscheck.nav.formalOpinionTitle", "Premium: request formal opinion quote")}
             >
-              Request formal opinion
+              {tm("crosscheck.nav.formalOpinion", "Request formal opinion")}
             </button>
 
             <button
               onClick={logout}
               className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
-              title="Log out"
+              title={tm("crosscheck.nav.logoutTitle", "Log out")}
             >
-              Logout
+              {tm("crosscheck.nav.logout", "Logout")}
             </button>
 
             {confidence ? (
               <Pill tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}>
-                Confidence: {confidence}
+                {tm("crosscheck.common.confidence", "Confidence")}: {confidence}
               </Pill>
             ) : null}
 
             <button
               onClick={() => setDiagnosticsOpen((v) => !v)}
               className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/70 hover:bg-white/5"
-              title="Diagnostics (telemetry)"
+              title={tm("crosscheck.nav.diagnosticsTitle", "Diagnostics (telemetry)")}
             >
-              {diagnosticsOpen ? "Hide diagnostics" : "Diagnostics"}
+              {diagnosticsOpen
+                ? tm("crosscheck.nav.hideDiagnostics", "Hide diagnostics")
+                : tm("crosscheck.nav.diagnostics", "Diagnostics")}
             </button>
           </div>
         </div>
 
-        {/* Diagnostics drawer */}
         {diagnosticsOpen ? (
           <div className="mt-3 rounded-2xl border border-white/10 bg-black/25 p-4">
             <div className="flex flex-wrap items-center gap-2">
-              <Pill tone={resp ? (systemTone as any) : "neutral"}>System: {systemLabel}</Pill>
+              <Pill tone={resp ? (systemTone as any) : "neutral"}>
+                {tm("crosscheck.common.system", "System")}: {systemLabel}
+              </Pill>
               {runtimeMs != null ? <Pill>{runtimeMs}ms</Pill> : <Pill>—</Pill>}
-              {runsLeft ? <Pill>Runs left: {runsLeft}</Pill> : <Pill>Runs left: —</Pill>}
-              {resetLocal ? <Pill>Resets: {resetLocal}</Pill> : <Pill>Resets: —</Pill>}
-              <Pill>Thread msgs: {thread.length}</Pill>
-              <Pill>Models ok: {succeeded.length}</Pill>
-              <Pill tone={failed.length ? "warn" : "neutral"}>Models failed: {failed.length}</Pill>
+              {runsLeft ? <Pill>{tm("crosscheck.diagnostics.runsLeft", "Runs left")}: {runsLeft}</Pill> : <Pill>{tm("crosscheck.diagnostics.runsLeft", "Runs left")}: —</Pill>}
+              {resetLocal ? <Pill>{tm("crosscheck.diagnostics.resets", "Resets")}: {resetLocal}</Pill> : <Pill>{tm("crosscheck.diagnostics.resets", "Resets")}: —</Pill>}
+              <Pill>{tm("crosscheck.diagnostics.threadMsgs", "Thread msgs")}: {thread.length}</Pill>
+              <Pill>{tm("crosscheck.diagnostics.modelsOk", "Models ok")}: {succeeded.length}</Pill>
+              <Pill tone={failed.length ? "warn" : "neutral"}>
+                {tm("crosscheck.diagnostics.modelsFailed", "Models failed")}: {failed.length}
+              </Pill>
             </div>
 
             {resp?.providers?.length ? (
               <details className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3">
-                <summary className="cursor-pointer text-xs font-semibold text-white/70">Provider outputs (debug)</summary>
+                <summary className="cursor-pointer text-xs font-semibold text-white/70">
+                  {tm("crosscheck.diagnostics.providerOutputs", "Provider outputs (debug)")}
+                </summary>
                 <div className="mt-3 space-y-3">
                   {resp.providers.map((p, idx) => (
                     <div key={idx} className="rounded-xl border border-white/10 bg-black/30 p-3">
@@ -1184,7 +1230,9 @@ export default function CrosscheckPage() {
                           {p.status !== "ok" ? <span className="text-amber-200">({p.status})</span> : null} {p.ms}ms
                         </div>
                       </div>
-                      <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">{p.status === "ok" ? p.text : p.error}</div>
+                      <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">
+                        {p.status === "ok" ? p.text : p.error}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1194,54 +1242,60 @@ export default function CrosscheckPage() {
         ) : null}
 
         <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-12">
-          {/* LEFT: Inputs */}
           <div className="lg:col-span-4 space-y-4">
             <Card className="p-5">
-              <SectionTitle title="Jurisdiction" subtitle="Country / state. Add treaty context in Facts if relevant." />
+              <SectionTitle
+                title={tm("crosscheck.jurisdiction.title", "Jurisdiction")}
+                subtitle={tm("crosscheck.jurisdiction.subtitle", "Country / state. Add treaty context in Facts if relevant.")}
+              />
               <select
                 value={jurisdiction}
                 onChange={(e) => setJurisdiction(e.target.value)}
                 className="mt-3 w-full rounded-xl border border-white/10 bg-black px-3 py-2.5 text-sm text-white outline-none focus:border-white/20"
               >
-                <optgroup label="USA">
-                  <option value="United States">United States</option>
-                  <option value="Canada">Canada</option>
+                <optgroup label={tm("crosscheck.jurisdiction.usa", "USA")}>
+                  <option value="United States">{tm("crosscheck.jurisdiction.unitedStates", "United States")}</option>
+                  <option value="Canada">{tm("crosscheck.jurisdiction.canada", "Canada")}</option>
                 </optgroup>
 
-                <optgroup label="LATAM">
-                  <option value="Argentina">Argentina</option>
-                  <option value="Brazil">Brazil</option>
-                  <option value="Chile">Chile</option>
-                  <option value="Colombia">Colombia</option>
-                  <option value="Mexico">Mexico</option>
-                  <option value="Panama">Panama</option>
-                  <option value="Peru">Peru</option>
-                  <option value="Uruguay">Uruguay</option>
-                  <option value="Paraguay">Paraguay</option>
-                  <option value="Bolivia">Bolivia</option>
-                  <option value="Puerto Rico">Puerto Rico</option>
-                  <option value="Ecuador">Ecuador</option>
-                  <option value="Republica Dominicana">Rep. Dominicana</option>
-                  <option value="Jamaica">Jamaica</option>
+                <optgroup label={tm("crosscheck.jurisdiction.latam", "LATAM")}>
+                  <option value="Argentina">{tm("crosscheck.jurisdiction.argentina", "Argentina")}</option>
+                  <option value="Brazil">{tm("crosscheck.jurisdiction.brazil", "Brazil")}</option>
+                  <option value="Chile">{tm("crosscheck.jurisdiction.chile", "Chile")}</option>
+                  <option value="Colombia">{tm("crosscheck.jurisdiction.colombia", "Colombia")}</option>
+                  <option value="Mexico">{tm("crosscheck.jurisdiction.mexico", "Mexico")}</option>
+                  <option value="Panama">{tm("crosscheck.jurisdiction.panama", "Panama")}</option>
+                  <option value="Peru">{tm("crosscheck.jurisdiction.peru", "Peru")}</option>
+                  <option value="Uruguay">{tm("crosscheck.jurisdiction.uruguay", "Uruguay")}</option>
+                  <option value="Paraguay">{tm("crosscheck.jurisdiction.paraguay", "Paraguay")}</option>
+                  <option value="Bolivia">{tm("crosscheck.jurisdiction.bolivia", "Bolivia")}</option>
+                  <option value="Puerto Rico">{tm("crosscheck.jurisdiction.puertoRico", "Puerto Rico")}</option>
+                  <option value="Ecuador">{tm("crosscheck.jurisdiction.ecuador", "Ecuador")}</option>
+                  <option value="Republica Dominicana">{tm("crosscheck.jurisdiction.dominicanRepublic", "Rep. Dominicana")}</option>
+                  <option value="Jamaica">{tm("crosscheck.jurisdiction.jamaica", "Jamaica")}</option>
                 </optgroup>
 
-                <optgroup label="Other">
-                  <option value="Other">Other / Not listed</option>
+                <optgroup label={tm("crosscheck.jurisdiction.otherGroup", "Other")}>
+                  <option value="Other">{tm("crosscheck.jurisdiction.other", "Other / Not listed")}</option>
                 </optgroup>
               </select>
             </Card>
 
-            {/* Case question */}
             <Card className="p-5">
-              <SectionTitle title="Case question" subtitle="One clear question. Put detail in Facts. Use Examples if you want a template." />
+              <SectionTitle
+                title={tm("crosscheck.caseQuestion.title", "Case question")}
+                subtitle={tm("crosscheck.caseQuestion.subtitle", "One clear question. Put detail in Facts. Use Examples if you want a template.")}
+              />
               <textarea
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
                 className="mt-3 min-h-[140px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm outline-none focus:border-white/20"
-                placeholder="Example: Does this create withholding exposure or PE/ECI risk? What facts change the result?"
+                placeholder={tm(
+                  "crosscheck.caseQuestion.placeholder",
+                  "Example: Does this create withholding exposure or PE/ECI risk? What facts change the result?"
+                )}
               />
 
-              {/* Examples moved BELOW question (collapsed) */}
               <div className="mt-3">
                 <details open={examplesOpen} className="rounded-2xl border border-white/10 bg-black/20 p-3">
                   <summary
@@ -1251,9 +1305,11 @@ export default function CrosscheckPage() {
                       setExamplesOpen((v) => !v);
                     }}
                   >
-                    {examplesOpen ? "Hide examples" : "Show examples"}
+                    {examplesOpen
+                      ? tm("crosscheck.examples.hide", "Hide examples")
+                      : tm("crosscheck.examples.show", "Show examples")}
                     <span className="ml-2 text-[11px] text-white/45">
-                      Load a full template (Jurisdiction + Question + Facts)
+                      {tm("crosscheck.examples.subtitle", "Load a full template (Jurisdiction + Question + Facts)")}
                     </span>
                   </summary>
 
@@ -1266,7 +1322,9 @@ export default function CrosscheckPage() {
                           className="rounded-2xl border border-white/10 bg-black/25 px-3 py-3 text-left hover:bg-white/5"
                         >
                           <div className="text-xs font-semibold text-white/85">{ex.label}</div>
-                          <div className="mt-1 text-[11px] text-white/55">Click to load</div>
+                          <div className="mt-1 text-[11px] text-white/55">
+                            {tm("crosscheck.examples.clickToLoad", "Click to load")}
+                          </div>
                         </button>
                       ))}
                     </div>
@@ -1275,7 +1333,9 @@ export default function CrosscheckPage() {
               </div>
 
               <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-xs text-white/50">Run → review Missing facts → paste into Facts → re-run.</div>
+                <div className="text-xs text-white/50">
+                  {tm("crosscheck.caseQuestion.helper", "Run → review Missing facts → paste into Facts → re-run.")}
+                </div>
 
                 <div className="flex items-center gap-2">
                   <button
@@ -1283,16 +1343,16 @@ export default function CrosscheckPage() {
                     disabled={loading}
                     className="h-10 rounded-xl bg-white px-4 text-sm font-semibold text-black hover:bg-white/90 disabled:opacity-50"
                   >
-                    {loading ? "Running…" : "Run"}
+                    {loading ? tm("crosscheck.actions.running", "Running…") : tm("crosscheck.actions.run", "Run")}
                   </button>
 
                   <button
                     onClick={saveCurrentRun}
                     disabled={!canSave}
                     className="h-10 rounded-xl border border-white/15 bg-white/5 px-3 text-sm text-white/85 hover:bg-white/10 disabled:opacity-40"
-                    title={canSave ? "Save this run" : "Run once first"}
+                    title={canSave ? tm("crosscheck.actions.saveTitle", "Save this run") : tm("crosscheck.actions.runOnceFirst", "Run once first")}
                   >
-                    Save
+                    {tm("crosscheck.actions.save", "Save")}
                   </button>
                 </div>
               </div>
@@ -1304,13 +1364,15 @@ export default function CrosscheckPage() {
               ) : null}
 
               <div className="mt-3 flex items-center justify-between gap-2">
-                <div className="text-[11px] text-white/45">Thread is client-side only (saved if you Save).</div>
+                <div className="text-[11px] text-white/45">
+                  {tm("crosscheck.caseQuestion.threadNote", "Thread is client-side only (saved if you Save).")}
+                </div>
                 <button
                   onClick={requestReset}
                   className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
-                  title="Resets the current case state."
+                  title={tm("crosscheck.actions.resetTitle", "Resets the current case state.")}
                 >
-                  Reset case
+                  {tm("crosscheck.actions.resetCase", "Reset case")}
                 </button>
               </div>
             </Card>
@@ -1318,7 +1380,11 @@ export default function CrosscheckPage() {
             <Card className="p-0">
               <details open className="p-5">
                 <summary className="cursor-pointer select-none list-none">
-                  <SectionTitle title="Facts" subtitle="Bullets only. This is what improves accuracy most." right={<Pill>Recommended</Pill>} />
+                  <SectionTitle
+                    title={tm("crosscheck.facts.title", "Facts")}
+                    subtitle={tm("crosscheck.facts.subtitle", "Bullets only. This is what improves accuracy most.")}
+                    right={<Pill>{tm("crosscheck.common.recommended", "Recommended")}</Pill>}
+                  />
                 </summary>
 
                 <textarea
@@ -1326,21 +1392,23 @@ export default function CrosscheckPage() {
                   onChange={(e) => setFacts(e.target.value)}
                   className="mt-4 min-h-[180px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm outline-none focus:border-white/20"
                   placeholder={[
-                    "• Entity type, residency, ownership",
-                    "• Transaction flow + timing + amounts",
-                    "• Where title passes / where services performed",
-                    "• Thresholds (PE, WHT, VAT registration, etc.)",
+                    tm("crosscheck.facts.placeholder1", "• Entity type, residency, ownership"),
+                    tm("crosscheck.facts.placeholder2", "• Transaction flow + timing + amounts"),
+                    tm("crosscheck.facts.placeholder3", "• Where title passes / where services performed"),
+                    tm("crosscheck.facts.placeholder4", "• Thresholds (PE, WHT, VAT registration, etc.)"),
                   ].join("\n")}
                 />
 
                 <div className="mt-3 flex items-center justify-between gap-3">
-                  <div className="text-[11px] text-white/45">Paste “Missing facts” here, then re-run.</div>
+                  <div className="text-[11px] text-white/45">
+                    {tm("crosscheck.facts.helper", "Paste “Missing facts” here, then re-run.")}
+                  </div>
                   <button
                     onClick={applyMissingFactsToFacts}
                     disabled={!(resp?.consensus?.followups ?? []).length}
                     className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10 disabled:opacity-40"
                   >
-                    Paste missing facts
+                    {tm("crosscheck.facts.pasteMissingFacts", "Paste missing facts")}
                   </button>
                 </div>
               </details>
@@ -1349,13 +1417,21 @@ export default function CrosscheckPage() {
             <Card className="p-0">
               <details open={false} className="p-5">
                 <summary className="cursor-pointer select-none list-none">
-                  <SectionTitle title="Advanced" subtitle="Defaults + run overrides (power users)." right={<Pill>Optional</Pill>} />
+                  <SectionTitle
+                    title={tm("crosscheck.advanced.title", "Advanced")}
+                    subtitle={tm("crosscheck.advanced.subtitle", "Defaults + run overrides (power users).")}
+                    right={<Pill>{tm("crosscheck.common.optional", "Optional")}</Pill>}
+                  />
                 </summary>
 
                 <div className="mt-4 space-y-4">
                   <div>
-                    <div className="text-xs font-semibold text-white/70">Global defaults</div>
-                    <div className="mt-1 text-[11px] text-white/45">Stable posture across runs.</div>
+                    <div className="text-xs font-semibold text-white/70">
+                      {tm("crosscheck.advanced.globalDefaults", "Global defaults")}
+                    </div>
+                    <div className="mt-1 text-[11px] text-white/45">
+                      {tm("crosscheck.advanced.globalDefaultsHelper", "Stable posture across runs.")}
+                    </div>
                     <textarea
                       value={globalDefaults}
                       onChange={(e) => setGlobalDefaults(e.target.value)}
@@ -1364,13 +1440,17 @@ export default function CrosscheckPage() {
                   </div>
 
                   <div>
-                    <div className="text-xs font-semibold text-white/70">Run overrides</div>
-                    <div className="mt-1 text-[11px] text-white/45">Only for this run (e.g., “focus only on withholding”).</div>
+                    <div className="text-xs font-semibold text-white/70">
+                      {tm("crosscheck.advanced.runOverrides", "Run overrides")}
+                    </div>
+                    <div className="mt-1 text-[11px] text-white/45">
+                      {tm("crosscheck.advanced.runOverridesHelper", "Only for this run (e.g., “focus only on withholding”).")}
+                    </div>
                     <textarea
                       value={runOverrides}
                       onChange={(e) => setRunOverrides(e.target.value)}
                       className="mt-2 min-h-[90px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm outline-none focus:border-white/20"
-                      placeholder="Example: Focus only on withholding + treaty relief."
+                      placeholder={tm("crosscheck.advanced.runOverridesPlaceholder", "Example: Focus only on withholding + treaty relief.")}
                     />
                     <div className="mt-2 flex justify-end">
                       <button
@@ -1378,14 +1458,16 @@ export default function CrosscheckPage() {
                         disabled={!runOverrides.trim()}
                         className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10 disabled:opacity-40"
                       >
-                        Clear overrides
+                        {tm("crosscheck.actions.clearOverrides", "Clear overrides")}
                       </button>
                     </div>
                   </div>
 
                   {resp?.providers?.length ? (
                     <details className="rounded-xl border border-white/10 bg-black/20 p-3">
-                      <summary className="cursor-pointer text-xs font-semibold text-white/70">Provider outputs (debug)</summary>
+                      <summary className="cursor-pointer text-xs font-semibold text-white/70">
+                        {tm("crosscheck.diagnostics.providerOutputs", "Provider outputs (debug)")}
+                      </summary>
                       <div className="mt-3 space-y-3">
                         {resp.providers.map((p, idx) => (
                           <div key={idx} className="rounded-xl border border-white/10 bg-black/30 p-3">
@@ -1394,11 +1476,12 @@ export default function CrosscheckPage() {
                                 <span className="font-semibold text-white/90">{p.provider}</span> · {p.model}
                               </div>
                               <div className="text-xs text-white/50">
-                                {p.status !== "ok" ? <span className="text-amber-200">({p.status})</span> : null}{" "}
-                                {p.ms}ms
+                                {p.status !== "ok" ? <span className="text-amber-200">({p.status})</span> : null} {p.ms}ms
                               </div>
                             </div>
-                            <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">{p.status === "ok" ? p.text : p.error}</div>
+                            <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">
+                              {p.status === "ok" ? p.text : p.error}
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -1409,40 +1492,45 @@ export default function CrosscheckPage() {
             </Card>
           </div>
 
-          {/* RIGHT: Output */}
           <div className="lg:col-span-8 space-y-4">
             <Card className="p-5">
               <SectionTitle
-                title="Output"
-                subtitle="Export-ready: Answer, Memo, or Email draft."
+                title={tm("crosscheck.output.title", "Output")}
+                subtitle={tm("crosscheck.output.subtitle", "Export-ready: Answer, Memo, or Email draft.")}
                 right={
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => setOutputStyle("answer")}
                       className={cn(
                         "rounded-full px-3 py-1 text-xs border",
-                        outputStyle === "answer" ? "bg-white text-black border-white" : "border-white/15 text-white/80 hover:bg-white/5"
+                        outputStyle === "answer"
+                          ? "bg-white text-black border-white"
+                          : "border-white/15 text-white/80 hover:bg-white/5"
                       )}
                     >
-                      Answer
+                      {tm("crosscheck.output.answer", "Answer")}
                     </button>
                     <button
                       onClick={() => setOutputStyle("memo")}
                       className={cn(
                         "rounded-full px-3 py-1 text-xs border",
-                        outputStyle === "memo" ? "bg-white text-black border-white" : "border-white/15 text-white/80 hover:bg-white/5"
+                        outputStyle === "memo"
+                          ? "bg-white text-black border-white"
+                          : "border-white/15 text-white/80 hover:bg-white/5"
                       )}
                     >
-                      Memo
+                      {tm("crosscheck.output.memo", "Memo")}
                     </button>
                     <button
                       onClick={() => setOutputStyle("email")}
                       className={cn(
                         "rounded-full px-3 py-1 text-xs border",
-                        outputStyle === "email" ? "bg-white text-black border-white" : "border-white/15 text-white/80 hover:bg-white/5"
+                        outputStyle === "email"
+                          ? "bg-white text-black border-white"
+                          : "border-white/15 text-white/80 hover:bg-white/5"
                       )}
                     >
-                      Email
+                      {tm("crosscheck.output.email", "Email")}
                     </button>
                   </div>
                 }
@@ -1457,67 +1545,95 @@ export default function CrosscheckPage() {
                   }}
                   className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
                 >
-                  Copy
+                  {tm("crosscheck.actions.copy", "Copy")}
                 </button>
 
                 <button
                   onClick={() => {
-                    const base = outputStyle === "memo" ? "taxaipro-memo" : outputStyle === "email" ? "taxaipro-email" : "taxaipro-answer";
+                    const base =
+                      outputStyle === "memo"
+                        ? "taxaipro-memo"
+                        : outputStyle === "email"
+                        ? "taxaipro-email"
+                        : "taxaipro-answer";
                     downloadText(`${base}.txt`, displayText);
                   }}
                   className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
                 >
-                  Download
+                  {tm("crosscheck.actions.download", "Download")}
                 </button>
 
                 <div className="ml-auto flex items-center gap-2">
-                  {resp ? <Pill tone={systemTone as any}>System: {systemLabel}</Pill> : <Pill>System: —</Pill>}
+                  {resp ? (
+                    <Pill tone={systemTone as any}>
+                      {tm("crosscheck.common.system", "System")}: {systemLabel}
+                    </Pill>
+                  ) : (
+                    <Pill>
+                      {tm("crosscheck.common.system", "System")}: —
+                    </Pill>
+                  )}
                   {confidence ? (
-                    <Pill tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}>Confidence: {confidence}</Pill>
+                    <Pill tone={confidence === "high" ? "good" : confidence === "medium" ? "warn" : "bad"}>
+                      {tm("crosscheck.common.confidence", "Confidence")}: {confidence}
+                    </Pill>
                   ) : null}
                 </div>
               </div>
 
-              {/* Paper-like output surface */}
               <div className="mt-4 rounded-2xl border border-zinc-200 bg-white p-6 min-h-[480px] shadow-sm">
                 <pre className="whitespace-pre-wrap text-[15px] leading-relaxed text-zinc-900">
                   {displayText || "—"}
                 </pre>
               </div>
 
-              {/* Follow-up */}
               <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-xs font-semibold text-white/80">Follow-up</div>
-                    <div className="mt-1 text-[11px] text-white/50">Continues the same case with context.</div>
+                    <div className="text-xs font-semibold text-white/80">
+                      {tm("crosscheck.followup.title", "Follow-up")}
+                    </div>
+                    <div className="mt-1 text-[11px] text-white/50">
+                      {tm("crosscheck.followup.subtitle", "Continues the same case with context.")}
+                    </div>
                   </div>
-                  <Pill tone={hasBaselineAnswer ? "good" : "neutral"}>{hasBaselineAnswer ? "Ready" : "Run first"}</Pill>
+                  <Pill tone={hasBaselineAnswer ? "good" : "neutral"}>
+                    {hasBaselineAnswer
+                      ? tm("crosscheck.followup.ready", "Ready")
+                      : tm("crosscheck.followup.runFirst", "Run first")}
+                  </Pill>
                 </div>
 
                 <textarea
                   value={followUp}
                   onChange={(e) => setFollowUp(e.target.value)}
                   className="mt-3 min-h-[90px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm outline-none focus:border-white/20"
-                  placeholder="Example: If services are performed partly in-country, does that change source rules / PE risk?"
+                  placeholder={tm(
+                    "crosscheck.followup.placeholder",
+                    "Example: If services are performed partly in-country, does that change source rules / PE risk?"
+                  )}
                 />
 
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="text-[11px] text-white/45">Client-side thread for now.</div>
+                  <div className="text-[11px] text-white/45">
+                    {tm("crosscheck.followup.helper", "Client-side thread for now.")}
+                  </div>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={runFollowUp}
                       disabled={followUpLoading || !hasBaselineAnswer}
                       className="h-10 rounded-xl bg-white px-4 text-sm font-semibold text-black hover:bg-white/90 disabled:opacity-50"
                     >
-                      {followUpLoading ? "Running…" : "Run follow-up"}
+                      {followUpLoading
+                        ? tm("crosscheck.actions.running", "Running…")
+                        : tm("crosscheck.actions.runFollowup", "Run follow-up")}
                     </button>
                     <button
                       onClick={() => setFollowUp("")}
                       disabled={!followUp.trim() || followUpLoading}
                       className="h-10 rounded-xl border border-white/15 bg-white/5 px-3 text-sm text-white/85 hover:bg-white/10 disabled:opacity-40"
                     >
-                      Clear
+                      {tm("crosscheck.actions.clear", "Clear")}
                     </button>
                   </div>
                 </div>
@@ -1525,25 +1641,29 @@ export default function CrosscheckPage() {
 
               <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
                 <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                  <div className="text-xs font-semibold text-white/70">Caveats</div>
+                  <div className="text-xs font-semibold text-white/70">
+                    {tm("crosscheck.caveats.title", "Caveats")}
+                  </div>
                   <div className="mt-2 space-y-1 text-sm text-white/80">
                     {(resp?.consensus?.caveats ?? []).length ? (
                       (resp?.consensus?.caveats ?? []).slice(0, 6).map((c, i) => <div key={i}>• {c}</div>)
                     ) : (
-                      <div className="text-white/50">None yet.</div>
+                      <div className="text-white/50">{tm("crosscheck.common.noneYet", "None yet.")}</div>
                     )}
                   </div>
                 </div>
 
                 <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="text-xs font-semibold text-white/70">Missing facts</div>
+                    <div className="text-xs font-semibold text-white/70">
+                      {tm("crosscheck.missingFacts.title", "Missing facts")}
+                    </div>
                     {(resp?.consensus?.followups ?? []).length ? (
                       <button
                         onClick={applyMissingFactsToFacts}
                         className="rounded-xl border border-white/15 bg-white/5 px-2.5 py-1.5 text-xs text-white/85 hover:bg-white/10"
                       >
-                        Paste to Facts
+                        {tm("crosscheck.missingFacts.pasteToFacts", "Paste to Facts")}
                       </button>
                     ) : null}
                   </div>
@@ -1552,18 +1672,23 @@ export default function CrosscheckPage() {
                     {(resp?.consensus?.followups ?? []).length ? (
                       (resp?.consensus?.followups ?? []).slice(0, 6).map((c, i) => <div key={i}>• {c}</div>)
                     ) : (
-                      <div className="text-white/50">None yet.</div>
+                      <div className="text-white/50">{tm("crosscheck.common.noneYet", "None yet.")}</div>
                     )}
                   </div>
                 </div>
               </div>
 
-              <p className="mt-4 text-[11px] text-white/40">TaxAiPro generates drafts for triage only — not legal or tax advice.</p>
+              <p className="mt-4 text-[11px] text-white/40">
+                {tm("crosscheck.footer.disclaimer", "TaxAiPro generates drafts for triage only — not legal or tax advice.")}
+              </p>
             </Card>
 
             {(resp?.consensus?.disagreements ?? []).length ? (
               <Card className="p-5">
-                <SectionTitle title="Disagreements" subtitle="Where models differed. Add facts and re-run." />
+                <SectionTitle
+                  title={tm("crosscheck.disagreements.title", "Disagreements")}
+                  subtitle={tm("crosscheck.disagreements.subtitle", "Where models differed. Add facts and re-run.")}
+                />
                 <div className="mt-3 space-y-2 text-sm text-white/80">
                   {(resp?.consensus?.disagreements ?? []).map((d, i) => (
                     <div key={i} className="rounded-xl border border-white/10 bg-black/25 p-3">
@@ -1576,7 +1701,6 @@ export default function CrosscheckPage() {
           </div>
         </div>
 
-        {/* Plans modal */}
         {upgradeOpen ? (
           <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" onMouseDown={() => setUpgradeOpen(false)}>
             <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
@@ -1586,12 +1710,16 @@ export default function CrosscheckPage() {
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm font-semibold text-white/90">Plans & tiers</div>
-                  <div className="mt-1 text-xs text-white/55">Upgrade increases daily runs. Resets daily (UTC midnight).</div>
+                  <div className="text-sm font-semibold text-white/90">
+                    {tm("crosscheck.plans.title", "Plans & tiers")}
+                  </div>
+                  <div className="mt-1 text-xs text-white/55">
+                    {tm("crosscheck.plans.subtitle", "Upgrade increases daily runs. Resets daily (UTC midnight).")}
+                  </div>
                   {runsLeft ? (
                     <div className="mt-2 text-[11px] text-white/55">
-                      Runs left today: <span className="text-white/85">{runsLeft}</span>
-                      {resetLocal ? <span className="text-white/40"> · Resets {resetLocal}</span> : null}
+                      {tm("crosscheck.plans.runsLeftToday", "Runs left today")}: <span className="text-white/85">{runsLeft}</span>
+                      {resetLocal ? <span className="text-white/40"> · {tm("crosscheck.plans.resets", "Resets")} {resetLocal}</span> : null}
                     </div>
                   ) : null}
                 </div>
@@ -1602,9 +1730,9 @@ export default function CrosscheckPage() {
 
               <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
                 <div className={cn("rounded-2xl border p-4", tier === "0" ? "border-white/25 bg-white/5" : "border-white/10 bg-black/25")}>
-                  <div className="text-xs font-semibold text-white/85">Tier 0 — Simple</div>
+                  <div className="text-xs font-semibold text-white/85">{tm("crosscheck.plans.tier0", "Tier 0 — Simple")}</div>
                   <div className="mt-1 text-2xl font-semibold text-white">$0</div>
-                  <div className="mt-1 text-xs text-white/60">Runs: 5/day</div>
+                  <div className="mt-1 text-xs text-white/60">{tm("crosscheck.plans.runs5", "Runs: 5/day")}</div>
                   <button
                     onClick={() => {
                       setTierLocal("0");
@@ -1615,14 +1743,14 @@ export default function CrosscheckPage() {
                       tier === "0" ? "bg-white text-black" : "border border-white/15 bg-white/5 text-white/85 hover:bg-white/10"
                     )}
                   >
-                    {tier === "0" ? "Current" : "Start free"}
+                    {tier === "0" ? tm("crosscheck.plans.current", "Current") : tm("crosscheck.plans.startFree", "Start free")}
                   </button>
                 </div>
 
                 <div className={cn("rounded-2xl border p-4", tier === "1" ? "border-white/25 bg-white/5" : "border-white/10 bg-black/25")}>
-                  <div className="text-xs font-semibold text-white/85">Tier 1 — Pro</div>
+                  <div className="text-xs font-semibold text-white/85">{tm("crosscheck.plans.tier1", "Tier 1 — Pro")}</div>
                   <div className="mt-1 text-2xl font-semibold text-white">$3.99</div>
-                  <div className="mt-1 text-xs text-white/60">per month · 25/day</div>
+                  <div className="mt-1 text-xs text-white/60">{tm("crosscheck.plans.perMonth25", "per month · 25/day")}</div>
                   <button
                     onClick={() => startCheckout("1")}
                     disabled={checkoutLoadingTier !== null}
@@ -1632,14 +1760,18 @@ export default function CrosscheckPage() {
                       checkoutLoadingTier !== null && "opacity-60 cursor-not-allowed"
                     )}
                   >
-                    {tier === "1" ? "Current" : checkoutLoadingTier === "1" ? "Opening Stripe…" : "Choose Tier 1"}
+                    {tier === "1"
+                      ? tm("crosscheck.plans.current", "Current")
+                      : checkoutLoadingTier === "1"
+                      ? tm("crosscheck.plans.openingStripe", "Opening Stripe…")
+                      : tm("crosscheck.plans.chooseTier1", "Choose Tier 1")}
                   </button>
                 </div>
 
                 <div className={cn("rounded-2xl border p-4", tier === "2" ? "border-white/25 bg-white/5" : "border-white/10 bg-black/25")}>
-                  <div className="text-xs font-semibold text-white/85">Tier 2 — Unlimited</div>
+                  <div className="text-xs font-semibold text-white/85">{tm("crosscheck.plans.tier2", "Tier 2 — Unlimited")}</div>
                   <div className="mt-1 text-2xl font-semibold text-white">$15.99</div>
-                  <div className="mt-1 text-xs text-white/60">per month · unlimited</div>
+                  <div className="mt-1 text-xs text-white/60">{tm("crosscheck.plans.perMonthUnlimited", "per month · unlimited")}</div>
                   <button
                     onClick={() => startCheckout("2")}
                     disabled={checkoutLoadingTier !== null}
@@ -1649,31 +1781,39 @@ export default function CrosscheckPage() {
                       checkoutLoadingTier !== null && "opacity-60 cursor-not-allowed"
                     )}
                   >
-                    {tier === "2" ? "Current" : checkoutLoadingTier === "2" ? "Opening Stripe…" : "Choose Tier 2"}
+                    {tier === "2"
+                      ? tm("crosscheck.plans.current", "Current")
+                      : checkoutLoadingTier === "2"
+                      ? tm("crosscheck.plans.openingStripe", "Opening Stripe…")
+                      : tm("crosscheck.plans.chooseTier2", "Choose Tier 2")}
                   </button>
                 </div>
 
                 <div className={cn("rounded-2xl border p-4", corpActive ? "border-emerald-500/30 bg-emerald-500/10" : "border-white/10 bg-black/25")}>
-                  <div className="text-xs font-semibold text-white/85">Corporate — 5 seats</div>
+                  <div className="text-xs font-semibold text-white/85">{tm("crosscheck.plans.corporate", "Corporate — 5 seats")}</div>
                   <div className="mt-1 text-2xl font-semibold text-white">$69.95</div>
-                  <div className="mt-1 text-xs text-white/60">per month · Tier 2 for team</div>
+                  <div className="mt-1 text-xs text-white/60">{tm("crosscheck.plans.perMonthTeam", "per month · Tier 2 for team")}</div>
                   <button
                     onClick={() => go("/corporate")}
                     className={cn("mt-3 w-full rounded-xl px-3 py-2 text-xs font-semibold", corpActive ? "bg-white text-black" : "bg-white text-black hover:bg-white/90")}
                   >
-                    {corpActive ? "Manage Corporate" : "Open Corporate"}
+                    {corpActive
+                      ? tm("crosscheck.plans.manageCorporate", "Manage Corporate")
+                      : tm("crosscheck.plans.openCorporate", "Open Corporate")}
                   </button>
                 </div>
               </div>
 
               <div className="mt-4 rounded-xl border border-white/10 bg-black/25 p-3 text-[11px] text-white/55">
-                Paid tiers use Stripe Checkout/Payment Links. Corporate redirects back with <code>?tier=corp&amp;session_id=...</code> which activates Tier 2 locally (MVP).
+                {tm(
+                  "crosscheck.plans.footer",
+                  "Paid tiers use Stripe Checkout/Payment Links. Corporate redirects back with ?tier=corp&session_id=... which activates Tier 2 locally (MVP)."
+                )}
               </div>
             </div>
           </div>
         ) : null}
 
-        {/* Reset confirmation modal */}
         {confirmResetOpen ? (
           <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" onMouseDown={() => setConfirmResetOpen(false)}>
             <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
@@ -1681,33 +1821,52 @@ export default function CrosscheckPage() {
               className="absolute left-1/2 top-1/2 w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-white/10 bg-[#070A12]/95 p-5 shadow-2xl"
               onMouseDown={(e) => e.stopPropagation()}
             >
-              <div className="text-sm font-semibold text-white/90">Reset current case?</div>
+              <div className="text-sm font-semibold text-white/90">
+                {tm("crosscheck.resetModal.title", "Reset current case?")}
+              </div>
               <div className="mt-2 text-xs text-white/55">
-                This will clear the current question, facts, overrides, output, and follow-up thread.
-                {hasUnsavedWork ? " If you haven’t saved, this conversation will be lost." : ""}
+                {tm(
+                  "crosscheck.resetModal.body",
+                  "This will clear the current question, facts, overrides, output, and follow-up thread."
+                )}
+                {hasUnsavedWork
+                  ? tm("crosscheck.resetModal.unsaved", " If you haven’t saved, this conversation will be lost.")
+                  : ""}
               </div>
 
               <div className="mt-4 flex items-center justify-end gap-2">
-                <button onClick={() => setConfirmResetOpen(false)} className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10">
-                  Cancel
+                <button
+                  onClick={() => setConfirmResetOpen(false)}
+                  className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
+                >
+                  {tm("crosscheck.common.cancel", "Cancel")}
                 </button>
-                <button onClick={doFullReset} className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-black hover:bg-white/90">
-                  Yes, reset
+                <button
+                  onClick={doFullReset}
+                  className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-black hover:bg-white/90"
+                >
+                  {tm("crosscheck.resetModal.confirm", "Yes, reset")}
                 </button>
               </div>
             </div>
           </div>
         ) : null}
 
-        {/* History drawer */}
         {historyOpen ? (
           <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" onMouseDown={() => setHistoryOpen(false)}>
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-            <div className="absolute right-0 top-0 h-full w-[92vw] max-w-md border-l border-white/10 bg-[#070A12]/95 p-4" onMouseDown={(e) => e.stopPropagation()}>
+            <div
+              className="absolute right-0 top-0 h-full w-[92vw] max-w-md border-l border-white/10 bg-[#070A12]/95 p-4"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm font-semibold text-white/90">Case history</div>
-                  <div className="mt-1 text-xs text-white/50">Saved on this device (localStorage).</div>
+                  <div className="text-sm font-semibold text-white/90">
+                    {tm("crosscheck.history.title", "Case history")}
+                  </div>
+                  <div className="mt-1 text-xs text-white/50">
+                    {tm("crosscheck.history.subtitle", "Saved on this device (localStorage).")}
+                  </div>
                 </div>
                 <button onClick={() => setHistoryOpen(false)} className="text-white/60 hover:text-white" aria-label="Close">
                   ✕
@@ -1717,12 +1876,16 @@ export default function CrosscheckPage() {
               <div className="mt-4 space-y-2 overflow-auto pr-1" style={{ maxHeight: "calc(100vh - 84px)" }}>
                 {history.length ? (
                   history.map((h) => (
-                    <div key={h.id} className={cn("rounded-xl border border-white/10 bg-black/25 p-3", selectedId === h.id && "ring-1 ring-white/20")}>
+                    <div
+                      key={h.id}
+                      className={cn("rounded-xl border border-white/10 bg-black/25 p-3", selectedId === h.id && "ring-1 ring-white/20")}
+                    >
                       <button onClick={() => loadRun(h)} className="w-full text-left">
                         <div className="text-xs font-semibold text-white/85 line-clamp-2">{h.title}</div>
                         <div className="mt-1 text-[11px] text-white/45">
-                          {new Date(h.createdAt).toLocaleDateString()} · {h.jurisdiction || "—"} · {h.confidence ? `Conf: ${h.confidence}` : "Conf: —"}
-                          {h.thread?.length ? ` · Turns: ${Math.max(0, Math.floor(h.thread.length / 2))}` : ""}
+                          {new Date(h.createdAt).toLocaleDateString()} · {h.jurisdiction || "—"} ·{" "}
+                          {h.confidence ? `${tm("crosscheck.history.conf", "Conf")}: ${h.confidence}` : `${tm("crosscheck.history.conf", "Conf")}: —`}
+                          {h.thread?.length ? ` · ${tm("crosscheck.history.turns", "Turns")}: ${Math.max(0, Math.floor(h.thread.length / 2))}` : ""}
                         </div>
                       </button>
 
@@ -1734,16 +1897,18 @@ export default function CrosscheckPage() {
                           }}
                           className="rounded-xl border border-white/15 bg-white/5 px-3 py-1.5 text-xs text-white/85 hover:bg-white/10"
                         >
-                          Open
+                          {tm("crosscheck.history.open", "Open")}
                         </button>
                         <button onClick={() => deleteRun(h.id)} className="text-xs text-white/55 hover:text-white/80">
-                          Delete
+                          {tm("crosscheck.history.delete", "Delete")}
                         </button>
                       </div>
                     </div>
                   ))
                 ) : (
-                  <div className="rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-white/50">No saved runs yet.</div>
+                  <div className="rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-white/50">
+                    {tm("crosscheck.history.empty", "No saved runs yet.")}
+                  </div>
                 )}
               </div>
             </div>
