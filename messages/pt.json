@@ -20,21 +20,215 @@
     }
   },
   "crosscheck": {
-    "jurisdiction": "Jurisdição",
-    "caseQuestion": "Pergunta do caso",
-    "facts": "Fatos",
-    "advanced": "Avançado",
-    "run": "Executar",
-    "save": "Salvar",
-    "output": "Resultado",
-    "answer": "Resposta",
-    "memo": "Memorando",
-    "email": "Email",
-    "copy": "Copiar",
-    "download": "Baixar",
-    "followUp": "Pergunta adicional",
-    "runFollowUp": "Executar seguimento",
-    "clear": "Limpar",
-    "resetCase": "Reiniciar caso"
+    "header": {
+      "builtBy": "Construído por um executivo tributário — para executivos tributários",
+      "tagline": "Triagem conservadora multimodelo",
+      "corporate": "Corporativo"
+    },
+    "nav": {
+      "howItWorks": "Como funciona",
+      "history": "Histórico",
+      "plans": "Planos",
+      "plansTitle": "Planos e upgrades",
+      "corporate": "Corporativo",
+      "corporateTitle": "Plano corporativo",
+      "formalOpinion": "Solicitar parecer formal",
+      "formalOpinionTitle": "Premium: solicitar parecer formal",
+      "logout": "Sair",
+      "logoutTitle": "Encerrar sessão",
+      "diagnostics": "Diagnósticos",
+      "diagnosticsTitle": "Diagnósticos (telemetria)",
+      "hideDiagnostics": "Ocultar diagnósticos"
+    },
+    "common": {
+      "confidence": "Confiança",
+      "system": "Sistema",
+      "recommended": "Recomendado",
+      "optional": "Opcional",
+      "noneYet": "Nada ainda.",
+      "cancel": "Cancelar"
+    },
+    "system": {
+      "degraded": "Degradado",
+      "partial": "Parcial",
+      "healthy": "Saudável"
+    },
+    "jurisdiction": {
+      "title": "Jurisdição",
+      "subtitle": "País / estado. Adicione contexto de tratado em Fatos se relevante.",
+      "usa": "EUA",
+      "latam": "LATAM",
+      "otherGroup": "Outros",
+      "unitedStates": "Estados Unidos",
+      "canada": "Canadá",
+      "argentina": "Argentina",
+      "brazil": "Brasil",
+      "chile": "Chile",
+      "colombia": "Colômbia",
+      "mexico": "México",
+      "panama": "Panamá",
+      "peru": "Peru",
+      "uruguay": "Uruguai",
+      "paraguay": "Paraguai",
+      "bolivia": "Bolívia",
+      "puertoRico": "Porto Rico",
+      "ecuador": "Equador",
+      "dominicanRepublic": "Rep. Dominicana",
+      "jamaica": "Jamaica",
+      "other": "Outro / Não listado"
+    },
+    "caseQuestion": {
+      "title": "Pergunta do caso",
+      "subtitle": "Uma pergunta clara. Coloque os detalhes em Fatos. Use Exemplos se quiser um modelo.",
+      "placeholder": "Exemplo: Isso cria exposição a retenção na fonte ou risco de PE/ECI? Quais fatos mudam o resultado?",
+      "helper": "Executar → revisar fatos faltantes → colar em Fatos → executar novamente.",
+      "threadNote": "A conversa fica apenas no cliente (salva se você clicar em Salvar)."
+    },
+    "examples": {
+      "show": "Mostrar exemplos",
+      "hide": "Ocultar exemplos",
+      "subtitle": "Carregar um modelo completo (Jurisdição + Pergunta + Fatos)",
+      "clickToLoad": "Clique para carregar",
+      "usInbound": {
+        "label": "Serviços inbound nos EUA — risco de WHT + PE",
+        "question": "Uma matriz estrangeira presta serviços de gestão a uma subsidiária dos EUA. Quais são os principais riscos fiscais federais nos EUA (WHT, PE/ECI, documentação de preços de transferência) e quais fatos mudam a conclusão?",
+        "fact1": "• A matriz estrangeira não tem entidade nos EUA; serviços prestados remotamente + viagens ocasionais aos EUA",
+        "fact2": "• Taxa de serviço: custo mais 7% paga trimestralmente",
+        "fact3": "• Contrato rege os serviços; sem empregados dos EUA na folha dos EUA",
+        "fact4": "• Necessário: indicadores de ECI/PE, posições de Form W-8/W-9, suporte de TP"
+      },
+      "brazilImports": {
+        "label": "Importações no Brasil — pilha ICMS/PIS/COFINS (triagem)",
+        "question": "Importação de equipamentos para revenda no Brasil: descreva os principais tributos (II, IPI, PIS/COFINS-Importação, ICMS) e os principais pontos de alavancagem (NCM, ex-tarifário, regimes especiais). Seja conservador e liste os fatos faltantes.",
+        "fact1": "• Importador é um CNPJ brasileiro sob Lucro Real",
+        "fact2": "• Mercadorias são bens de capital (NCM a definir)",
+        "fact3": "• Estado de destino: SP",
+        "fact4": "• CIF conhecido; objetivo é estimar faixa de custo landed + lista de fatos faltantes"
+      },
+      "latamHolding": {
+        "label": "Holding LATAM — triagem de regras de fonte",
+        "question": "Uma empresa panamenha fatura clientes estrangeiros por serviços de consultoria. É renda de fonte panamenha? Existe exposição ao imposto corporativo local, preocupações de substância ou risco de retenção no exterior (tratado / lei doméstica)?",
+        "fact1": "• Serviços executados por empregados localizados fora do Panamá",
+        "fact2": "• Entidade do Panamá tem diretor + conta bancária; operações locais mínimas",
+        "fact3": "• Clientes localizados na LATAM + EUA",
+        "fact4": "• Necessário: onde os serviços são executados, termos do contrato, regimes de retenção por país do cliente"
+      }
+    },
+    "facts": {
+      "title": "Fatos",
+      "subtitle": "Somente tópicos. Isto é o que mais melhora a precisão.",
+      "placeholder1": "• Tipo de entidade, residência, titularidade",
+      "placeholder2": "• Fluxo da transação + momento + valores",
+      "placeholder3": "• Onde o título é transferido / onde os serviços são executados",
+      "placeholder4": "• Limiares (PE, WHT, registro de VAT etc.)",
+      "helper": "Cole aqui os “Fatos faltantes” e execute novamente.",
+      "pasteMissingFacts": "Colar fatos faltantes"
+    },
+    "advanced": {
+      "title": "Avançado",
+      "subtitle": "Padrões + substituições desta execução (usuários avançados).",
+      "globalDefaults": "Padrões globais",
+      "globalDefaultsHelper": "Postura estável entre execuções.",
+      "runOverrides": "Substituições desta execução",
+      "runOverridesHelper": "Somente para esta execução (ex.: “focar apenas em retenção na fonte”).",
+      "runOverridesPlaceholder": "Exemplo: focar apenas em retenção na fonte + benefício de tratado."
+    },
+    "actions": {
+      "run": "Executar",
+      "running": "Executando…",
+      "save": "Salvar",
+      "saveTitle": "Salvar esta execução",
+      "runOnceFirst": "Execute uma vez primeiro",
+      "copy": "Copiar",
+      "download": "Baixar",
+      "runFollowup": "Executar seguimento",
+      "clear": "Limpar",
+      "clearOverrides": "Limpar substituições",
+      "resetCase": "Reiniciar caso",
+      "resetTitle": "Reinicia o estado atual do caso."
+    },
+    "output": {
+      "title": "Resultado",
+      "subtitle": "Pronto para exportação: Resposta, Memorando ou Rascunho de Email.",
+      "answer": "Resposta",
+      "memo": "Memorando",
+      "email": "Email",
+      "placeholder": "Sua resposta aparecerá aqui."
+    },
+    "followup": {
+      "title": "Pergunta adicional",
+      "subtitle": "Continua o mesmo caso com contexto.",
+      "ready": "Pronto",
+      "runFirst": "Execute primeiro",
+      "placeholder": "Exemplo: Se os serviços forem executados parcialmente no país, isso muda as regras de fonte / risco de PE?",
+      "helper": "Conversa no cliente por enquanto."
+    },
+    "caveats": {
+      "title": "Ressalvas"
+    },
+    "missingFacts": {
+      "title": "Fatos faltantes",
+      "pasteToFacts": "Colar em Fatos"
+    },
+    "missingFactsBlockTitle": "Fatos faltantes para confirmar:",
+    "diagnostics": {
+      "runsLeft": "Execuções restantes",
+      "resets": "Reinicia",
+      "threadMsgs": "Mensagens",
+      "modelsOk": "Modelos ok",
+      "modelsFailed": "Modelos falharam",
+      "providerOutputs": "Saídas dos provedores (debug)"
+    },
+    "plans": {
+      "title": "Planos e níveis",
+      "subtitle": "O upgrade aumenta as execuções diárias. Reinicia diariamente (meia-noite UTC).",
+      "runsLeftToday": "Execuções restantes hoje",
+      "resets": "Reinicia",
+      "tier0": "Nível 0 — Simples",
+      "tier1": "Nível 1 — Pro",
+      "tier2": "Nível 2 — Ilimitado",
+      "runs5": "Execuções: 5/dia",
+      "perMonth25": "por mês · 25/dia",
+      "perMonthUnlimited": "por mês · ilimitado",
+      "perMonthTeam": "por mês · Nível 2 para equipe",
+      "current": "Atual",
+      "startFree": "Começar grátis",
+      "openingStripe": "Abrindo Stripe…",
+      "chooseTier1": "Escolher Nível 1",
+      "chooseTier2": "Escolher Nível 2",
+      "corporate": "Corporativo — 5 assentos",
+      "manageCorporate": "Gerenciar Corporativo",
+      "openCorporate": "Abrir Corporativo",
+      "footer": "Níveis pagos usam Stripe Checkout/Payment Links. O corporativo redireciona de volta com ?tier=corp&session_id=... o que ativa localmente o Nível 2 (MVP)."
+    },
+    "resetModal": {
+      "title": "Reiniciar caso atual?",
+      "body": "Isso limpará a pergunta atual, fatos, substituições, resultado e a conversa de seguimento.",
+      "unsaved": " Se você não salvou, esta conversa será perdida.",
+      "confirm": "Sim, reiniciar"
+    },
+    "history": {
+      "title": "Histórico de casos",
+      "subtitle": "Salvo neste dispositivo (localStorage).",
+      "conf": "Conf.",
+      "turns": "Rodadas",
+      "open": "Abrir",
+      "delete": "Excluir",
+      "empty": "Ainda não há execuções salvas."
+    },
+    "disagreements": {
+      "title": "Divergências",
+      "subtitle": "Onde os modelos divergiram. Adicione fatos e execute novamente."
+    },
+    "footer": {
+      "disclaimer": "O TaxAiPro gera rascunhos apenas para triagem — não é aconselhamento jurídico ou tributário."
+    },
+    "errors": {
+      "typeQuestion": "Digite uma pergunta primeiro.",
+      "typeFollowup": "Digite uma pergunta adicional primeiro.",
+      "runInitialFirst": "Execute a pergunta inicial primeiro para criar uma resposta base.",
+      "typeOriginalQuestion": "Digite uma pergunta original primeiro.",
+      "requestFailed": "Falha na solicitação."
+    }
   }
 }
