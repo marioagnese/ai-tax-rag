@@ -18,5 +18,23 @@
       "disclaimer": "Drafts for triage only — not legal or tax advice.",
       "videoFallback": "Your browser does not support the video tag."
     }
+  },
+  "crosscheck": {
+    "jurisdiction": "Jurisdiction",
+    "caseQuestion": "Case question",
+    "facts": "Facts",
+    "advanced": "Advanced",
+    "run": "Run",
+    "save": "Save",
+    "output": "Output",
+    "answer": "Answer",
+    "memo": "Memo",
+    "email": "Email",
+    "copy": "Copy",
+    "download": "Download",
+    "followUp": "Follow-up",
+    "runFollowUp": "Run follow-up",
+    "clear": "Clear",
+    "resetCase": "Reset case"
   }
 }

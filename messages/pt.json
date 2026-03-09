@@ -18,5 +18,23 @@
       "disclaimer": "Rascunhos apenas para triagem — não é aconselhamento jurídico ou tributário.",
       "videoFallback": "Seu navegador não suporta a tag de vídeo."
     }
+  },
+  "crosscheck": {
+    "jurisdiction": "Jurisdição",
+    "caseQuestion": "Pergunta do caso",
+    "facts": "Fatos",
+    "advanced": "Avançado",
+    "run": "Executar",
+    "save": "Salvar",
+    "output": "Resultado",
+    "answer": "Resposta",
+    "memo": "Memorando",
+    "email": "Email",
+    "copy": "Copiar",
+    "download": "Baixar",
+    "followUp": "Pergunta adicional",
+    "runFollowUp": "Executar seguimento",
+    "clear": "Limpar",
+    "resetCase": "Reiniciar caso"
   }
 }
