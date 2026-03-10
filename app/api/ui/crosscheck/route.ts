@@ -1,5 +1,6 @@
 // app/api/ui/crosscheck/route.ts
 import { NextResponse, type NextRequest } from "next/server";
+import { GoogleGenAI } from "@google/genai";
 import { requireSessionUser } from "../../../../src/lib/auth/session";
 import {
   assertWithinDailyLimit,
@@ -14,7 +15,6 @@ export const dynamic = "force-dynamic";
 /* ---------------- Env helpers ---------------- */
 
 function env(name: string): string {
-  // Trim to avoid Vercel env var whitespace/newline bugs.
   return (process.env[name] || "").trim();
 }
 
@@ -66,6 +66,23 @@ type CrosscheckResponse = {
 
 type ChatMsg = { role: "system" | "user" | "assistant"; content: string };
 
+type OpenAiCompatibleProvider = {
+  provider: "openai" | "perplexity" | "xai";
+  kind: "openai-compatible";
+  baseURL: string;
+  apiKey: string;
+  model: string;
+};
+
+type GeminiProvider = {
+  provider: "gemini";
+  kind: "gemini";
+  apiKey: string;
+  model: string;
+};
+
+type ProviderConfig = OpenAiCompatibleProvider | GeminiProvider;
+
 /* ---------------- Sanitization ---------------- */
 
 function sanitizeBody(raw: unknown): CrosscheckUiBody {
@@ -115,7 +132,6 @@ function applyRateLimitHeaders(h: Headers, meta?: RateLimitMeta) {
 function normalizeBaseForProvider(provider: string, baseURL: string) {
   const base = (baseURL || "").trim().replace(/\/+$/, "");
 
-  // Defaults if env not set
   if (!base) {
     if (provider === "openai") return "https://api.openai.com/v1";
     if (provider === "perplexity") return "https://api.perplexity.ai";
@@ -123,12 +139,10 @@ function normalizeBaseForProvider(provider: string, baseURL: string) {
     return "";
   }
 
-  // xAI: allow env to be https://api.x.ai OR https://api.x.ai/v1
   if (provider === "xai") {
     return base.endsWith("/v1") ? base : `${base}/v1`;
   }
 
-  // OpenAI / Perplexity: treat base as-is; our caller appends /chat/completions
   return base;
 }
 
@@ -221,6 +235,70 @@ async function callChatCompletions(args: {
   }
 }
 
+/* ---------------- Gemini ---------------- */
+
+async function callGemini(args: {
+  provider: "gemini";
+  apiKey: string;
+  model: string;
+  messages: ChatMsg[];
+  timeoutMs: number;
+}): Promise<ProviderResult> {
+  const started = Date.now();
+
+  try {
+    const client = new GoogleGenAI({ apiKey: args.apiKey });
+
+    const prompt = args.messages
+      .map((m) => `${m.role.toUpperCase()}:\n${m.content}`)
+      .join("\n\n");
+
+    const response = await Promise.race([
+      client.models.generateContent({
+        model: args.model,
+        contents: prompt,
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Timed out")), args.timeoutMs)
+      ),
+    ]);
+
+    const ms = Date.now() - started;
+    const text = String((response as any)?.text ?? "").trim();
+
+    if (!text) {
+      return {
+        provider: args.provider,
+        model: args.model,
+        status: "error",
+        ms,
+        error: "Empty response content.",
+      };
+    }
+
+    return {
+      provider: args.provider,
+      model: args.model,
+      status: "ok",
+      ms,
+      text,
+    };
+  } catch (e: any) {
+    const ms = Date.now() - started;
+    const timedOut = String(e?.message || "")
+      .toLowerCase()
+      .includes("timed out");
+
+    return {
+      provider: args.provider,
+      model: args.model,
+      status: timedOut ? "timeout" : "error",
+      ms,
+      error: e?.message || "Request failed",
+    };
+  }
+}
+
 /* ---------------- Prompt building ---------------- */
 
 function buildMessages(body: CrosscheckUiBody): ChatMsg[] {
@@ -259,7 +337,6 @@ function buildConsensus(
     };
   }
 
-  // Prefer OpenAI if present (stable baseline), else first success.
   const openai = oks.find((p) => p.provider === "openai");
   const chosen = openai ?? oks[0];
 
@@ -282,7 +359,7 @@ function buildConsensus(
       : [];
 
   const confidence: "low" | "medium" | "high" =
-    oks.length >= 3 && fails.length === 0
+    oks.length >= 4 && fails.length === 0
       ? "high"
       : oks.length >= 2
       ? "medium"
@@ -301,12 +378,50 @@ function buildConsensus(
 
 function normalizeXaiModel(maybe: string) {
   const m = (maybe || "").trim();
-  if (!m) return "grok-4-1-fast-reasoning"; // safe default
+  if (!m) return "grok-4-1-fast-reasoning";
 
-  // People guess grok-*-latest; normalize to a known available alias
   if (/-latest$/i.test(m)) return "grok-4-1-fast-reasoning";
 
   return m;
+}
+
+/* ---------------- Provider config ---------------- */
+
+function getProvidersToRun(): ProviderConfig[] {
+  const providers: ProviderConfig[] = [
+    {
+      provider: "openai",
+      kind: "openai-compatible",
+      baseURL: env("OPENAI_BASE_URL") || "https://api.openai.com/v1",
+      apiKey: requireEnv("OPENAI_API_KEY"),
+      model: env("OPENAI_MODEL") || "gpt-4.1-mini",
+    },
+    {
+      provider: "perplexity",
+      kind: "openai-compatible",
+      baseURL: env("PERPLEXITY_BASE_URL") || "https://api.perplexity.ai",
+      apiKey: requireEnv("PERPLEXITY_API_KEY"),
+      model: env("PERPLEXITY_MODEL") || "sonar-pro",
+    },
+    {
+      provider: "xai",
+      kind: "openai-compatible",
+      baseURL: env("XAI_BASE_URL") || "https://api.x.ai",
+      apiKey: requireEnv("XAI_API_KEY"),
+      model: normalizeXaiModel(env("XAI_MODEL") || "grok-4-1-fast-reasoning"),
+    },
+  ];
+
+  if (env("GEMINI_ENABLED").toLowerCase() === "true") {
+    providers.push({
+      provider: "gemini",
+      kind: "gemini",
+      apiKey: requireEnv("GEMINI_API_KEY"),
+      model: env("GEMINI_MODEL") || "gemini-2.5-pro",
+    });
+  }
+
+  return providers;
 }
 
 /* ---------------- Route ---------------- */
@@ -315,10 +430,8 @@ export async function POST(req: NextRequest) {
   let rlMeta: RateLimitMeta | undefined;
 
   try {
-    // Must be logged in to use the UI route
     await requireSessionUser();
 
-    // ---- Rate limit (tier 0/1/2) ----
     const tier = getTierFromRequest(req as unknown as Request);
     const clientId = getClientId(req as unknown as Request);
 
@@ -344,35 +457,23 @@ export async function POST(req: NextRequest) {
     const timeoutMs = body.timeoutMs ?? 35_000;
     const maxTokens = body.maxTokens ?? 1_200;
     const messages = buildMessages(body);
-
-    // ---- Provider config ----
-    const providersToRun = [
-      {
-        provider: "openai",
-        baseURL: env("OPENAI_BASE_URL") || "https://api.openai.com/v1",
-        apiKey: requireEnv("OPENAI_API_KEY"),
-        model: env("OPENAI_MODEL") || "gpt-4.1-mini",
-      },
-      {
-        provider: "perplexity",
-        baseURL: env("PERPLEXITY_BASE_URL") || "https://api.perplexity.ai",
-        apiKey: requireEnv("PERPLEXITY_API_KEY"),
-        model: env("PERPLEXITY_MODEL") || "sonar-pro",
-      },
-      {
-        provider: "xai",
-        // can be https://api.x.ai OR https://api.x.ai/v1 — we normalize to /v1
-        baseURL: env("XAI_BASE_URL") || "https://api.x.ai",
-        apiKey: requireEnv("XAI_API_KEY"),
-        model: normalizeXaiModel(env("XAI_MODEL") || "grok-4-1-fast-reasoning"),
-      },
-    ] as const;
+    const providersToRun = getProvidersToRun();
 
     const startedAll = Date.now();
 
     const settled = await Promise.allSettled(
-      providersToRun.map((p) =>
-        callChatCompletions({
+      providersToRun.map((p) => {
+        if (p.kind === "gemini") {
+          return callGemini({
+            provider: p.provider,
+            apiKey: p.apiKey,
+            model: p.model,
+            messages,
+            timeoutMs,
+          });
+        }
+
+        return callChatCompletions({
           provider: p.provider,
           baseURL: p.baseURL,
           apiKey: p.apiKey,
@@ -381,8 +482,8 @@ export async function POST(req: NextRequest) {
           temperature: 0.2,
           timeoutMs,
           maxTokens,
-        })
-      )
+        });
+      })
     );
 
     const results: ProviderResult[] = settled.map((s, i) => {

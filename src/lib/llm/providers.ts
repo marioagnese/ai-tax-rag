@@ -1,3 +1,4 @@
+import { GoogleGenAI } from "@google/genai";
 import { callOpenAICompatible, ChatMsg } from "./openaiCompatible";
 
 function mustEnv(name: string) {
@@ -6,7 +7,13 @@ function mustEnv(name: string) {
   return v;
 }
 
-export type ProviderId = "openai" | "perplexity" | "xai";
+export type ProviderId = "openai" | "perplexity" | "xai" | "gemini";
+
+function flattenMessages(messages: ChatMsg[]) {
+  return messages
+    .map((m) => `${m.role.toUpperCase()}:\n${m.content}`)
+    .join("\n\n");
+}
 
 export async function runProvider(provider: ProviderId, messages: ChatMsg[]) {
   if (provider === "openai") {
@@ -27,11 +34,38 @@ export async function runProvider(provider: ProviderId, messages: ChatMsg[]) {
     });
   }
 
-  // xAI / Grok
-  return callOpenAICompatible({
-    baseURL: process.env.XAI_BASE_URL ?? "https://api.x.ai",
-    apiKey: mustEnv("XAI_API_KEY"),
-    model: process.env.XAI_MODEL ?? "grok-2-latest",
-    messages,
-  });
+  if (provider === "xai") {
+    return callOpenAICompatible({
+      baseURL: process.env.XAI_BASE_URL ?? "https://api.x.ai",
+      apiKey: mustEnv("XAI_API_KEY"),
+      model: process.env.XAI_MODEL ?? "grok-2-latest",
+      messages,
+    });
+  }
+
+  if (provider === "gemini") {
+    const enabled = (process.env.GEMINI_ENABLED ?? "false").toLowerCase() === "true";
+    if (!enabled) {
+      throw new Error("Gemini provider is disabled.");
+    }
+
+    const ai = new GoogleGenAI({
+      apiKey: mustEnv("GEMINI_API_KEY"),
+    });
+
+    const model = process.env.GEMINI_MODEL ?? "gemini-2.5-pro";
+
+    const prompt = flattenMessages(messages);
+
+    const response = await ai.models.generateContent({
+      model,
+      contents: prompt,
+    });
+
+    return {
+      text: response.text ?? "",
+    };
+  }
+
+  throw new Error(`Unsupported provider: ${provider satisfies never}`);
 }
