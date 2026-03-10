@@ -1801,7 +1801,7 @@ export default function CrosscheckPage() {
 
                 <div className={cn("rounded-2xl border p-4", tier === "1" ? "border-white/25 bg-white/5" : "border-white/10 bg-black/25")}>
                   <div className="text-xs font-semibold text-white/85">{tm("crosscheck.plans.tier1", "Tier 1 — Pro")}</div>
-                  <div className="mt-1 text-2xl font-semibold text-white">$3.99</div>
+                  <div className="mt-1 text-2xl font-semibold text-white">$5.99</div>
                   <div className="mt-1 text-xs text-white/60">{tm("crosscheck.plans.perMonth25", "per month · 25/day")}</div>
                   <button
                     onClick={() => startCheckout("1")}
@@ -1822,7 +1822,7 @@ export default function CrosscheckPage() {
 
                 <div className={cn("rounded-2xl border p-4", tier === "2" ? "border-white/25 bg-white/5" : "border-white/10 bg-black/25")}>
                   <div className="text-xs font-semibold text-white/85">{tm("crosscheck.plans.tier2", "Tier 2 — Unlimited")}</div>
-                  <div className="mt-1 text-2xl font-semibold text-white">$15.99</div>
+                  <div className="mt-1 text-2xl font-semibold text-white">$19.99</div>
                   <div className="mt-1 text-xs text-white/60">{tm("crosscheck.plans.perMonthUnlimited", "per month · unlimited")}</div>
                   <button
                     onClick={() => startCheckout("2")}
