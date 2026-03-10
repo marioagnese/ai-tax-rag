@@ -20,21 +20,225 @@
     }
   },
   "crosscheck": {
-    "jurisdiction": "Jurisdiction",
-    "caseQuestion": "Case question",
-    "facts": "Facts",
-    "advanced": "Advanced",
-    "run": "Run",
-    "save": "Save",
-    "output": "Output",
-    "answer": "Answer",
-    "memo": "Memo",
-    "email": "Email",
-    "copy": "Copy",
-    "download": "Download",
-    "followUp": "Follow-up",
-    "runFollowUp": "Run follow-up",
-    "clear": "Clear",
-    "resetCase": "Reset case"
+    "header": {
+      "builtBy": "Built by a tax executive — for tax executives",
+      "tagline": "Conservative multi-model triage",
+      "corporate": "Corporate"
+    },
+    "nav": {
+      "howItWorks": "How it works",
+      "history": "History",
+      "plans": "Plans",
+      "plansTitle": "Plans & upgrades",
+      "corporate": "Corporate",
+      "corporateTitle": "Corporate plan",
+      "formalOpinion": "Request formal opinion",
+      "formalOpinionTitle": "Premium: request formal opinion quote",
+      "logout": "Logout",
+      "logoutTitle": "Log out",
+      "diagnostics": "Diagnostics",
+      "diagnosticsTitle": "Diagnostics (telemetry)",
+      "hideDiagnostics": "Hide diagnostics"
+    },
+    "common": {
+      "confidence": "Confidence",
+      "system": "System",
+      "recommended": "Recommended",
+      "optional": "Optional",
+      "noneYet": "None yet.",
+      "cancel": "Cancel"
+    },
+    "system": {
+      "degraded": "Degraded",
+      "partial": "Partial",
+      "healthy": "Healthy"
+    },
+    "jurisdiction": {
+      "title": "Jurisdiction",
+      "subtitle": "Country / state. Add treaty context in Facts if relevant.",
+      "usa": "USA",
+      "latam": "LATAM",
+      "otherGroup": "Other",
+      "unitedStates": "United States",
+      "canada": "Canada",
+      "argentina": "Argentina",
+      "brazil": "Brazil",
+      "chile": "Chile",
+      "colombia": "Colombia",
+      "mexico": "Mexico",
+      "panama": "Panama",
+      "peru": "Peru",
+      "uruguay": "Uruguay",
+      "paraguay": "Paraguay",
+      "bolivia": "Bolivia",
+      "puertoRico": "Puerto Rico",
+      "ecuador": "Ecuador",
+      "dominicanRepublic": "Rep. Dominicana",
+      "jamaica": "Jamaica",
+      "other": "Other / Not listed"
+    },
+    "caseQuestion": {
+      "title": "Case question",
+      "subtitle": "One clear question. Put detail in Facts. Use Examples if you want a template.",
+      "placeholder": "Example: Does this create withholding exposure or PE/ECI risk? What facts change the result?",
+      "helper": "Run → review Missing facts → paste into Facts → re-run.",
+      "threadNote": "Thread is client-side only (saved if you Save)."
+    },
+    "examples": {
+      "show": "Show examples",
+      "hide": "Hide examples",
+      "subtitle": "Load a full template (Jurisdiction + Question + Facts)",
+      "clickToLoad": "Click to load",
+      "usInbound": {
+        "label": "US inbound services — WHT + PE risk",
+        "question": "A foreign parent provides management services to a US subsidiary. What are the key US federal tax risks (WHT, PE/ECI, transfer pricing documentation), and what facts change the conclusion?",
+        "fact1": "• Foreign parent has no US entity; services delivered remotely + occasional US travel",
+        "fact2": "• Service fee: cost-plus 7% paid quarterly",
+        "fact3": "• Contract governs services; no US employees on US payroll",
+        "fact4": "• Need: ECI/PE indicators, Form W-8/W-9 positions, TP support outline"
+      },
+      "brazilImports": {
+        "label": "Brazil imports — ICMS/PIS/COFINS stack (triage)",
+        "question": "Importing equipment into Brazil for resale: outline the main taxes (II, IPI, PIS/COFINS-Import, ICMS) and the top levers (NCM, ex-tarifário, special regimes). Keep it conservative and list missing facts.",
+        "fact1": "• Importer is a Brazilian CNPJ under Lucro Real",
+        "fact2": "• Goods are capital equipment (NCM TBD)",
+        "fact3": "• Destination state: SP",
+        "fact4": "• CIF known; goal is to estimate landed cost range + missing facts list"
+      },
+      "latamHolding": {
+        "label": "LATAM holding — source rules triage",
+        "question": "A Panama company invoices foreign clients for consulting services. Is it Panama-source income? Any local corporate tax exposure, substance concerns, or foreign withholding risk (treaty / domestic law)?",
+        "fact1": "• Services performed by employees located outside Panama",
+        "fact2": "• Panama entity has director + bank account; minimal local ops",
+        "fact3": "• Clients located in LATAM + US",
+        "fact4": "• Need: where services performed, contract terms, withholding regimes by client country"
+      }
+    },
+    "facts": {
+      "title": "Facts",
+      "subtitle": "Bullets only. This is what improves accuracy most.",
+      "placeholder1": "• Entity type, residency, ownership",
+      "placeholder2": "• Transaction flow + timing + amounts",
+      "placeholder3": "• Where title passes / where services performed",
+      "placeholder4": "• Thresholds (PE, WHT, VAT registration, etc.)",
+      "helper": "Paste “Missing facts” here, then re-run.",
+      "pasteMissingFacts": "Paste missing facts"
+    },
+    "advanced": {
+      "title": "Advanced",
+      "subtitle": "Defaults + run overrides (power users).",
+      "globalDefaults": "Global defaults",
+      "globalDefaultsHelper": "Stable posture across runs.",
+      "runOverrides": "Run overrides",
+      "runOverridesHelper": "Only for this run (e.g., “focus only on withholding”).",
+      "runOverridesPlaceholder": "Example: Focus only on withholding + treaty relief."
+    },
+    "actions": {
+      "run": "Run",
+      "running": "Running…",
+      "save": "Save",
+      "saveTitle": "Save this run",
+      "runOnceFirst": "Run once first",
+      "copy": "Copy",
+      "download": "Download",
+      "runFollowup": "Run follow-up",
+      "clear": "Clear",
+      "clearOverrides": "Clear overrides",
+      "resetCase": "Reset case",
+      "resetTitle": "Resets the current case state."
+    },
+    "output": {
+      "title": "Output",
+      "subtitle": "Export-ready: Answer, Memo, or Email draft.",
+      "answer": "Answer",
+      "memo": "Memo",
+      "email": "Email",
+      "placeholder": "Your answer will appear here."
+    },
+    "followup": {
+      "title": "Follow-up",
+      "subtitle": "Continues the same case with context.",
+      "ready": "Ready",
+      "runFirst": "Run first",
+      "placeholder": "Example: If services are performed partly in-country, does that change source rules / PE risk?",
+      "helper": "Client-side thread for now."
+    },
+    "caveats": {
+      "title": "Caveats"
+    },
+    "missingFacts": {
+      "title": "Missing facts",
+      "pasteToFacts": "Paste to Facts"
+    },
+    "missingFactsBlockTitle": "Missing facts to confirm:",
+    "diagnostics": {
+      "runsLeft": "Runs left",
+      "resets": "Resets",
+      "threadMsgs": "Thread msgs",
+      "modelsOk": "Models ok",
+      "modelsFailed": "Models failed",
+      "providerOutputs": "Provider outputs (debug)"
+    },
+    "plans": {
+      "title": "Plans & tiers",
+      "subtitle": "Upgrade increases daily runs. Resets daily (UTC midnight).",
+      "runsLeftToday": "Runs left today",
+      "resets": "Resets",
+      "tier0": "Tier 0 — Simple",
+      "tier1": "Tier 1 — Pro",
+      "tier2": "Tier 2 — Unlimited",
+      "runs5": "Runs: 5/day",
+      "perMonth25": "per month · 25/day",
+      "perMonthUnlimited": "per month · unlimited",
+      "perMonthTeam": "per month · Tier 2 for team",
+      "current": "Current",
+      "startFree": "Start free",
+      "openingStripe": "Opening Stripe…",
+      "chooseTier1": "Choose Tier 1",
+      "chooseTier2": "Choose Tier 2",
+      "corporate": "Corporate — 5 seats",
+      "manageCorporate": "Manage Corporate",
+      "openCorporate": "Open Corporate",
+      "footer": "Paid tiers use Stripe Checkout/Payment Links. Corporate redirects back with ?tier=corp&session_id=... which activates Tier 2 locally (MVP)."
+    },
+    "resetModal": {
+      "title": "Reset current case?",
+      "body": "This will clear the current question, facts, overrides, output, and follow-up thread.",
+      "unsaved": " If you haven’t saved, this conversation will be lost.",
+      "confirm": "Yes, reset"
+    },
+    "history": {
+      "title": "Case history",
+      "subtitle": "Saved on this device (localStorage).",
+      "conf": "Conf",
+      "turns": "Turns",
+      "open": "Open",
+      "delete": "Delete",
+      "empty": "No saved runs yet."
+    },
+    "disagreements": {
+      "title": "Disagreements",
+      "subtitle": "Where models differed. Add facts and re-run."
+    },
+    "footer": {
+      "disclaimer": "TaxAiPro generates drafts for triage only — not legal or tax advice."
+    },
+    "errors": {
+      "typeQuestion": "Type a question first.",
+      "typeFollowup": "Type a follow-up first.",
+      "runInitialFirst": "Run the initial question first to create a baseline answer.",
+      "typeOriginalQuestion": "Type an original question first.",
+      "requestFailed": "Request failed."
+    },
+    "loading": {
+      "title": "Analyzing your case",
+      "step1": "Reviewing facts and jurisdiction",
+      "step2": "Running multi-model analysis",
+      "step3": "Comparing agreement and disagreement",
+      "step4": "Identifying caveats and missing facts",
+      "step5": "Preparing conservative summary",
+      "footer": "This may take a few seconds because multiple models are being cross-checked.",
+      "elapsed": "Elapsed"
+    }
   }
 }

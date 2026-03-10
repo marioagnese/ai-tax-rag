@@ -134,7 +134,7 @@ export default function CorporatePage() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-2xl font-semibold tracking-tight">Corporate Plan</div>
-            <div className="mt-1 text-sm text-white/60">5 seats · Tier 2 Unlimited · $69.95/mo</div>
+            <div className="mt-1 text-sm text-white/60">5 seats · Tier 2 Unlimited · $79.99/mo</div>
           </div>
 
           <button
@@ -158,7 +158,7 @@ export default function CorporatePage() {
                   href={STRIPE_CORP_LINK}
                   className="inline-flex items-center justify-center rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-white/90"
                 >
-                  Buy Corporate Plan ($69.95/mo)
+                  Buy Corporate Plan ($79.99/mo)
                 </a>
 
                 <div className="text-xs text-white/45">

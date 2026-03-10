@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
     const safeName = name ? escapeHtml(name) : "there";
 
     const planLabel = tier === "2" ? "Tier 2 — Unlimited" : "Tier 1 — Pro";
-    const priceLabel = tier === "2" ? "$15.99/mo" : "$3.99/mo";
+    const priceLabel = tier === "2" ? "$19.99/mo" : "$5.99/mo";
 
     const subject = `TaxAiPro subscription activated: ${planLabel}`;
     const html = `

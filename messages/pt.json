@@ -229,6 +229,16 @@
       "runInitialFirst": "Execute a pergunta inicial primeiro para criar uma resposta base.",
       "typeOriginalQuestion": "Digite uma pergunta original primeiro.",
       "requestFailed": "Falha na solicitação."
+    },
+    "loading": {
+      "title": "Analisando seu caso",
+      "step1": "Revisando fatos e jurisdição",
+      "step2": "Executando análise multimodelo",
+      "step3": "Comparando concordâncias e divergências",
+      "step4": "Identificando ressalvas e fatos faltantes",
+      "step5": "Preparando resumo conservador",
+      "footer": "Isso pode levar alguns segundos porque vários modelos estão sendo comparados.",
+      "elapsed": "Tempo decorrido"
     }
   }
 }

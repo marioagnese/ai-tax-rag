@@ -418,8 +418,8 @@ function tierDailyRuns(t: Tier) {
 }
 
 function tierPrice(t: Tier) {
-  if (t === "2") return "$15.99/mo";
-  if (t === "1") return "$3.99/mo";
+  if (t === "2") return "$19.99/mo";
+  if (t === "1") return "$5.99/mo";
   return "$0";
 }
 
@@ -536,6 +536,9 @@ export default function CrosscheckPage() {
 
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [examplesOpen, setExamplesOpen] = useState(false);
+
+  const [loadingStepIndex, setLoadingStepIndex] = useState(0);
+  const [loadingElapsed, setLoadingElapsed] = useState(0);
 
   const runFnRef = useRef<() => void>(() => {});
 
@@ -658,6 +661,40 @@ export default function CrosscheckPage() {
   const confidence = resp?.consensus?.confidence;
   const canSave = !!resp?.consensus?.answer?.trim();
   const effectiveQuestionForOutput = useMemo(() => buildQuestionForFormatting(thread, question), [thread, question]);
+
+  const isBusy = loading || followUpLoading;
+
+  const loadingSteps = useMemo(
+    () => [
+      tm("crosscheck.loading.step1", "Reviewing facts and jurisdiction"),
+      tm("crosscheck.loading.step2", "Running multi-model analysis"),
+      tm("crosscheck.loading.step3", "Comparing agreement and disagreement"),
+      tm("crosscheck.loading.step4", "Identifying caveats and missing facts"),
+      tm("crosscheck.loading.step5", "Preparing conservative summary"),
+    ],
+    [tm]
+  );
+
+  useEffect(() => {
+    if (!isBusy) {
+      setLoadingStepIndex(0);
+      setLoadingElapsed(0);
+      return;
+    }
+
+    const stepTimer = window.setInterval(() => {
+      setLoadingStepIndex((prev) => (prev + 1) % loadingSteps.length);
+    }, 2200);
+
+    const elapsedTimer = window.setInterval(() => {
+      setLoadingElapsed((prev) => prev + 1);
+    }, 1000);
+
+    return () => {
+      window.clearInterval(stepTimer);
+      window.clearInterval(elapsedTimer);
+    };
+  }, [isBusy, loadingSteps]);
 
   const displayText = useMemo(() => {
     const base = {
@@ -1076,6 +1113,8 @@ export default function CrosscheckPage() {
   }
 
   const corpActive = hasCorpActive();
+  const loadingMessage =
+    loadingSteps[loadingStepIndex] || tm("crosscheck.loading.step1", "Reviewing facts and jurisdiction");
 
   return (
     <div className="min-h-screen bg-[#070A12] text-white">
@@ -1083,6 +1122,40 @@ export default function CrosscheckPage() {
         <div className="absolute -top-48 left-1/2 h-[560px] w-[560px] -translate-x-1/2 rounded-full bg-white/10 blur-3xl" />
         <div className="absolute bottom-[-220px] right-[-140px] h-[560px] w-[560px] rounded-full bg-white/5 blur-3xl" />
       </div>
+
+      {isBusy ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 backdrop-blur-sm">
+          <div className="w-[92vw] max-w-md rounded-3xl border border-white/10 bg-[#0B1020]/95 p-6 shadow-2xl">
+            <div className="flex flex-col items-center text-center">
+              <div className="relative h-14 w-14">
+                <div className="absolute inset-0 rounded-full border-4 border-white/10" />
+                <div className="absolute inset-0 animate-spin rounded-full border-4 border-transparent border-t-white border-r-white" />
+              </div>
+
+              <h3 className="mt-4 text-lg font-semibold text-white">
+                {tm("crosscheck.loading.title", "Analyzing your case")}
+              </h3>
+
+              <p className="mt-2 min-h-[24px] text-sm text-white/75">{loadingMessage}</p>
+
+              <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-white/10">
+                <div className="h-full w-1/3 animate-pulse rounded-full bg-white/70" />
+              </div>
+
+              <p className="mt-3 text-xs text-white/45">
+                {tm(
+                  "crosscheck.loading.footer",
+                  "This may take a few seconds because multiple models are being cross-checked."
+                )}
+              </p>
+
+              <p className="mt-1 text-xs text-white/35">
+                {tm("crosscheck.loading.elapsed", "Elapsed")}: {loadingElapsed}s
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="relative mx-auto max-w-6xl px-4 py-6">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -1770,7 +1843,7 @@ export default function CrosscheckPage() {
 
                 <div className={cn("rounded-2xl border p-4", corpActive ? "border-emerald-500/30 bg-emerald-500/10" : "border-white/10 bg-black/25")}>
                   <div className="text-xs font-semibold text-white/85">{tm("crosscheck.plans.corporate", "Corporate — 5 seats")}</div>
-                  <div className="mt-1 text-2xl font-semibold text-white">$69.95</div>
+                  <div className="mt-1 text-2xl font-semibold text-white">$79.99</div>
                   <div className="mt-1 text-xs text-white/60">{tm("crosscheck.plans.perMonthTeam", "per month · Tier 2 for team")}</div>
                   <button
                     onClick={() => go("/corporate")}
