@@ -60,32 +60,71 @@ export async function POST(req: NextRequest) {
     const name = (user.name || "").trim();
     const safeName = name ? escapeHtml(name) : "there";
 
-    const planLabel = tier === "2" ? "Tier 2 — Unlimited" : "Tier 1 — Pro";
+    const planLabelEn = tier === "2" ? "Tier 2 — Unlimited" : "Tier 1 — Pro";
+    const planLabelEs = tier === "2" ? "Nivel 2 — Ilimitado" : "Nivel 1 — Pro";
+    const planLabelPt = tier === "2" ? "Nível 2 — Ilimitado" : "Nível 1 — Pro";
+
     const priceLabel = tier === "2" ? "$19.99/mo" : "$5.99/mo";
 
-    const subject = `TaxAiPro subscription activated: ${planLabel}`;
+    const subject = `TaxAiPro subscription activated / suscripción activada / assinatura ativada`;
+
     const html = `
-      <div style="font-family:Arial, sans-serif; line-height:1.5; color:#111;">
-        <h2 style="margin:0 0 10px;">Subscription activated ✅</h2>
+      <div style="font-family:Arial, sans-serif; line-height:1.6; color:#111;">
+        <h2 style="margin:0 0 12px;">Subscription activated ✅</h2>
         <p style="margin:0 0 10px;">Hi ${safeName},</p>
         <p style="margin:0 0 10px;">
-          Thanks for subscribing to <b>${planLabel}</b> (${priceLabel}).
+          Thanks for subscribing to <b>${planLabelEn}</b> (${priceLabel}).
         </p>
-        <p style="margin:0 0 10px;">
+        <p style="margin:0 0 18px;">
           Your higher daily run limit is now active on this account.
         </p>
+
+        <hr style="border:none; border-top:1px solid #ddd; margin:20px 0;" />
+
+        <h2 style="margin:0 0 12px;">Suscripción activada ✅</h2>
+        <p style="margin:0 0 10px;">Hola ${safeName},</p>
+        <p style="margin:0 0 10px;">
+          Gracias por suscribirte a <b>${planLabelEs}</b> (${priceLabel}).
+        </p>
+        <p style="margin:0 0 18px;">
+          Tu nuevo límite diario ampliado ya está activo en esta cuenta.
+        </p>
+
+        <hr style="border:none; border-top:1px solid #ddd; margin:20px 0;" />
+
+        <h2 style="margin:0 0 12px;">Assinatura ativada ✅</h2>
+        <p style="margin:0 0 10px;">Olá ${safeName},</p>
+        <p style="margin:0 0 10px;">
+          Obrigado por assinar o <b>${planLabelPt}</b> (${priceLabel}).
+        </p>
+        <p style="margin:0 0 18px;">
+          Seu novo limite diário ampliado já está ativo nesta conta.
+        </p>
+
         <p style="margin:16px 0 0;">
           — TaxAiPro Team<br/>
-          <span style="color:#666; font-size:12px;">(Not legal or tax advice)</span>
+          <span style="color:#666; font-size:12px;">(Not legal or tax advice / No es asesoría legal ni fiscal / Não é aconselhamento jurídico ou tributário)</span>
         </p>
       </div>
     `;
 
     const text =
       `Subscription activated ✅\n\n` +
-      `Hi ${name || "there"},\n\n` +
-      `Thanks for subscribing to ${planLabel} (${priceLabel}). Your higher daily run limit is now active.\n\n` +
-      `— TaxAiPro Team (Not legal or tax advice)`;
+      `Hi ${name || "there"},\n` +
+      `Thanks for subscribing to ${planLabelEn} (${priceLabel}).\n` +
+      `Your higher daily run limit is now active on this account.\n\n` +
+      `----------------------------------------\n\n` +
+      `Suscripción activada ✅\n\n` +
+      `Hola ${name || "there"},\n` +
+      `Gracias por suscribirte a ${planLabelEs} (${priceLabel}).\n` +
+      `Tu nuevo límite diario ampliado ya está activo en esta cuenta.\n\n` +
+      `----------------------------------------\n\n` +
+      `Assinatura ativada ✅\n\n` +
+      `Olá ${name || "there"},\n` +
+      `Obrigado por assinar o ${planLabelPt} (${priceLabel}).\n` +
+      `Seu novo limite diário ampliado já está ativo nesta conta.\n\n` +
+      `— TaxAiPro Team\n` +
+      `(Not legal or tax advice / No es asesoría legal ni fiscal / Não é aconselhamento jurídico ou tributário)`;
 
     await sendEmail({ to: userEmail, subject, html, text });
 
