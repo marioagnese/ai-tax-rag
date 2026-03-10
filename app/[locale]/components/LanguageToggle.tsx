@@ -6,16 +6,10 @@ import { usePathname, useSearchParams } from "next/navigation";
 type Locale = "en" | "es" | "pt";
 const LOCALES: Locale[] = ["en", "es", "pt"];
 
-const FLAG: Record<Locale, string> = {
-  en: "🇬🇧",
-  es: "🇪🇸",
-  pt: "🇧🇷",
-};
-
 const LABEL: Record<Locale, string> = {
-  en: "English",
-  es: "Español",
-  pt: "Português",
+  en: "EN",
+  es: "ES",
+  pt: "BR",
 };
 
 function replaceLocaleInPath(pathname: string, nextLocale: Locale) {
@@ -66,13 +60,13 @@ export default function LanguageToggle({
             title={LABEL[loc]}
             aria-current={active ? "page" : undefined}
             className={[
-              "flex h-11 w-11 items-center justify-center rounded-full border text-2xl transition",
+              "flex h-11 min-w-[44px] items-center justify-center rounded-full border px-3 text-sm font-semibold transition",
               active
-                ? "border-white/70 bg-white/15 scale-105"
-                : "border-white/15 bg-transparent hover:bg-white/10",
+                ? "border-white/70 bg-white/15 text-white"
+                : "border-white/15 bg-transparent text-white/85 hover:bg-white/10",
             ].join(" ")}
           >
-            <span className="leading-none">{FLAG[loc]}</span>
+            {LABEL[loc]}
           </a>
         );
       })}

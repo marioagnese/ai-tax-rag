@@ -1276,7 +1276,7 @@ export default function CrosscheckPage() {
                 <textarea
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
-                  className="mt-3 min-h-[160px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm outline-none focus:border-white/20"
+                  className="mt-3 min-h-[160px] w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none focus:border-zinc-400"
                   placeholder={tm(
                     "crosscheck.caseQuestion.placeholder",
                     "Example: Does this create withholding exposure or PE/ECI risk? What facts change the result?"
@@ -1329,15 +1329,6 @@ export default function CrosscheckPage() {
                       className="h-10 rounded-xl bg-white px-4 text-sm font-semibold text-black hover:bg-white/90 disabled:opacity-50"
                     >
                       {loading ? tm("crosscheck.actions.running", "Running…") : tm("crosscheck.actions.run", "Run")}
-                    </button>
-
-                    <button
-                      onClick={saveCurrentRun}
-                      disabled={!canSave}
-                      className="h-10 rounded-xl border border-white/15 bg-white/5 px-3 text-sm text-white/85 hover:bg-white/10 disabled:opacity-40"
-                      title={canSave ? tm("crosscheck.actions.saveTitle", "Save this run") : tm("crosscheck.actions.runOnceFirst", "Run once first")}
-                    >
-                      {tm("crosscheck.actions.save", "Save")}
                     </button>
 
                     <button
@@ -1431,6 +1422,15 @@ export default function CrosscheckPage() {
                 className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
               >
                 {tm("crosscheck.actions.download", "Download")}
+              </button>
+
+              <button
+                onClick={saveCurrentRun}
+                disabled={!canSave}
+                className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10 disabled:opacity-40"
+                title={canSave ? tm("crosscheck.actions.saveTitle", "Save this run") : tm("crosscheck.actions.runOnceFirst", "Run once first")}
+              >
+                {tm("crosscheck.actions.save", "Save")}
               </button>
 
               <div className="ml-auto flex items-center gap-2">
