@@ -56,6 +56,14 @@ type SavedRun = {
   thread?: ThreadMessage[];
 };
 
+type DerivedConsensus = {
+  answer: string;
+  caveats: string[];
+  followups: string[];
+  disagreements: string[];
+  confidence?: "low" | "medium" | "high";
+};
+
 const LS_KEY = "taxaipro_runs_v1";
 const LS_TIER_KEY = "taxaipro_tier";
 const LS_ACTIVE_THREAD = "taxaipro_active_thread_v1";
@@ -234,6 +242,187 @@ function downloadText(filename: string, content: string) {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+/* ---------------- Parsing helpers ---------------- */
+
+function dedupeStrings(items: string[]) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  for (const raw of items) {
+    const value = String(raw || "").replace(/\s+/g, " ").trim();
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(value);
+  }
+
+  return out;
+}
+
+function stripBulletPrefix(line: string) {
+  return line
+    .replace(/^\s*[•\-–—*]\s*/, "")
+    .replace(/^\s*\d+[\.\)]\s*/, "")
+    .replace(/^\s*[a-zA-Z][\.\)]\s*/, "")
+    .trim();
+}
+
+function isHeadingLine(line: string) {
+  const s = line.trim().toLowerCase().replace(/:+$/, "");
+  if (!s) return null as null | "caveats" | "followups" | "disagreements";
+
+  if (
+    s === "caveat" ||
+    s === "caveats" ||
+    s === "key caveat" ||
+    s === "key caveats" ||
+    s === "caveats / limitations" ||
+    s === "limitations"
+  ) {
+    return "caveats";
+  }
+
+  if (
+    s === "missing fact" ||
+    s === "missing facts" ||
+    s === "missing facts to confirm" ||
+    s === "missing facts / follow-ups needed" ||
+    s === "follow-up" ||
+    s === "follow-up questions" ||
+    s === "followups" ||
+    s === "follow-ups" ||
+    s === "follow ups" ||
+    s === "follow-up needed" ||
+    s === "follow-ups needed" ||
+    s === "to confirm the conclusion, i still need"
+  ) {
+    return "followups";
+  }
+
+  if (
+    s === "disagreement" ||
+    s === "disagreements" ||
+    s === "noted disagreements across models" ||
+    s === "where models differed"
+  ) {
+    return "disagreements";
+  }
+
+  return null;
+}
+
+function parseStructuredSections(text?: string | null) {
+  const raw = String(text || "").trim();
+  if (!raw) {
+    return {
+      answer: "",
+      caveats: [] as string[],
+      followups: [] as string[],
+      disagreements: [] as string[],
+    };
+  }
+
+  const lines = raw.split(/\r?\n/);
+
+  const answerLines: string[] = [];
+  const caveats: string[] = [];
+  const followups: string[] = [];
+  const disagreements: string[] = [];
+
+  let current: null | "caveats" | "followups" | "disagreements" = null;
+
+  for (const line of lines) {
+    const heading = isHeadingLine(line);
+    if (heading) {
+      current = heading;
+      continue;
+    }
+
+    const trimmed = line.trim();
+
+    if (!current) {
+      answerLines.push(line);
+      continue;
+    }
+
+    if (!trimmed) continue;
+
+    const item = stripBulletPrefix(trimmed);
+
+    const lookedLikePlainParagraph =
+      !/^[•\-–—*\d]/.test(trimmed) &&
+      !/^[a-zA-Z][\.\)]\s/.test(trimmed) &&
+      (current === "caveats" || current === "followups" || current === "disagreements");
+
+    if (lookedLikePlainParagraph) {
+      current = null;
+      answerLines.push(line);
+      continue;
+    }
+
+    if (current === "caveats") caveats.push(item);
+    if (current === "followups") followups.push(item);
+    if (current === "disagreements") disagreements.push(item);
+  }
+
+  const answer = answerLines
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return {
+    answer,
+    caveats: dedupeStrings(caveats),
+    followups: dedupeStrings(followups),
+    disagreements: dedupeStrings(disagreements),
+  };
+}
+
+function deriveConsensus(resp: CrosscheckResponse | null): DerivedConsensus {
+  const baseAnswer = (resp?.consensus?.answer || "").trim();
+
+  const fromConsensus = {
+    answer: baseAnswer,
+    caveats: Array.isArray(resp?.consensus?.caveats) ? resp!.consensus!.caveats!.map(String) : [],
+    followups: Array.isArray(resp?.consensus?.followups) ? resp!.consensus!.followups!.map(String) : [],
+    disagreements: Array.isArray(resp?.consensus?.disagreements) ? resp!.consensus!.disagreements!.map(String) : [],
+    confidence: resp?.consensus?.confidence,
+  };
+
+  const parsedFromAnswer = parseStructuredSections(baseAnswer);
+
+  let caveats = dedupeStrings([...fromConsensus.caveats, ...parsedFromAnswer.caveats]);
+  let followups = dedupeStrings([...fromConsensus.followups, ...parsedFromAnswer.followups]);
+  let disagreements = dedupeStrings([...fromConsensus.disagreements, ...parsedFromAnswer.disagreements]);
+
+  if ((!caveats.length || !followups.length || !disagreements.length) && Array.isArray(resp?.providers)) {
+    for (const provider of resp.providers) {
+      if (provider.status !== "ok" || !provider.text) continue;
+      const parsed = parseStructuredSections(provider.text);
+
+      if (!caveats.length && parsed.caveats.length) caveats = dedupeStrings([...caveats, ...parsed.caveats]);
+      if (!followups.length && parsed.followups.length) followups = dedupeStrings([...followups, ...parsed.followups]);
+      if (!disagreements.length && parsed.disagreements.length) {
+        disagreements = dedupeStrings([...disagreements, ...parsed.disagreements]);
+      }
+    }
+  }
+
+  const answer =
+    parsedFromAnswer.answer.trim() ||
+    baseAnswer ||
+    "";
+
+  return {
+    answer,
+    caveats,
+    followups,
+    disagreements,
+    confidence: fromConsensus.confidence,
+  };
 }
 
 /* ---------------- Local history ---------------- */
@@ -659,7 +848,8 @@ export default function CrosscheckPage() {
 
   const constraints = useMemo(() => buildConstraints(globalDefaults, runOverrides), [globalDefaults, runOverrides]);
   const confidence = resp?.consensus?.confidence;
-  const canSave = !!resp?.consensus?.answer?.trim();
+  const derivedConsensus = useMemo(() => deriveConsensus(resp), [resp]);
+  const canSave = !!derivedConsensus.answer.trim();
   const effectiveQuestionForOutput = useMemo(() => buildQuestionForFormatting(thread, question), [thread, question]);
 
   const isBusy = loading || followUpLoading;
@@ -701,17 +891,17 @@ export default function CrosscheckPage() {
       jurisdiction: jurisdiction.trim() || undefined,
       facts: facts.trim() || undefined,
       question: effectiveQuestionForOutput.trim(),
-      answer: resp?.consensus?.answer || "",
-      caveats: resp?.consensus?.caveats || [],
-      followups: resp?.consensus?.followups || [],
-      disagreements: resp?.consensus?.disagreements || [],
-      confidence: resp?.consensus?.confidence,
+      answer: derivedConsensus.answer || "",
+      caveats: derivedConsensus.caveats || [],
+      followups: derivedConsensus.followups || [],
+      disagreements: derivedConsensus.disagreements || [],
+      confidence: derivedConsensus.confidence,
     };
 
     if (outputStyle === "memo") return formatMemo(base);
     if (outputStyle === "email") return formatEmail(base);
-    return (resp?.consensus?.answer || tm("crosscheck.output.placeholder", "Your answer will appear here.")).trim();
-  }, [outputStyle, resp, jurisdiction, facts, effectiveQuestionForOutput, tm]);
+    return (derivedConsensus.answer || tm("crosscheck.output.placeholder", "Your answer will appear here.")).trim();
+  }, [outputStyle, derivedConsensus, jurisdiction, facts, effectiveQuestionForOutput, tm]);
 
   function loadRun(r: SavedRun) {
     setSelectedId(r.id);
@@ -766,11 +956,11 @@ export default function CrosscheckPage() {
       globalDefaults: globalDefaults.trim() || undefined,
       runOverrides: runOverrides.trim() || undefined,
       question: question.trim(),
-      answer: resp?.consensus?.answer || "",
-      caveats: resp?.consensus?.caveats || [],
-      followups: resp?.consensus?.followups || [],
-      disagreements: resp?.consensus?.disagreements || [],
-      confidence: resp?.consensus?.confidence,
+      answer: derivedConsensus.answer || "",
+      caveats: derivedConsensus.caveats || [],
+      followups: derivedConsensus.followups || [],
+      disagreements: derivedConsensus.disagreements || [],
+      confidence: derivedConsensus.confidence,
       thread: thread.length ? thread : undefined,
     };
 
@@ -781,7 +971,7 @@ export default function CrosscheckPage() {
   }
 
   function applyMissingFactsToFacts() {
-    const followups = resp?.consensus?.followups ?? [];
+    const followups = derivedConsensus.followups ?? [];
     if (!followups.length) return;
     const block = followups.map((f) => `• ${f}`).join("\n");
     const prefix = facts.trim() ? `${facts.trim()}\n\n` : "";
@@ -907,7 +1097,7 @@ export default function CrosscheckPage() {
 
       setResp(parsed);
 
-      const ans = (parsed?.consensus?.answer || "").trim();
+      const ans = deriveConsensus(parsed).answer.trim();
       if (ans) setThread((t) => [...t, newMsg("assistant", ans)]);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : tm("crosscheck.errors.requestFailed", "Request failed.");
@@ -925,7 +1115,8 @@ export default function CrosscheckPage() {
       setError(tm("crosscheck.errors.typeFollowup", "Type a follow-up first."));
       return;
     }
-    const prior = (resp?.consensus?.answer || "").trim();
+
+    const prior = derivedConsensus.answer.trim();
     if (!prior) {
       setError(tm("crosscheck.errors.runInitialFirst", "Run the initial question first to create a baseline answer."));
       return;
@@ -984,7 +1175,7 @@ export default function CrosscheckPage() {
 
       setResp(parsed);
 
-      const ans = (parsed?.consensus?.answer || "").trim();
+      const ans = deriveConsensus(parsed).answer.trim();
       if (ans) setThread((t) => [...t, newMsg("assistant", ans)]);
       setFollowUp("");
     } catch (e: unknown) {
@@ -1029,7 +1220,7 @@ export default function CrosscheckPage() {
       ? tm("crosscheck.system.healthy", "Healthy")
       : "—";
 
-  const hasBaselineAnswer = !!resp?.consensus?.answer?.trim();
+  const hasBaselineAnswer = !!derivedConsensus.answer.trim();
 
   const hasUnsavedWork = useMemo(() => {
     return !!(
@@ -1038,17 +1229,20 @@ export default function CrosscheckPage() {
       runOverrides.trim() ||
       followUp.trim() ||
       thread.length ||
-      resp?.consensus?.answer?.trim()
+      derivedConsensus.answer.trim()
     );
-  }, [question, facts, runOverrides, followUp, thread.length, resp]);
+  }, [question, facts, runOverrides, followUp, thread.length, derivedConsensus.answer]);
 
   const runsLeft = typeof rate.remaining === "number" ? (rate.remaining === -1 ? "∞" : String(rate.remaining)) : null;
   const resetLocal = formatResetLocal(rate.resetAt);
 
-  const disagreementsCount = (resp?.consensus?.disagreements ?? []).length;
-  const missingFactsCount = (resp?.consensus?.followups ?? []).length;
+  const disagreementsCount = derivedConsensus.disagreements.length;
+  const missingFactsCount = derivedConsensus.followups.length;
   const showStrongPremium =
-    confidence === "low" || disagreementsCount > 0 || missingFactsCount > 0 || (resp && !resp.consensus?.answer?.trim());
+    confidence === "low" ||
+    disagreementsCount > 0 ||
+    missingFactsCount > 0 ||
+    (resp && !derivedConsensus.answer.trim());
 
   const EXAMPLES = useMemo(
     () => [
@@ -1172,7 +1366,9 @@ export default function CrosscheckPage() {
               </div>
               <div className="mt-1 text-[11px] text-white/55">
                 {tm("crosscheck.header.tagline", "Conservative multi-model triage")} · {tierLabel(tier)}
-                {corpActive ? <span className="text-emerald-100"> · {tm("crosscheck.header.corporate", "Corporate")}</span> : null}
+                {corpActive ? (
+                  <span className="text-emerald-100"> · {tm("crosscheck.header.corporate", "Corporate")}</span>
+                ) : null}
                 {" · "}
                 {tierPrice(tier)} · {tierDailyRuns(tier)}
               </div>
@@ -1303,48 +1499,100 @@ export default function CrosscheckPage() {
         <div className="mt-5 space-y-4">
           <Card className="p-5">
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-              <div className="lg:col-span-4">
-                <SectionTitle
-                  title={tm("crosscheck.jurisdiction.title", "Jurisdiction")}
-                  subtitle={tm("crosscheck.jurisdiction.subtitle", "Country / state. Add treaty context in Facts if relevant.")}
-                />
-                <select
-                  value={jurisdiction}
-                  onChange={(e) => setJurisdiction(e.target.value)}
-                  className="mt-3 w-full rounded-xl border border-white/10 bg-black px-3 py-2.5 text-sm text-white outline-none focus:border-white/20"
-                >
-                  <optgroup label={tm("crosscheck.jurisdiction.usa", "USA")}>
-                    <option value="United States">{tm("crosscheck.jurisdiction.unitedStates", "United States")}</option>
-                    <option value="Canada">{tm("crosscheck.jurisdiction.canada", "Canada")}</option>
-                  </optgroup>
+              <div className="space-y-4 lg:col-span-4">
+                <div>
+                  <SectionTitle
+                    title={tm("crosscheck.jurisdiction.title", "Jurisdiction")}
+                    subtitle={tm(
+                      "crosscheck.jurisdiction.subtitle",
+                      "Country / state. Add treaty context in Facts if relevant."
+                    )}
+                  />
+                  <select
+                    value={jurisdiction}
+                    onChange={(e) => setJurisdiction(e.target.value)}
+                    className="mt-3 w-full rounded-xl border border-white/10 bg-black px-3 py-2.5 text-sm text-white outline-none focus:border-white/20"
+                  >
+                    <optgroup label={tm("crosscheck.jurisdiction.usa", "USA")}>
+                      <option value="United States">
+                        {tm("crosscheck.jurisdiction.unitedStates", "United States")}
+                      </option>
+                      <option value="Canada">{tm("crosscheck.jurisdiction.canada", "Canada")}</option>
+                    </optgroup>
 
-                  <optgroup label={tm("crosscheck.jurisdiction.latam", "LATAM")}>
-                    <option value="Argentina">{tm("crosscheck.jurisdiction.argentina", "Argentina")}</option>
-                    <option value="Brazil">{tm("crosscheck.jurisdiction.brazil", "Brazil")}</option>
-                    <option value="Chile">{tm("crosscheck.jurisdiction.chile", "Chile")}</option>
-                    <option value="Colombia">{tm("crosscheck.jurisdiction.colombia", "Colombia")}</option>
-                    <option value="Mexico">{tm("crosscheck.jurisdiction.mexico", "Mexico")}</option>
-                    <option value="Panama">{tm("crosscheck.jurisdiction.panama", "Panama")}</option>
-                    <option value="Peru">{tm("crosscheck.jurisdiction.peru", "Peru")}</option>
-                    <option value="Uruguay">{tm("crosscheck.jurisdiction.uruguay", "Uruguay")}</option>
-                    <option value="Paraguay">{tm("crosscheck.jurisdiction.paraguay", "Paraguay")}</option>
-                    <option value="Bolivia">{tm("crosscheck.jurisdiction.bolivia", "Bolivia")}</option>
-                    <option value="Puerto Rico">{tm("crosscheck.jurisdiction.puertoRico", "Puerto Rico")}</option>
-                    <option value="Ecuador">{tm("crosscheck.jurisdiction.ecuador", "Ecuador")}</option>
-                    <option value="Republica Dominicana">{tm("crosscheck.jurisdiction.dominicanRepublic", "Rep. Dominicana")}</option>
-                    <option value="Jamaica">{tm("crosscheck.jurisdiction.jamaica", "Jamaica")}</option>
-                  </optgroup>
+                    <optgroup label={tm("crosscheck.jurisdiction.latam", "LATAM")}>
+                      <option value="Argentina">{tm("crosscheck.jurisdiction.argentina", "Argentina")}</option>
+                      <option value="Brazil">{tm("crosscheck.jurisdiction.brazil", "Brazil")}</option>
+                      <option value="Chile">{tm("crosscheck.jurisdiction.chile", "Chile")}</option>
+                      <option value="Colombia">{tm("crosscheck.jurisdiction.colombia", "Colombia")}</option>
+                      <option value="Mexico">{tm("crosscheck.jurisdiction.mexico", "Mexico")}</option>
+                      <option value="Panama">{tm("crosscheck.jurisdiction.panama", "Panama")}</option>
+                      <option value="Peru">{tm("crosscheck.jurisdiction.peru", "Peru")}</option>
+                      <option value="Uruguay">{tm("crosscheck.jurisdiction.uruguay", "Uruguay")}</option>
+                      <option value="Paraguay">{tm("crosscheck.jurisdiction.paraguay", "Paraguay")}</option>
+                      <option value="Bolivia">{tm("crosscheck.jurisdiction.bolivia", "Bolivia")}</option>
+                      <option value="Puerto Rico">{tm("crosscheck.jurisdiction.puertoRico", "Puerto Rico")}</option>
+                      <option value="Ecuador">{tm("crosscheck.jurisdiction.ecuador", "Ecuador")}</option>
+                      <option value="Republica Dominicana">
+                        {tm("crosscheck.jurisdiction.dominicanRepublic", "Rep. Dominicana")}
+                      </option>
+                      <option value="Jamaica">{tm("crosscheck.jurisdiction.jamaica", "Jamaica")}</option>
+                    </optgroup>
 
-                  <optgroup label={tm("crosscheck.jurisdiction.otherGroup", "Other")}>
-                    <option value="Other">{tm("crosscheck.jurisdiction.other", "Other / Not listed")}</option>
-                  </optgroup>
-                </select>
+                    <optgroup label={tm("crosscheck.jurisdiction.otherGroup", "Other")}>
+                      <option value="Other">{tm("crosscheck.jurisdiction.other", "Other / Not listed")}</option>
+                    </optgroup>
+                  </select>
+                </div>
+
+                <Card className="p-0">
+                  <details open className="p-5">
+                    <summary className="cursor-pointer list-none select-none">
+                      <SectionTitle
+                        title={tm("crosscheck.facts.title", "Facts")}
+                        subtitle={tm(
+                          "crosscheck.facts.subtitle",
+                          "Bullets only. This is what improves accuracy most."
+                        )}
+                        right={<Pill>{tm("crosscheck.common.recommended", "Recommended")}</Pill>}
+                      />
+                    </summary>
+
+                    <textarea
+                      value={facts}
+                      onChange={(e) => setFacts(e.target.value)}
+                      className="mt-4 min-h-[240px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm outline-none focus:border-white/20"
+                      placeholder={[
+                        tm("crosscheck.facts.placeholder1", "• Entity type, residency, ownership"),
+                        tm("crosscheck.facts.placeholder2", "• Transaction flow + timing + amounts"),
+                        tm("crosscheck.facts.placeholder3", "• Where title passes / where services performed"),
+                        tm("crosscheck.facts.placeholder4", "• Thresholds (PE, WHT, VAT registration, etc.)"),
+                      ].join("\n")}
+                    />
+
+                    <div className="mt-3 flex items-center justify-between gap-3">
+                      <div className="text-[11px] text-white/45">
+                        {tm("crosscheck.facts.helper", "Paste “Missing facts” here, then re-run.")}
+                      </div>
+                      <button
+                        onClick={applyMissingFactsToFacts}
+                        disabled={!derivedConsensus.followups.length}
+                        className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10 disabled:opacity-40"
+                      >
+                        {tm("crosscheck.facts.pasteMissingFacts", "Paste missing facts")}
+                      </button>
+                    </div>
+                  </details>
+                </Card>
               </div>
 
               <div className="lg:col-span-8">
                 <SectionTitle
                   title={tm("crosscheck.caseQuestion.title", "Case question")}
-                  subtitle={tm("crosscheck.caseQuestion.subtitle", "One clear question. Put detail in Facts. Use Examples if you want a template.")}
+                  subtitle={tm(
+                    "crosscheck.caseQuestion.subtitle",
+                    "One clear question. Put detail in Facts. Use Examples if you want a template."
+                  )}
                 />
                 <textarea
                   value={question}
@@ -1365,9 +1613,14 @@ export default function CrosscheckPage() {
                         setExamplesOpen((v) => !v);
                       }}
                     >
-                      {examplesOpen ? tm("crosscheck.examples.hide", "Hide examples") : tm("crosscheck.examples.show", "Show examples")}
+                      {examplesOpen
+                        ? tm("crosscheck.examples.hide", "Hide examples")
+                        : tm("crosscheck.examples.show", "Show examples")}
                       <span className="ml-2 text-[11px] text-white/45">
-                        {tm("crosscheck.examples.subtitle", "Load a full template (Jurisdiction + Question + Facts)")}
+                        {tm(
+                          "crosscheck.examples.subtitle",
+                          "Load a full template (Jurisdiction + Question + Facts)"
+                        )}
                       </span>
                     </summary>
 
@@ -1501,7 +1754,11 @@ export default function CrosscheckPage() {
                 onClick={saveCurrentRun}
                 disabled={!canSave}
                 className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10 disabled:opacity-40"
-                title={canSave ? tm("crosscheck.actions.saveTitle", "Save this run") : tm("crosscheck.actions.runOnceFirst", "Run once first")}
+                title={
+                  canSave
+                    ? tm("crosscheck.actions.saveTitle", "Save this run")
+                    : tm("crosscheck.actions.runOnceFirst", "Run once first")
+                }
               >
                 {tm("crosscheck.actions.save", "Save")}
               </button>
@@ -1522,7 +1779,7 @@ export default function CrosscheckPage() {
               </div>
             </div>
 
-            <div className="mt-4 rounded-2xl border border-zinc-200 bg-white p-6 min-h-[420px] shadow-sm">
+            <div className="mt-4 min-h-[420px] rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <pre className="whitespace-pre-wrap text-[15px] leading-relaxed text-zinc-900">
                 {displayText || "—"}
               </pre>
@@ -1539,7 +1796,9 @@ export default function CrosscheckPage() {
                   </div>
                 </div>
                 <Pill tone={hasBaselineAnswer ? "good" : "neutral"}>
-                  {hasBaselineAnswer ? tm("crosscheck.followup.ready", "Ready") : tm("crosscheck.followup.runFirst", "Run first")}
+                  {hasBaselineAnswer
+                    ? tm("crosscheck.followup.ready", "Ready")
+                    : tm("crosscheck.followup.runFirst", "Run first")}
                 </Pill>
               </div>
 
@@ -1563,7 +1822,9 @@ export default function CrosscheckPage() {
                     disabled={followUpLoading || !hasBaselineAnswer}
                     className="h-10 rounded-xl bg-white px-4 text-sm font-semibold text-black hover:bg-white/90 disabled:opacity-50"
                   >
-                    {followUpLoading ? tm("crosscheck.actions.running", "Running…") : tm("crosscheck.actions.runFollowup", "Run follow-up")}
+                    {followUpLoading
+                      ? tm("crosscheck.actions.running", "Running…")
+                      : tm("crosscheck.actions.runFollowup", "Run follow-up")}
                   </button>
                   <button
                     onClick={() => setFollowUp("")}
@@ -1582,8 +1843,8 @@ export default function CrosscheckPage() {
                   {tm("crosscheck.caveats.title", "Caveats")}
                 </div>
                 <div className="mt-2 space-y-1 text-sm text-white/80">
-                  {(resp?.consensus?.caveats ?? []).length ? (
-                    (resp?.consensus?.caveats ?? []).slice(0, 6).map((c, i) => <div key={i}>• {c}</div>)
+                  {derivedConsensus.caveats.length ? (
+                    derivedConsensus.caveats.slice(0, 6).map((c, i) => <div key={i}>• {c}</div>)
                   ) : (
                     <div className="text-white/50">{tm("crosscheck.common.noneYet", "None yet.")}</div>
                   )}
@@ -1595,7 +1856,7 @@ export default function CrosscheckPage() {
                   <div className="text-xs font-semibold text-white/70">
                     {tm("crosscheck.missingFacts.title", "Missing facts")}
                   </div>
-                  {(resp?.consensus?.followups ?? []).length ? (
+                  {derivedConsensus.followups.length ? (
                     <button
                       onClick={applyMissingFactsToFacts}
                       className="rounded-xl border border-white/15 bg-white/5 px-2.5 py-1.5 text-xs text-white/85 hover:bg-white/10"
@@ -1606,8 +1867,8 @@ export default function CrosscheckPage() {
                 </div>
 
                 <div className="mt-2 space-y-1 text-sm text-white/80">
-                  {(resp?.consensus?.followups ?? []).length ? (
-                    (resp?.consensus?.followups ?? []).slice(0, 6).map((c, i) => <div key={i}>• {c}</div>)
+                  {derivedConsensus.followups.length ? (
+                    derivedConsensus.followups.slice(0, 6).map((c, i) => <div key={i}>• {c}</div>)
                   ) : (
                     <div className="text-white/50">{tm("crosscheck.common.noneYet", "None yet.")}</div>
                   )}
@@ -1620,130 +1881,97 @@ export default function CrosscheckPage() {
             </p>
           </Card>
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <Card className="p-0">
-              <details open className="p-5">
-                <summary className="cursor-pointer list-none select-none">
-                  <SectionTitle
-                    title={tm("crosscheck.facts.title", "Facts")}
-                    subtitle={tm("crosscheck.facts.subtitle", "Bullets only. This is what improves accuracy most.")}
-                    right={<Pill>{tm("crosscheck.common.recommended", "Recommended")}</Pill>}
-                  />
-                </summary>
-
-                <textarea
-                  value={facts}
-                  onChange={(e) => setFacts(e.target.value)}
-                  className="mt-4 min-h-[220px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm outline-none focus:border-white/20"
-                  placeholder={[
-                    tm("crosscheck.facts.placeholder1", "• Entity type, residency, ownership"),
-                    tm("crosscheck.facts.placeholder2", "• Transaction flow + timing + amounts"),
-                    tm("crosscheck.facts.placeholder3", "• Where title passes / where services performed"),
-                    tm("crosscheck.facts.placeholder4", "• Thresholds (PE, WHT, VAT registration, etc.)"),
-                  ].join("\n")}
+          <Card className="p-0">
+            <details open={false} className="p-5">
+              <summary className="cursor-pointer list-none select-none">
+                <SectionTitle
+                  title={tm("crosscheck.advanced.title", "Advanced")}
+                  subtitle={tm("crosscheck.advanced.subtitle", "Defaults + run overrides (power users).")}
+                  right={<Pill>{tm("crosscheck.common.optional", "Optional")}</Pill>}
                 />
+              </summary>
 
-                <div className="mt-3 flex items-center justify-between gap-3">
-                  <div className="text-[11px] text-white/45">
-                    {tm("crosscheck.facts.helper", "Paste “Missing facts” here, then re-run.")}
+              <div className="mt-4 space-y-4">
+                <div>
+                  <div className="text-xs font-semibold text-white/70">
+                    {tm("crosscheck.advanced.globalDefaults", "Global defaults")}
                   </div>
-                  <button
-                    onClick={applyMissingFactsToFacts}
-                    disabled={!(resp?.consensus?.followups ?? []).length}
-                    className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10 disabled:opacity-40"
-                  >
-                    {tm("crosscheck.facts.pasteMissingFacts", "Paste missing facts")}
-                  </button>
-                </div>
-              </details>
-            </Card>
-
-            <Card className="p-0">
-              <details open={false} className="p-5">
-                <summary className="cursor-pointer list-none select-none">
-                  <SectionTitle
-                    title={tm("crosscheck.advanced.title", "Advanced")}
-                    subtitle={tm("crosscheck.advanced.subtitle", "Defaults + run overrides (power users).")}
-                    right={<Pill>{tm("crosscheck.common.optional", "Optional")}</Pill>}
+                  <div className="mt-1 text-[11px] text-white/45">
+                    {tm("crosscheck.advanced.globalDefaultsHelper", "Stable posture across runs.")}
+                  </div>
+                  <textarea
+                    value={globalDefaults}
+                    onChange={(e) => setGlobalDefaults(e.target.value)}
+                    className="mt-2 min-h-[140px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm outline-none focus:border-white/20"
                   />
-                </summary>
+                </div>
 
-                <div className="mt-4 space-y-4">
-                  <div>
-                    <div className="text-xs font-semibold text-white/70">
-                      {tm("crosscheck.advanced.globalDefaults", "Global defaults")}
-                    </div>
-                    <div className="mt-1 text-[11px] text-white/45">
-                      {tm("crosscheck.advanced.globalDefaultsHelper", "Stable posture across runs.")}
-                    </div>
-                    <textarea
-                      value={globalDefaults}
-                      onChange={(e) => setGlobalDefaults(e.target.value)}
-                      className="mt-2 min-h-[140px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm outline-none focus:border-white/20"
-                    />
+                <div>
+                  <div className="text-xs font-semibold text-white/70">
+                    {tm("crosscheck.advanced.runOverrides", "Run overrides")}
                   </div>
-
-                  <div>
-                    <div className="text-xs font-semibold text-white/70">
-                      {tm("crosscheck.advanced.runOverrides", "Run overrides")}
-                    </div>
-                    <div className="mt-1 text-[11px] text-white/45">
-                      {tm("crosscheck.advanced.runOverridesHelper", "Only for this run (e.g., “focus only on withholding”).")}
-                    </div>
-                    <textarea
-                      value={runOverrides}
-                      onChange={(e) => setRunOverrides(e.target.value)}
-                      className="mt-2 min-h-[90px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm outline-none focus:border-white/20"
-                      placeholder={tm("crosscheck.advanced.runOverridesPlaceholder", "Example: Focus only on withholding + treaty relief.")}
-                    />
-                    <div className="mt-2 flex justify-end">
-                      <button
-                        onClick={() => setRunOverrides("")}
-                        disabled={!runOverrides.trim()}
-                        className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10 disabled:opacity-40"
-                      >
-                        {tm("crosscheck.actions.clearOverrides", "Clear overrides")}
-                      </button>
-                    </div>
+                  <div className="mt-1 text-[11px] text-white/45">
+                    {tm(
+                      "crosscheck.advanced.runOverridesHelper",
+                      "Only for this run (e.g., “focus only on withholding”)."
+                    )}
                   </div>
+                  <textarea
+                    value={runOverrides}
+                    onChange={(e) => setRunOverrides(e.target.value)}
+                    className="mt-2 min-h-[90px] w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm outline-none focus:border-white/20"
+                    placeholder={tm(
+                      "crosscheck.advanced.runOverridesPlaceholder",
+                      "Example: Focus only on withholding + treaty relief."
+                    )}
+                  />
+                  <div className="mt-2 flex justify-end">
+                    <button
+                      onClick={() => setRunOverrides("")}
+                      disabled={!runOverrides.trim()}
+                      className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10 disabled:opacity-40"
+                    >
+                      {tm("crosscheck.actions.clearOverrides", "Clear overrides")}
+                    </button>
+                  </div>
+                </div>
 
-                  {resp?.providers?.length ? (
-                    <details className="rounded-xl border border-white/10 bg-black/20 p-3">
-                      <summary className="cursor-pointer text-xs font-semibold text-white/70">
-                        {tm("crosscheck.diagnostics.providerOutputs", "Provider outputs (debug)")}
-                      </summary>
-                      <div className="mt-3 space-y-3">
-                        {resp.providers.map((p, idx) => (
-                          <div key={idx} className="rounded-xl border border-white/10 bg-black/30 p-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="text-xs text-white/70">
-                                <span className="font-semibold text-white/90">{p.provider}</span> · {p.model}
-                              </div>
-                              <div className="text-xs text-white/50">
-                                {p.status !== "ok" ? <span className="text-amber-200">({p.status})</span> : null} {p.ms}ms
-                              </div>
+                {resp?.providers?.length ? (
+                  <details className="rounded-xl border border-white/10 bg-black/20 p-3">
+                    <summary className="cursor-pointer text-xs font-semibold text-white/70">
+                      {tm("crosscheck.diagnostics.providerOutputs", "Provider outputs (debug)")}
+                    </summary>
+                    <div className="mt-3 space-y-3">
+                      {resp.providers.map((p, idx) => (
+                        <div key={idx} className="rounded-xl border border-white/10 bg-black/30 p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-xs text-white/70">
+                              <span className="font-semibold text-white/90">{p.provider}</span> · {p.model}
                             </div>
-                            <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">
-                              {p.status === "ok" ? p.text : p.error}
+                            <div className="text-xs text-white/50">
+                              {p.status !== "ok" ? <span className="text-amber-200">({p.status})</span> : null} {p.ms}ms
                             </div>
                           </div>
-                        ))}
-                      </div>
-                    </details>
-                  ) : null}
-                </div>
-              </details>
-            </Card>
-          </div>
+                          <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">
+                            {p.status === "ok" ? p.text : p.error}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                ) : null}
+              </div>
+            </details>
+          </Card>
 
-          {(resp?.consensus?.disagreements ?? []).length ? (
+          {derivedConsensus.disagreements.length ? (
             <Card className="p-5">
               <SectionTitle
                 title={tm("crosscheck.disagreements.title", "Disagreements")}
                 subtitle={tm("crosscheck.disagreements.subtitle", "Where models differed. Add facts and re-run.")}
               />
               <div className="mt-3 space-y-2 text-sm text-white/80">
-                {(resp?.consensus?.disagreements ?? []).map((d, i) => (
+                {derivedConsensus.disagreements.map((d, i) => (
                   <div key={i} className="rounded-xl border border-white/10 bg-black/25 p-3">
                     {d}
                   </div>
@@ -1770,8 +1998,14 @@ export default function CrosscheckPage() {
                   </div>
                   {runsLeft ? (
                     <div className="mt-2 text-[11px] text-white/55">
-                      {tm("crosscheck.plans.runsLeftToday", "Runs left today")}: <span className="text-white/85">{runsLeft}</span>
-                      {resetLocal ? <span className="text-white/40"> · {tm("crosscheck.plans.resets", "Resets")} {resetLocal}</span> : null}
+                      {tm("crosscheck.plans.runsLeftToday", "Runs left today")}:{" "}
+                      <span className="text-white/85">{runsLeft}</span>
+                      {resetLocal ? (
+                        <span className="text-white/40">
+                          {" "}
+                          · {tm("crosscheck.plans.resets", "Resets")} {resetLocal}
+                        </span>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -1781,8 +2015,15 @@ export default function CrosscheckPage() {
               </div>
 
               <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
-                <div className={cn("rounded-2xl border p-4", tier === "0" ? "border-white/25 bg-white/5" : "border-white/10 bg-black/25")}>
-                  <div className="text-xs font-semibold text-white/85">{tm("crosscheck.plans.tier0", "Tier 0 — Simple")}</div>
+                <div
+                  className={cn(
+                    "rounded-2xl border p-4",
+                    tier === "0" ? "border-white/25 bg-white/5" : "border-white/10 bg-black/25"
+                  )}
+                >
+                  <div className="text-xs font-semibold text-white/85">
+                    {tm("crosscheck.plans.tier0", "Tier 0 — Simple")}
+                  </div>
                   <div className="mt-1 text-2xl font-semibold text-white">$0</div>
                   <div className="mt-1 text-xs text-white/60">{tm("crosscheck.plans.runs5", "Runs: 5/day")}</div>
                   <button
@@ -1792,17 +2033,30 @@ export default function CrosscheckPage() {
                     }}
                     className={cn(
                       "mt-3 w-full rounded-xl px-3 py-2 text-xs font-semibold",
-                      tier === "0" ? "bg-white text-black" : "border border-white/15 bg-white/5 text-white/85 hover:bg-white/10"
+                      tier === "0"
+                        ? "bg-white text-black"
+                        : "border border-white/15 bg-white/5 text-white/85 hover:bg-white/10"
                     )}
                   >
-                    {tier === "0" ? tm("crosscheck.plans.current", "Current") : tm("crosscheck.plans.startFree", "Start free")}
+                    {tier === "0"
+                      ? tm("crosscheck.plans.current", "Current")
+                      : tm("crosscheck.plans.startFree", "Start free")}
                   </button>
                 </div>
 
-                <div className={cn("rounded-2xl border p-4", tier === "1" ? "border-white/25 bg-white/5" : "border-white/10 bg-black/25")}>
-                  <div className="text-xs font-semibold text-white/85">{tm("crosscheck.plans.tier1", "Tier 1 — Pro")}</div>
+                <div
+                  className={cn(
+                    "rounded-2xl border p-4",
+                    tier === "1" ? "border-white/25 bg-white/5" : "border-white/10 bg-black/25"
+                  )}
+                >
+                  <div className="text-xs font-semibold text-white/85">
+                    {tm("crosscheck.plans.tier1", "Tier 1 — Pro")}
+                  </div>
                   <div className="mt-1 text-2xl font-semibold text-white">$5.99</div>
-                  <div className="mt-1 text-xs text-white/60">{tm("crosscheck.plans.perMonth25", "per month · 25/day")}</div>
+                  <div className="mt-1 text-xs text-white/60">
+                    {tm("crosscheck.plans.perMonth25", "per month · 25/day")}
+                  </div>
                   <button
                     onClick={() => startCheckout("1")}
                     disabled={checkoutLoadingTier !== null}
@@ -1820,10 +2074,19 @@ export default function CrosscheckPage() {
                   </button>
                 </div>
 
-                <div className={cn("rounded-2xl border p-4", tier === "2" ? "border-white/25 bg-white/5" : "border-white/10 bg-black/25")}>
-                  <div className="text-xs font-semibold text-white/85">{tm("crosscheck.plans.tier2", "Tier 2 — Unlimited")}</div>
+                <div
+                  className={cn(
+                    "rounded-2xl border p-4",
+                    tier === "2" ? "border-white/25 bg-white/5" : "border-white/10 bg-black/25"
+                  )}
+                >
+                  <div className="text-xs font-semibold text-white/85">
+                    {tm("crosscheck.plans.tier2", "Tier 2 — Unlimited")}
+                  </div>
                   <div className="mt-1 text-2xl font-semibold text-white">$19.99</div>
-                  <div className="mt-1 text-xs text-white/60">{tm("crosscheck.plans.perMonthUnlimited", "per month · unlimited")}</div>
+                  <div className="mt-1 text-xs text-white/60">
+                    {tm("crosscheck.plans.perMonthUnlimited", "per month · unlimited")}
+                  </div>
                   <button
                     onClick={() => startCheckout("2")}
                     disabled={checkoutLoadingTier !== null}
@@ -1841,15 +2104,29 @@ export default function CrosscheckPage() {
                   </button>
                 </div>
 
-                <div className={cn("rounded-2xl border p-4", corpActive ? "border-emerald-500/30 bg-emerald-500/10" : "border-white/10 bg-black/25")}>
-                  <div className="text-xs font-semibold text-white/85">{tm("crosscheck.plans.corporate", "Corporate — 5 seats")}</div>
+                <div
+                  className={cn(
+                    "rounded-2xl border p-4",
+                    corpActive ? "border-emerald-500/30 bg-emerald-500/10" : "border-white/10 bg-black/25"
+                  )}
+                >
+                  <div className="text-xs font-semibold text-white/85">
+                    {tm("crosscheck.plans.corporate", "Corporate — 5 seats")}
+                  </div>
                   <div className="mt-1 text-2xl font-semibold text-white">$79.99</div>
-                  <div className="mt-1 text-xs text-white/60">{tm("crosscheck.plans.perMonthTeam", "per month · Tier 2 for team")}</div>
+                  <div className="mt-1 text-xs text-white/60">
+                    {tm("crosscheck.plans.perMonthTeam", "per month · Tier 2 for team")}
+                  </div>
                   <button
                     onClick={() => go("/corporate")}
-                    className={cn("mt-3 w-full rounded-xl px-3 py-2 text-xs font-semibold", corpActive ? "bg-white text-black" : "bg-white text-black hover:bg-white/90")}
+                    className={cn(
+                      "mt-3 w-full rounded-xl px-3 py-2 text-xs font-semibold",
+                      corpActive ? "bg-white text-black" : "bg-white text-black hover:bg-white/90"
+                    )}
                   >
-                    {corpActive ? tm("crosscheck.plans.manageCorporate", "Manage Corporate") : tm("crosscheck.plans.openCorporate", "Open Corporate")}
+                    {corpActive
+                      ? tm("crosscheck.plans.manageCorporate", "Manage Corporate")
+                      : tm("crosscheck.plans.openCorporate", "Open Corporate")}
                   </button>
                 </div>
               </div>
@@ -1865,7 +2142,12 @@ export default function CrosscheckPage() {
         ) : null}
 
         {confirmResetOpen ? (
-          <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" onMouseDown={() => setConfirmResetOpen(false)}>
+          <div
+            className="fixed inset-0 z-50"
+            role="dialog"
+            aria-modal="true"
+            onMouseDown={() => setConfirmResetOpen(false)}
+          >
             <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
             <div
               className="absolute left-1/2 top-1/2 w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-white/10 bg-[#070A12]/95 p-5 shadow-2xl"
@@ -1875,8 +2157,13 @@ export default function CrosscheckPage() {
                 {tm("crosscheck.resetModal.title", "Reset current case?")}
               </div>
               <div className="mt-2 text-xs text-white/55">
-                {tm("crosscheck.resetModal.body", "This will clear the current question, facts, overrides, output, and follow-up thread.")}
-                {hasUnsavedWork ? tm("crosscheck.resetModal.unsaved", " If you haven’t saved, this conversation will be lost.") : ""}
+                {tm(
+                  "crosscheck.resetModal.body",
+                  "This will clear the current question, facts, overrides, output, and follow-up thread."
+                )}
+                {hasUnsavedWork
+                  ? tm("crosscheck.resetModal.unsaved", " If you haven’t saved, this conversation will be lost.")
+                  : ""}
               </div>
 
               <div className="mt-4 flex items-center justify-end gap-2">
@@ -1923,14 +2210,24 @@ export default function CrosscheckPage() {
                   history.map((h) => (
                     <div
                       key={h.id}
-                      className={cn("rounded-xl border border-white/10 bg-black/25 p-3", selectedId === h.id && "ring-1 ring-white/20")}
+                      className={cn(
+                        "rounded-xl border border-white/10 bg-black/25 p-3",
+                        selectedId === h.id && "ring-1 ring-white/20"
+                      )}
                     >
                       <button onClick={() => loadRun(h)} className="w-full text-left">
                         <div className="line-clamp-2 text-xs font-semibold text-white/85">{h.title}</div>
                         <div className="mt-1 text-[11px] text-white/45">
                           {new Date(h.createdAt).toLocaleDateString()} · {h.jurisdiction || "—"} ·{" "}
-                          {h.confidence ? `${tm("crosscheck.history.conf", "Conf")}: ${h.confidence}` : `${tm("crosscheck.history.conf", "Conf")}: —`}
-                          {h.thread?.length ? ` · ${tm("crosscheck.history.turns", "Turns")}: ${Math.max(0, Math.floor(h.thread.length / 2))}` : ""}
+                          {h.confidence
+                            ? `${tm("crosscheck.history.conf", "Conf")}: ${h.confidence}`
+                            : `${tm("crosscheck.history.conf", "Conf")}: —`}
+                          {h.thread?.length
+                            ? ` · ${tm("crosscheck.history.turns", "Turns")}: ${Math.max(
+                                0,
+                                Math.floor(h.thread.length / 2)
+                              )}`
+                            : ""}
                         </div>
                       </button>
 
