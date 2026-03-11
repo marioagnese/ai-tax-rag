@@ -83,6 +83,13 @@ type GeminiProvider = {
 
 type ProviderConfig = OpenAiCompatibleProvider | GeminiProvider;
 
+type ParsedSections = {
+  answer: string;
+  caveats: string[];
+  followups: string[];
+  disagreements: string[];
+};
+
 /* ---------------- Sanitization ---------------- */
 
 function sanitizeBody(raw: unknown): CrosscheckUiBody {
@@ -303,14 +310,41 @@ async function callGemini(args: {
 
 function buildMessages(body: CrosscheckUiBody): ChatMsg[] {
   const sysParts: string[] = [];
-  if (body.constraints?.trim()) sysParts.push(body.constraints.trim());
-  if (body.jurisdiction?.trim())
-    sysParts.push(`Jurisdiction: ${body.jurisdiction.trim()}`);
-  if (body.facts?.trim()) sysParts.push(`Facts:\n${body.facts.trim()}`);
 
-  const system = sysParts.length
-    ? sysParts.join("\n\n")
-    : "Be conservative. Avoid overclaiming.";
+  if (body.constraints?.trim()) sysParts.push(body.constraints.trim());
+  if (body.jurisdiction?.trim()) {
+    sysParts.push(`Jurisdiction: ${body.jurisdiction.trim()}`);
+  }
+  if (body.facts?.trim()) {
+    sysParts.push(`Facts:\n${body.facts.trim()}`);
+  }
+
+  sysParts.push(
+    [
+      "You are a conservative senior tax specialist.",
+      "Answer the user's tax question directly, but avoid overclaiming.",
+      "Use the facts given. If key facts are missing, say so clearly.",
+      "Return the result using exactly these section headings in this order:",
+      "",
+      "Answer:",
+      "- concise but useful answer",
+      "",
+      "Caveats:",
+      "- bullet list of caveats or limitations",
+      "",
+      "Missing facts:",
+      "- bullet list of missing facts or follow-up questions",
+      "",
+      "Disagreements:",
+      "- bullet list only if materially relevant; otherwise write '- None.'",
+      "",
+      "Do not omit the headings, even if a section is short.",
+      "Do not use markdown tables.",
+      "Keep a conservative posture.",
+    ].join("\n")
+  );
+
+  const system = sysParts.join("\n\n");
   const user = body.question?.trim() || "";
 
   return [
@@ -319,7 +353,131 @@ function buildMessages(body: CrosscheckUiBody): ChatMsg[] {
   ];
 }
 
-/* ---------------- Consensus (simple + conservative) ---------------- */
+/* ---------------- Parsing helpers ---------------- */
+
+function dedupeStrings(items: string[]) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  for (const raw of items) {
+    const value = String(raw || "").replace(/\s+/g, " ").trim();
+    if (!value) continue;
+
+    const normalized = value
+      .replace(/^none\.?$/i, "")
+      .replace(/^n\/a$/i, "")
+      .trim();
+
+    if (!normalized) continue;
+
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(normalized);
+  }
+
+  return out;
+}
+
+function stripBulletPrefix(line: string) {
+  return line
+    .replace(/^\s*[•\-–—*]\s*/, "")
+    .replace(/^\s*\d+[\.\)]\s*/, "")
+    .replace(/^\s*[a-zA-Z][\.\)]\s*/, "")
+    .trim();
+}
+
+function detectSection(line: string): keyof Omit<ParsedSections, "answer"> | "answer" | null {
+  const s = line.trim().toLowerCase().replace(/:+$/, "");
+  if (!s) return null;
+
+  if (s === "answer" || s === "bottom line" || s === "conclusion") return "answer";
+
+  if (
+    s === "caveat" ||
+    s === "caveats" ||
+    s === "limitations" ||
+    s === "caveats / limitations" ||
+    s === "key caveats"
+  ) {
+    return "caveats";
+  }
+
+  if (
+    s === "missing facts" ||
+    s === "missing fact" ||
+    s === "followups" ||
+    s === "follow-ups" ||
+    s === "follow up questions" ||
+    s === "missing facts to confirm" ||
+    s === "missing facts / follow-ups needed"
+  ) {
+    return "followups";
+  }
+
+  if (
+    s === "disagreements" ||
+    s === "disagreement" ||
+    s === "where models differed"
+  ) {
+    return "disagreements";
+  }
+
+  return null;
+}
+
+function parseSections(text?: string | null): ParsedSections {
+  const raw = String(text || "").trim();
+  if (!raw) {
+    return { answer: "", caveats: [], followups: [], disagreements: [] };
+  }
+
+  const lines = raw.split(/\r?\n/);
+
+  const answerLines: string[] = [];
+  const caveats: string[] = [];
+  const followups: string[] = [];
+  const disagreements: string[] = [];
+
+  let current: "answer" | "caveats" | "followups" | "disagreements" = "answer";
+
+  for (const line of lines) {
+    const section = detectSection(line);
+    if (section) {
+      current = section;
+      continue;
+    }
+
+    const trimmed = line.trim();
+    if (!trimmed) {
+      if (current === "answer") answerLines.push("");
+      continue;
+    }
+
+    if (current === "answer") {
+      answerLines.push(line);
+      continue;
+    }
+
+    const cleaned = stripBulletPrefix(trimmed);
+    if (!cleaned) continue;
+
+    if (current === "caveats") caveats.push(cleaned);
+    if (current === "followups") followups.push(cleaned);
+    if (current === "disagreements") disagreements.push(cleaned);
+  }
+
+  const answer = answerLines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+
+  return {
+    answer,
+    caveats: dedupeStrings(caveats),
+    followups: dedupeStrings(followups),
+    disagreements: dedupeStrings(disagreements),
+  };
+}
+
+/* ---------------- Consensus (structured + conservative) ---------------- */
 
 function buildConsensus(
   providers: ProviderResult[]
@@ -337,38 +495,55 @@ function buildConsensus(
     };
   }
 
-  const openai = oks.find((p) => p.provider === "openai");
-  const chosen = openai ?? oks[0];
+  const parsed = oks.map((p) => ({
+    provider: p.provider,
+    model: p.model,
+    parsed: parseSections(p.text),
+    raw: (p.text || "").trim(),
+  }));
 
-  const unique = Array.from(
+  const openai = parsed.find((p) => p.provider === "openai");
+  const chosen = openai ?? parsed[0];
+
+  const answer =
+    chosen.parsed.answer.trim() ||
+    chosen.raw;
+
+  const caveats = dedupeStrings(parsed.flatMap((p) => p.parsed.caveats));
+  const followups = dedupeStrings(parsed.flatMap((p) => p.parsed.followups));
+
+  const answerSnippets = Array.from(
     new Set(
-      oks
-        .map((p) => (p.text || "").slice(0, 240).replace(/\s+/g, " ").trim())
+      parsed
+        .map((p) =>
+          (p.parsed.answer.trim() || p.raw)
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 220)
+        )
         .filter(Boolean)
     )
   );
 
-  const disagreements =
-    unique.length > 1
-      ? unique
-          .slice(0, 3)
-          .map(
-            (u, i) =>
-              `Model disagreement #${i + 1}: ${u}${u.length >= 240 ? "…" : ""}`
-          )
-      : [];
+  let disagreements = dedupeStrings(parsed.flatMap((p) => p.parsed.disagreements));
+
+  if (!disagreements.length && answerSnippets.length > 1) {
+    disagreements = answerSnippets.slice(0, 3).map(
+      (u, i) => `Model disagreement #${i + 1}: ${u}${u.length >= 220 ? "…" : ""}`
+    );
+  }
 
   const confidence: "low" | "medium" | "high" =
-    oks.length >= 4 && fails.length === 0
+    oks.length >= 4 && fails.length === 0 && disagreements.length === 0
       ? "high"
       : oks.length >= 2
       ? "medium"
       : "low";
 
   return {
-    answer: chosen.text!,
-    caveats: [],
-    followups: [],
+    answer,
+    caveats,
+    followups,
     disagreements,
     confidence,
   };
