@@ -149,7 +149,7 @@ function formatMemo(args: {
   const { jurisdiction, facts, question, answer, caveats = [], followups = [], disagreements = [], confidence } = args;
 
   const lines: string[] = [];
-  lines.push(`MEMO — TaxAiPro (Draft)`);
+  lines.push(`MEMO — TaxAiPro™™ (Draft)`);
   lines.push(`Date: ${new Date().toLocaleString()}`);
   if (jurisdiction) lines.push(`Jurisdiction: ${jurisdiction}`);
   if (confidence) lines.push(`Confidence: ${confidence}`);
@@ -228,7 +228,7 @@ function formatEmail(args: {
   lines.push("[Your name]");
   lines.push("");
   lines.push("—");
-  lines.push("Draft generated with TaxAiPro (not legal or tax advice).");
+  lines.push("Draft generated with TaxAiPro™™ (not legal or tax advice).");
   return lines.join("\n");
 }
 
@@ -1356,11 +1356,11 @@ export default function CrosscheckPage() {
           <div className="flex items-center gap-3">
             <img
               src="/taxaipro-logo.png"
-              alt="TaxAiPro"
+              alt="TaxAiPro™™"
               className="h-16 w-16 rounded-xl border border-white/10 bg-white/5 object-contain"
             />
             <div>
-              <div className="text-sm font-semibold text-white/90">TaxAiPro</div>
+              <div className="text-sm font-semibold text-white/90">TaxAiPro™™</div>
               <div className="mt-0.5 text-xs text-white/55">
                 {tm("crosscheck.header.builtBy", "Built by a tax executive — for tax executives")}
               </div>
@@ -1879,7 +1879,7 @@ export default function CrosscheckPage() {
             </div>
 
             <p className="mt-4 text-[11px] text-white/40">
-              {tm("crosscheck.footer.disclaimer", "TaxAiPro generates drafts for triage only — not legal or tax advice.")}
+              {tm("crosscheck.footer.disclaimer", "TaxAiPro™™ generates drafts for triage only — not legal or tax advice.")}
             </p>
           </Card>
 

@@ -31,7 +31,7 @@ export default function SignInPage() {
           <div className="relative h-16 w-56 sm:h-18 sm:w-64 md:h-20 md:w-72">
             <Image
               src="/taxaipro-logo.png"
-              alt="TaxAiPro"
+              alt="TaxAiPro™"
               fill
               priority
               className="object-contain"
