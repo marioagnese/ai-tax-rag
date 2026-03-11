@@ -1,5 +1,4 @@
 {
-{
   "auth": {
     "signin": {
       "howItWorks": "How it works",
@@ -19,7 +18,7 @@
       "disclaimer": "Drafts for triage only — not legal or tax advice.",
       "videoFallback": "Your browser does not support the video tag."
     }
-    },
+  },
   "crosscheck": {
     "header": {
       "builtBy": "Built by a tax executive — for tax executives",
