@@ -1,4 +1,5 @@
 {
+{
   "auth": {
     "signin": {
       "howItWorks": "How it works",
@@ -6,19 +7,19 @@
       "contact": "Contact",
       "headline": "Multi-model tax analysis,",
       "subheadline": "built to reduce uncertainty.",
-      "bodyPrefix": "TaxAiPro runs multiple models in parallel, crosschecks where they agree and disagree, then rewrites",
-      "bodyEmphasis": "one conservative answer",
-      "bodySuffix": "with explicit assumptions, caveats, and missing facts.",
-      "builtBy": "Built by a tax executive",
+      "bodyPrefix": "TaxAiPro runs multiple AI models in parallel, cross-checking where they agree and where they differ to produce",
+      "bodyEmphasis": "a more reliable answer",
+      "bodySuffix": "Instead of relying on a single AI response, it compares independent models and highlights assumptions, caveats, and missing facts. Built as a global tax research engine capable of analyzing questions across most jurisdictions worldwide.",
+      "builtBy": "Created by a tax executive",
       "for": "for",
-      "forWhom": "tax executives",
+      "forWhom": "professionals and anyone with a tax question",
       "cta": "Sign in to try it",
       "ctaHint": "Create your account once, then log in anytime.",
       "firebaseMissing": "Firebase is not configured in env vars",
       "disclaimer": "Drafts for triage only — not legal or tax advice.",
       "videoFallback": "Your browser does not support the video tag."
     }
-  },
+    },
   "crosscheck": {
     "header": {
       "builtBy": "Built by a tax executive — for tax executives",
