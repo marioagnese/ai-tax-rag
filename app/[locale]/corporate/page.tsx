@@ -8,7 +8,7 @@ const LS_TIER_KEY = "taxaipro_tier";
 const LS_CORP_KEY = "taxaipro_corp_v1";
 
 // Your Stripe Payment Link (already created)
-const STRIPE_CORP_LINK = "https://buy.stripe.com/9B65kw9rF52dbtX9oAffy06";
+const STRIPE_CORP_LINK = "https://buy.stripe.com/4gM28k0V9amxcy19oAffy09";
 
 type CorpState = {
   active: boolean;
