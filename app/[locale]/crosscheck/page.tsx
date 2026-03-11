@@ -688,7 +688,7 @@ export default function CrosscheckPage() {
     }
   };
 
-  const [jurisdiction, setJurisdiction] = useState("Panama");
+  const [jurisdiction, setJurisdiction] = useState("");
   const [facts, setFacts] = useState("");
   const [globalDefaults, setGlobalDefaults] = useState(
     [
@@ -1511,9 +1511,11 @@ export default function CrosscheckPage() {
                   <select
                     value={jurisdiction}
                     onChange={(e) => setJurisdiction(e.target.value)}
-                    className="mt-3 w-full rounded-xl border border-white/10 bg-black px-3 py-2.5 text-sm text-white outline-none focus:border-white/20"
+                    className="mt-3 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none focus:border-zinc-400"
                   >
-                    <optgroup label={tm("crosscheck.jurisdiction.usa", "USA")}>
+                    <option value="">{tm("crosscheck.jurisdiction.choose", "Choose your Jurisdiction Here")}</option>
+
+                  <optgroup label={tm("crosscheck.jurisdiction.usa", "USA")}>
                       <option value="United States">
                         {tm("crosscheck.jurisdiction.unitedStates", "United States")}
                       </option>
