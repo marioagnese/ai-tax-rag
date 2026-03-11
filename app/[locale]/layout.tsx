@@ -43,9 +43,11 @@ export default async function LocaleLayout({
         <NextIntlClientProvider locale={locale} messages={messages}>
           {children}
         </NextIntlClientProvider>
-<footer style="text-align:center;font-size:12px;color:#999;margin-top:40px;padding-bottom:20px;">
-TaxAiPro™ © 2026 Vendetta Global LLC. All rights reserved.
-</footer>
+<footer
+        style={{ textAlign: "center", fontSize: 12, color: "#999", marginTop: 40, paddingBottom: 20 }}
+      >
+        TaxAiPro™ © 2026 Vendetta Global LLC. All rights reserved.
+      </footer>
       </body>
     </html>
   );
