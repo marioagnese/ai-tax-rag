@@ -67,7 +67,7 @@ type CrosscheckResponse = {
 type ChatMsg = { role: "system" | "user" | "assistant"; content: string };
 
 type OpenAiCompatibleProvider = {
-  provider: "openai" | "perplexity" | "xai";
+  provider: "openai" | "perplexity" | "xai" | "deepseek";
   kind: "openai-compatible";
   baseURL: string;
   apiKey: string;
@@ -143,6 +143,7 @@ function normalizeBaseForProvider(provider: string, baseURL: string) {
     if (provider === "openai") return "https://api.openai.com/v1";
     if (provider === "perplexity") return "https://api.perplexity.ai";
     if (provider === "xai") return "https://api.x.ai/v1";
+    if (provider === "deepseek") return "https://api.deepseek.com";
     return "";
   }
 
@@ -509,9 +510,7 @@ function buildConsensus(
   const openai = parsed.find((p) => p.provider === "openai");
   const chosen = openai ?? parsed[0];
 
-  const answer =
-    chosen.parsed.answer.trim() ||
-    chosen.raw;
+  const answer = chosen.parsed.answer.trim() || chosen.raw;
 
   const caveats = dedupeStrings(parsed.flatMap((p) => p.parsed.caveats));
   const followups = dedupeStrings(parsed.flatMap((p) => p.parsed.followups));
@@ -538,7 +537,7 @@ function buildConsensus(
   }
 
   const confidence: "low" | "medium" | "high" =
-    oks.length >= 4 && fails.length === 0 && disagreements.length === 0
+    oks.length >= 5 && fails.length === 0 && disagreements.length === 0
       ? "high"
       : oks.length >= 2
       ? "medium"
@@ -589,6 +588,13 @@ function getProvidersToRun(): ProviderConfig[] {
       apiKey: requireEnv("XAI_API_KEY"),
       model: normalizeXaiModel(env("XAI_MODEL") || "grok-4-1-fast-reasoning"),
     },
+    {
+      provider: "deepseek",
+      kind: "openai-compatible",
+      baseURL: env("DEEPSEEK_BASE_URL") || "https://api.deepseek.com",
+      apiKey: requireEnv("DEEPSEEK_API_KEY"),
+      model: env("DEEPSEEK_MODEL") || "deepseek-chat",
+    },
   ];
 
   if (env("GEMINI_ENABLED").toLowerCase() === "true") {
@@ -596,7 +602,7 @@ function getProvidersToRun(): ProviderConfig[] {
       provider: "gemini",
       kind: "gemini",
       apiKey: requireEnv("GEMINI_API_KEY"),
-      model: env("GEMINI_MODEL") || "gemini-2.5-pro",
+      model: env("GEMINI_MODEL") || "gemini-2.5-flash",
     });
   }
 
