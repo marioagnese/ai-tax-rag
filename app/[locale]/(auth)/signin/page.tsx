@@ -61,9 +61,7 @@ export default function SignInPage() {
 
       <main className="relative mx-auto max-w-6xl px-6">
         <section className="pt-14 md:pt-20 pb-16 md:pb-24">
-          {/* Two-column hero: copy + demo video */}
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-start">
-            {/* Left: Hero copy card */}
             <div className="lg:col-span-6">
               <div className="rounded-3xl border border-white/10 bg-black/45 backdrop-blur-sm px-6 py-7 md:px-8 md:py-8 shadow-2xl shadow-black/40">
                 <h1 className="text-4xl md:text-5xl font-semibold tracking-tight leading-[1.05]">
@@ -90,7 +88,7 @@ export default function SignInPage() {
                   .
                 </div>
 
-                <div className="mt-7 flex flex-col sm:flex-row gap-3 sm:items-center">
+                <div className="mt-7 flex flex-col sm:flex-row gap-3 sm:items-center sm:flex-wrap">
                   <button
                     type="button"
                     onClick={() => router.push("/signup")}
@@ -99,6 +97,16 @@ export default function SignInPage() {
                     title={!configured ? t("firebaseMissing") : ""}
                   >
                     {t("cta")}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => router.push("/signup")}
+                    className="h-11 px-5 rounded-xl border border-white/20 bg-white/10 text-white font-medium hover:bg-white/15 disabled:opacity-50"
+                    disabled={!configured}
+                    title={!configured ? t("firebaseMissing") : ""}
+                  >
+                    Log in
                   </button>
 
                   <div className="text-sm text-white/65">{t("ctaHint")}</div>
@@ -110,7 +118,6 @@ export default function SignInPage() {
               </div>
             </div>
 
-            {/* Right: Clean square demo video (no chrome) */}
             <div className="lg:col-span-6">
               <div className="w-full max-w-[520px] ml-auto">
                 <div className="rounded-3xl border border-white/10 bg-transparent p-2">
