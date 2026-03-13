@@ -20,24 +20,29 @@ function escapeHtml(s: string) {
 }
 
 /**
- * Protection model:
- * - If TAXAIPRO_INTERNAL_TOKEN is set, require header x-taxaipro-internal to match (for server->server calls from login).
- * - Otherwise, require an authenticated session user.
+ * Accept either:
+ * 1) valid internal token header, OR
+ * 2) valid authenticated session
  */
 async function authorize(req: NextRequest) {
   const internal = (process.env.TAXAIPRO_INTERNAL_TOKEN || "").trim();
-  if (internal) {
-    const got = (req.headers.get("x-taxaipro-internal") || "").trim();
-    if (got && got === internal) return { ok: true as const };
-    return { ok: false as const, status: 401, error: "Unauthorized (missing internal token)" };
+  const got = (req.headers.get("x-taxaipro-internal") || "").trim();
+
+  if (internal && got && got === internal) {
+    return { ok: true as const };
   }
 
-  // fallback: require session auth if no internal token configured
   try {
     await requireSessionUser();
     return { ok: true as const };
   } catch {
-    return { ok: false as const, status: 401, error: "Unauthorized" };
+    return {
+      ok: false as const,
+      status: 401,
+      error: internal
+        ? "Unauthorized (missing valid internal token or session)"
+        : "Unauthorized",
+    };
   }
 }
 

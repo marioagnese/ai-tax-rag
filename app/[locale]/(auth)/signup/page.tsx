@@ -31,6 +31,19 @@ async function mintSession(idToken: string) {
   if (!res.ok || !data.ok) throw new Error((data as any)?.error || `Login failed (${res.status})`);
 }
 
+async function sendWelcomeEmail(email: string, name: string) {
+  const res = await fetch("/api/email/welcome", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email, name }),
+  });
+
+  const data = (await res.json().catch(() => ({}))) as ApiResp;
+  if (!res.ok || !data.ok) {
+    throw new Error((data as any)?.error || `Welcome email failed (${res.status})`);
+  }
+}
+
 function isEmailInUse(err: any) {
   const code = err?.code || err?.error?.code || "";
   return code === "auth/email-already-in-use";
@@ -50,7 +63,7 @@ function readPendingCorp(): CorpPending | null {
     if (!raw) return null;
     const j = JSON.parse(raw);
     if (!j?.corp || !j?.invite) return null;
-    if (Date.now() - Number(j.createdAt || 0) > 2 * 60 * 60 * 1000) return null; // 2h expiry
+    if (Date.now() - Number(j.createdAt || 0) > 2 * 60 * 60 * 1000) return null;
     return j as CorpPending;
   } catch {
     return null;
@@ -96,7 +109,6 @@ export default function SignupPage() {
 
   const disable = busy || !configured;
 
-  // Capture corporate invite if present: /signup?corp=1&invite=TOKEN
   useEffect(() => {
     try {
       const sp = new URLSearchParams(window.location.search);
@@ -160,6 +172,8 @@ export default function SignupPage() {
       setBusy(true);
 
       let userCred;
+      const isNewSignup = mode === "signup";
+
       if (mode === "signup") {
         try {
           userCred = await createUserWithEmailAndPassword(auth, email.trim(), password);
@@ -195,9 +209,17 @@ export default function SignupPage() {
       const idToken = await userCred.user.getIdToken(true);
       await mintSession(idToken);
 
-      // Tier assignment:
-      // Corporate invite => Tier 2
-      // Else keep existing tier, otherwise set Tier 0
+      if (isNewSignup) {
+        try {
+          await sendWelcomeEmail(
+            userCred.user.email || email.trim(),
+            fullName.trim() || userCred.user.displayName || ""
+          );
+        } catch (welcomeErr) {
+          console.error("Welcome email failed:", welcomeErr);
+        }
+      }
+
       try {
         const pending = readPendingCorp();
         if (pending?.invite) {
