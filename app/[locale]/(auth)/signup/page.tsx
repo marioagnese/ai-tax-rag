@@ -115,8 +115,9 @@ export default function SignupPage() {
       const corp = sp.get("corp");
       const invite = sp.get("invite");
       const requestedMode = sp.get("mode");
+      const requestedHash = window.location.hash.replace("#", "").trim().toLowerCase();
 
-      if (requestedMode === "login") {
+      if (requestedMode === "login" || requestedHash === "login") {
         setMode("login");
       }
 

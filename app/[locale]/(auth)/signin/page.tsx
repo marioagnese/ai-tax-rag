@@ -3,12 +3,14 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { firebaseClientConfigured } from "@/src/lib/firebase/client";
 
 export default function SignInPage() {
   const router = useRouter();
+  const params = useParams<{ locale?: string }>();
+  const locale = typeof params?.locale === "string" ? params.locale : "en";
   const t = useTranslations("auth.signin");
   const configured = useMemo(() => firebaseClientConfigured(), []);
   const [demoOpen, setDemoOpen] = useState(false);
@@ -141,7 +143,7 @@ export default function SignInPage() {
                 <div className="mt-7 flex flex-col sm:flex-row gap-3 sm:items-center sm:flex-wrap">
                   <button
                     type="button"
-                    onClick={() => router.push("/signup")}
+                    onClick={() => router.push(`/${locale}/signup`)}
                     className="h-11 px-5 rounded-xl bg-white text-black font-medium hover:bg-white/90 disabled:opacity-50"
                     disabled={!configured}
                     title={!configured ? t("firebaseMissing") : ""}
@@ -151,7 +153,7 @@ export default function SignInPage() {
 
                   <button
                     type="button"
-                    onClick={() => router.push("/signup?mode=login")}
+                    onClick={() => router.push(`/${locale}/signup?mode=login#login`)}
                     className="h-11 px-5 rounded-xl border border-white/20 bg-white/10 text-white font-medium hover:bg-white/15 disabled:opacity-50"
                     disabled={!configured}
                     title={!configured ? t("firebaseMissing") : ""}
