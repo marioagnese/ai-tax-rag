@@ -1,7 +1,7 @@
 // app/[locale]/(auth)/signin/page.tsx
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -11,6 +11,23 @@ export default function SignInPage() {
   const router = useRouter();
   const t = useTranslations("auth.signin");
   const configured = useMemo(() => firebaseClientConfigured(), []);
+  const [demoOpen, setDemoOpen] = useState(false);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setDemoOpen(false);
+    }
+
+    if (demoOpen) {
+      window.addEventListener("keydown", onKeyDown);
+      document.body.style.overflow = "hidden";
+    }
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = "";
+    };
+  }, [demoOpen]);
 
   return (
     <div
@@ -25,7 +42,40 @@ export default function SignInPage() {
     >
       <div className="absolute inset-0 bg-black/10" />
 
-      {/* Top-left logo + top-right links */}
+      {demoOpen ? (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4"
+          onClick={() => setDemoOpen(false)}
+        >
+          <div
+            className="relative w-[92vw] max-w-[1100px] rounded-3xl border border-white/10 bg-[#0A0F1A] p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setDemoOpen(false)}
+              className="absolute right-4 top-4 z-10 rounded-full border border-white/15 bg-black/40 px-3 py-1.5 text-sm text-white/80 hover:bg-white/10"
+              aria-label="Close demo"
+            >
+              ✕
+            </button>
+
+            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black">
+              <video
+                className="h-auto w-full object-contain"
+                controls
+                playsInline
+                preload="auto"
+                autoPlay
+              >
+                <source src="/TaxAIProGuide.mp4" type="video/mp4" />
+                {t("videoFallback")}
+              </video>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <header className="relative px-6 pt-6">
         <div className="flex items-start justify-between gap-4">
           <div className="relative h-16 w-56 sm:h-18 sm:w-64 md:h-20 md:w-72">
@@ -131,6 +181,16 @@ export default function SignInPage() {
                       <source src="/demo-60s.mp4" type="video/mp4" />
                       {t("videoFallback")}
                     </video>
+                  </div>
+
+                  <div className="mt-4 flex justify-center">
+                    <button
+                      type="button"
+                      onClick={() => setDemoOpen(true)}
+                      className="h-11 px-6 rounded-xl border border-white/20 bg-white/10 text-white font-medium hover:bg-white/15"
+                    >
+                      Watch Demo
+                    </button>
                   </div>
                 </div>
               </div>
