@@ -114,6 +114,11 @@ export default function SignupPage() {
       const sp = new URLSearchParams(window.location.search);
       const corp = sp.get("corp");
       const invite = sp.get("invite");
+      const requestedMode = sp.get("mode");
+
+      if (requestedMode === "login") {
+        setMode("login");
+      }
 
       if (corp === "1" && invite) {
         setPendingCorp(invite);
