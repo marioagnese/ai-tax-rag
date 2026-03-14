@@ -141,7 +141,7 @@ export default function SignInPage() {
                 <div className="mt-7 flex flex-col sm:flex-row gap-3 sm:items-center sm:flex-wrap">
                   <button
                     type="button"
-                    onClick={() => router.push("/signup?mode=login")}
+                    onClick={() => router.push("/signup")}
                     className="h-11 px-5 rounded-xl bg-white text-black font-medium hover:bg-white/90 disabled:opacity-50"
                     disabled={!configured}
                     title={!configured ? t("firebaseMissing") : ""}
