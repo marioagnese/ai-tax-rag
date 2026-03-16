@@ -1,18 +1,25 @@
 import "server-only";
 import { getApps, initializeApp, cert, type App } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
+import { getFirestore, type Firestore } from "firebase-admin/firestore";
 
 function env(name: string) {
   return process.env[name] || "";
 }
 
 function hasFirebaseAdminEnv() {
-  return !!(env("FIREBASE_PROJECT_ID") && env("FIREBASE_CLIENT_EMAIL") && env("FIREBASE_PRIVATE_KEY"));
+  return !!(
+    env("FIREBASE_PROJECT_ID") &&
+    env("FIREBASE_CLIENT_EMAIL") &&
+    env("FIREBASE_PRIVATE_KEY")
+  );
 }
 
 export function firebaseAdminConfigured() {
   return hasFirebaseAdminEnv();
 }
+
+let dbInstance: Firestore | null = null;
 
 export function getAdminApp(): App {
   if (!hasFirebaseAdminEnv()) {
@@ -36,4 +43,11 @@ export function getAdminApp(): App {
 export function getAdminAuth() {
   const app = getAdminApp();
   return getAuth(app);
+}
+
+export function getAdminDb(): Firestore {
+  if (dbInstance) return dbInstance;
+  const app = getAdminApp();
+  dbInstance = getFirestore(app);
+  return dbInstance;
 }

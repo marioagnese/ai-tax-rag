@@ -64,6 +64,8 @@ type DerivedConsensus = {
   confidence?: "low" | "medium" | "high";
 };
 
+type AutosaveState = "idle" | "saving" | "saved" | "unavailable" | "error";
+
 const LS_KEY = "taxaipro_runs_v1";
 const LS_TIER_KEY = "taxaipro_tier";
 const LS_ACTIVE_THREAD = "taxaipro_active_thread_v1";
@@ -368,10 +370,7 @@ function parseStructuredSections(text?: string | null) {
     if (current === "disagreements") disagreements.push(item);
   }
 
-  const answer = answerLines
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  const answer = answerLines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 
   return {
     answer,
@@ -388,7 +387,9 @@ function deriveConsensus(resp: CrosscheckResponse | null): DerivedConsensus {
     answer: baseAnswer,
     caveats: Array.isArray(resp?.consensus?.caveats) ? resp!.consensus!.caveats!.map(String) : [],
     followups: Array.isArray(resp?.consensus?.followups) ? resp!.consensus!.followups!.map(String) : [],
-    disagreements: Array.isArray(resp?.consensus?.disagreements) ? resp!.consensus!.disagreements!.map(String) : [],
+    disagreements: Array.isArray(resp?.consensus?.disagreements)
+      ? resp!.consensus!.disagreements!.map(String)
+      : [],
     confidence: resp?.consensus?.confidence,
   };
 
@@ -411,10 +412,7 @@ function deriveConsensus(resp: CrosscheckResponse | null): DerivedConsensus {
     }
   }
 
-  const answer =
-    parsedFromAnswer.answer.trim() ||
-    baseAnswer ||
-    "";
+  const answer = parsedFromAnswer.answer.trim() || baseAnswer || "";
 
   return {
     answer,
@@ -725,9 +723,14 @@ export default function CrosscheckPage() {
 
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [examplesOpen, setExamplesOpen] = useState(false);
+  const [aiWorksOpen, setAiWorksOpen] = useState(false);
 
   const [loadingStepIndex, setLoadingStepIndex] = useState(0);
   const [loadingElapsed, setLoadingElapsed] = useState(0);
+
+  const [autosaveState, setAutosaveState] = useState<AutosaveState>("idle");
+  const [autosaveMessage, setAutosaveMessage] = useState("");
+  const [currentRunId, setCurrentRunId] = useState<string | null>(null);
 
   const runFnRef = useRef<() => void>(() => {});
 
@@ -849,7 +852,6 @@ export default function CrosscheckPage() {
   const constraints = useMemo(() => buildConstraints(globalDefaults, runOverrides), [globalDefaults, runOverrides]);
   const confidence = resp?.consensus?.confidence;
   const derivedConsensus = useMemo(() => deriveConsensus(resp), [resp]);
-  const canSave = !!derivedConsensus.answer.trim();
   const effectiveQuestionForOutput = useMemo(() => buildQuestionForFormatting(thread, question), [thread, question]);
 
   const isBusy = loading || followUpLoading;
@@ -903,8 +905,89 @@ export default function CrosscheckPage() {
     return (derivedConsensus.answer || tm("crosscheck.output.placeholder", "Your answer will appear here.")).trim();
   }, [outputStyle, derivedConsensus, jurisdiction, facts, effectiveQuestionForOutput, tm]);
 
+  function upsertLocalRun(run: SavedRun) {
+    const next = [run, ...history.filter((h) => h.id !== run.id)].slice(0, 50);
+    setHistory(next);
+    persistRuns(next);
+    setSelectedId(run.id);
+  }
+
+  async function autosaveRun(args: {
+    runId?: string | null;
+    question: string;
+    answer: string;
+    thread: ThreadMessage[];
+  }) {
+    if (tier === "0") {
+      setAutosaveState("unavailable");
+      setAutosaveMessage(tm("crosscheck.autosave.freePlan", "Permanent autosave is available on paid plans."));
+      return;
+    }
+
+    setAutosaveState("saving");
+    setAutosaveMessage(tm("crosscheck.autosave.saving", "Saving automatically…"));
+
+    const payload = {
+      runId: args.runId || undefined,
+      title: clampTitleFromQuestion(question),
+      jurisdiction: jurisdiction.trim() || undefined,
+      facts: facts.trim() || undefined,
+      globalDefaults: globalDefaults.trim() || undefined,
+      runOverrides: runOverrides.trim() || undefined,
+      question: question.trim(),
+      answer: args.answer,
+      caveats: derivedConsensus.caveats || [],
+      followups: derivedConsensus.followups || [],
+      disagreements: derivedConsensus.disagreements || [],
+      confidence: derivedConsensus.confidence,
+      thread: args.thread,
+    };
+
+    try {
+      const r = await fetch("/api/runs/autosave", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const j = (await r.json().catch(() => null)) as any;
+
+      if (!r.ok || !j?.ok) {
+        setAutosaveState("error");
+        setAutosaveMessage(j?.error || tm("crosscheck.autosave.failed", "Autosave failed."));
+        return;
+      }
+
+      const nextRunId = String(j.runId || args.runId || crypto.randomUUID());
+      setCurrentRunId(nextRunId);
+      setAutosaveState("saved");
+      setAutosaveMessage(tm("crosscheck.autosave.saved", "Saved automatically."));
+
+      upsertLocalRun({
+        id: nextRunId,
+        createdAt: Date.now(),
+        title: clampTitleFromQuestion(question),
+        jurisdiction: jurisdiction.trim() || undefined,
+        facts: facts.trim() || undefined,
+        globalDefaults: globalDefaults.trim() || undefined,
+        runOverrides: runOverrides.trim() || undefined,
+        question: question.trim(),
+        answer: args.answer,
+        caveats: derivedConsensus.caveats || [],
+        followups: derivedConsensus.followups || [],
+        disagreements: derivedConsensus.disagreements || [],
+        confidence: derivedConsensus.confidence,
+        thread: args.thread,
+      });
+    } catch (e: any) {
+      setAutosaveState("error");
+      setAutosaveMessage(e?.message || tm("crosscheck.autosave.failed", "Autosave failed."));
+    }
+  }
+
   function loadRun(r: SavedRun) {
     setSelectedId(r.id);
+    setCurrentRunId(r.id);
     setJurisdiction(r.jurisdiction || "");
     setFacts(r.facts || "");
     setGlobalDefaults(r.globalDefaults || globalDefaults);
@@ -935,6 +1018,12 @@ export default function CrosscheckPage() {
     });
     setError(null);
     setFollowUp("");
+    setAutosaveState(tier === "0" ? "unavailable" : "saved");
+    setAutosaveMessage(
+      tier === "0"
+        ? tm("crosscheck.autosave.freePlan", "Permanent autosave is available on paid plans.")
+        : tm("crosscheck.autosave.saved", "Saved automatically.")
+    );
   }
 
   function deleteRun(id: string) {
@@ -942,32 +1031,7 @@ export default function CrosscheckPage() {
     setHistory(next);
     persistRuns(next);
     if (selectedId === id) setSelectedId(null);
-  }
-
-  function saveCurrentRun() {
-    if (!canSave) return;
-
-    const run: SavedRun = {
-      id: crypto.randomUUID(),
-      createdAt: Date.now(),
-      title: clampTitleFromQuestion(question),
-      jurisdiction: jurisdiction.trim() || undefined,
-      facts: facts.trim() || undefined,
-      globalDefaults: globalDefaults.trim() || undefined,
-      runOverrides: runOverrides.trim() || undefined,
-      question: question.trim(),
-      answer: derivedConsensus.answer || "",
-      caveats: derivedConsensus.caveats || [],
-      followups: derivedConsensus.followups || [],
-      disagreements: derivedConsensus.disagreements || [],
-      confidence: derivedConsensus.confidence,
-      thread: thread.length ? thread : undefined,
-    };
-
-    const next = [run, ...history].slice(0, 50);
-    setHistory(next);
-    persistRuns(next);
-    setSelectedId(run.id);
+    if (currentRunId === id) setCurrentRunId(null);
   }
 
   function applyMissingFactsToFacts() {
@@ -994,6 +1058,9 @@ export default function CrosscheckPage() {
     setQuestion("");
     setRunOverrides("");
     setSelectedId(null);
+    setCurrentRunId(null);
+    setAutosaveState("idle");
+    setAutosaveMessage("");
   }
 
   function updateRateFromHeaders(h: Headers) {
@@ -1058,7 +1125,8 @@ export default function CrosscheckPage() {
     }
 
     const userMsg = newMsg("user", q);
-    setThread((t) => [...t, userMsg]);
+    const baseThread = [...thread, userMsg];
+    setThread(baseThread);
 
     setLoading(true);
     try {
@@ -1098,7 +1166,20 @@ export default function CrosscheckPage() {
       setResp(parsed);
 
       const ans = deriveConsensus(parsed).answer.trim();
-      if (ans) setThread((t) => [...t, newMsg("assistant", ans)]);
+      const finalThread = ans ? [...baseThread, newMsg("assistant", ans)] : baseThread;
+      setThread(finalThread);
+
+      if (ans) {
+        await autosaveRun({
+          runId: currentRunId,
+          question: q,
+          answer: ans,
+          thread: finalThread,
+        });
+      } else if (tier === "0") {
+        setAutosaveState("unavailable");
+        setAutosaveMessage(tm("crosscheck.autosave.freePlan", "Permanent autosave is available on paid plans."));
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : tm("crosscheck.errors.requestFailed", "Request failed.");
       setError(msg);
@@ -1131,7 +1212,8 @@ export default function CrosscheckPage() {
     setFollowUpLoading(true);
 
     const userMsg = newMsg("user", follow);
-    setThread((t) => [...t, userMsg]);
+    const baseThread = [...thread, userMsg];
+    setThread(baseThread);
 
     try {
       const composite = buildCompositeFollowUpPrompt({
@@ -1176,7 +1258,21 @@ export default function CrosscheckPage() {
       setResp(parsed);
 
       const ans = deriveConsensus(parsed).answer.trim();
-      if (ans) setThread((t) => [...t, newMsg("assistant", ans)]);
+      const finalThread = ans ? [...baseThread, newMsg("assistant", ans)] : baseThread;
+      setThread(finalThread);
+
+      if (ans) {
+        await autosaveRun({
+          runId: currentRunId,
+          question: baseQ,
+          answer: ans,
+          thread: finalThread,
+        });
+      } else if (tier === "0") {
+        setAutosaveState("unavailable");
+        setAutosaveMessage(tm("crosscheck.autosave.freePlan", "Permanent autosave is available on paid plans."));
+      }
+
       setFollowUp("");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : tm("crosscheck.errors.requestFailed", "Request failed.");
@@ -1303,6 +1399,9 @@ export default function CrosscheckPage() {
     setError(null);
     setThread([]);
     setFollowUp("");
+    setCurrentRunId(null);
+    setAutosaveState("idle");
+    setAutosaveMessage("");
     setExamplesOpen(false);
   }
 
@@ -1377,10 +1476,10 @@ export default function CrosscheckPage() {
 
           <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => go("/how-it-works")}
+              onClick={() => setAiWorksOpen(true)}
               className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
             >
-              {tm("crosscheck.nav.howItWorks", "How it works")}
+              {tm("crosscheck.nav.howAiWorks", "How the AI works")}
             </button>
 
             <button
@@ -1515,7 +1614,7 @@ export default function CrosscheckPage() {
                   >
                     <option value="">{tm("crosscheck.jurisdiction.choose", "Choose your Jurisdiction Here")}</option>
 
-                  <optgroup label={tm("crosscheck.jurisdiction.usa", "USA")}>
+                    <optgroup label={tm("crosscheck.jurisdiction.usa", "USA")}>
                       <option value="United States">
                         {tm("crosscheck.jurisdiction.unitedStates", "United States")}
                       </option>
@@ -1676,7 +1775,15 @@ export default function CrosscheckPage() {
                 ) : null}
 
                 <div className="mt-3 text-[11px] text-white/45">
-                  {tm("crosscheck.caseQuestion.threadNote", "Thread is client-side only (saved if you Save).")}
+                  {tier === "0"
+                    ? tm(
+                        "crosscheck.caseQuestion.threadNoteFree",
+                        "Free tier does not include permanent autosave. Paid plans save analyses automatically."
+                      )
+                    : tm(
+                        "crosscheck.caseQuestion.threadNotePaid",
+                        "Paid plans save analyses automatically after each successful run."
+                      )}
                 </div>
               </div>
             </div>
@@ -1752,18 +1859,19 @@ export default function CrosscheckPage() {
                 {tm("crosscheck.actions.download", "Download")}
               </button>
 
-              <button
-                onClick={saveCurrentRun}
-                disabled={!canSave}
-                className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10 disabled:opacity-40"
-                title={
-                  canSave
-                    ? tm("crosscheck.actions.saveTitle", "Save this run")
-                    : tm("crosscheck.actions.runOnceFirst", "Run once first")
-                }
-              >
-                {tm("crosscheck.actions.save", "Save")}
-              </button>
+              <div className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85">
+                {autosaveState === "saving"
+                  ? tm("crosscheck.autosave.saving", "Saving automatically…")
+                  : autosaveState === "saved"
+                  ? tm("crosscheck.autosave.saved", "Saved automatically.")
+                  : autosaveState === "unavailable"
+                  ? tm("crosscheck.autosave.freePlan", "Permanent autosave is available on paid plans.")
+                  : autosaveState === "error"
+                  ? autosaveMessage || tm("crosscheck.autosave.failed", "Autosave failed.")
+                  : tier === "0"
+                  ? tm("crosscheck.autosave.freePlan", "Permanent autosave is available on paid plans.")
+                  : tm("crosscheck.autosave.ready", "Ready to autosave")}
+              </div>
 
               <div className="ml-auto flex items-center gap-2">
                 {resp ? (
@@ -1816,7 +1924,9 @@ export default function CrosscheckPage() {
 
               <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-[11px] text-white/45">
-                  {tm("crosscheck.followup.helper", "Client-side thread for now.")}
+                  {tier === "0"
+                    ? tm("crosscheck.followup.helperFree", "Follow-ups are not permanently saved on the free tier.")
+                    : tm("crosscheck.followup.helperPaid", "Follow-ups are autosaved to the same paid case history item.")}
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -1983,6 +2093,63 @@ export default function CrosscheckPage() {
           ) : null}
         </div>
 
+        {aiWorksOpen ? (
+          <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" onMouseDown={() => setAiWorksOpen(false)}>
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+            <div
+              className="absolute left-1/2 top-1/2 w-[92vw] max-w-xl -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-white/10 bg-[#070A12]/95 p-5 shadow-2xl"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-white/90">
+                    {tm("crosscheck.aiWorks.title", "How the AI analysis works")}
+                  </div>
+                  <div className="mt-1 text-xs text-white/55">
+                    {tm("crosscheck.aiWorks.subtitle", "Clear positioning for professional users")}
+                  </div>
+                </div>
+                <button onClick={() => setAiWorksOpen(false)} className="text-white/60 hover:text-white" aria-label="Close">
+                  ✕
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-3 text-sm leading-6 text-white/80">
+                <p>
+                  {tm(
+                    "crosscheck.aiWorks.p1",
+                    "TaxAiPro is not a standalone large language model. It is a multi-model tax analysis platform."
+                  )}
+                </p>
+                <p>
+                  {tm(
+                    "crosscheck.aiWorks.p2",
+                    "When you run an analysis, the platform sends your tax question to several advanced AI models, compares the responses, and produces a structured result."
+                  )}
+                </p>
+                <p>
+                  {tm(
+                    "crosscheck.aiWorks.p3",
+                    "The output is designed to highlight preliminary conclusions, caveats, missing facts, and areas where models disagree."
+                  )}
+                </p>
+                <p>
+                  {tm(
+                    "crosscheck.aiWorks.p4",
+                    "The platform improves over time through prompt engineering, workflow design, and better comparison logic — not by claiming to be its own tax-trained LLM."
+                  )}
+                </p>
+                <p className="text-white/55">
+                  {tm(
+                    "crosscheck.aiWorks.p5",
+                    "TaxAiPro is a tax triage tool for professionals and does not replace professional judgment or primary-source validation."
+                  )}
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {upgradeOpen ? (
           <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" onMouseDown={() => setUpgradeOpen(false)}>
             <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
@@ -2028,6 +2195,9 @@ export default function CrosscheckPage() {
                   </div>
                   <div className="mt-1 text-2xl font-semibold text-white">$0</div>
                   <div className="mt-1 text-xs text-white/60">{tm("crosscheck.plans.runs5", "Runs: 5/day")}</div>
+                  <div className="mt-2 text-[11px] text-white/45">
+                    {tm("crosscheck.plans.noPermanentHistory", "No permanent autosave")}
+                  </div>
                   <button
                     onClick={() => {
                       setTierLocal("0");
@@ -2059,6 +2229,9 @@ export default function CrosscheckPage() {
                   <div className="mt-1 text-xs text-white/60">
                     {tm("crosscheck.plans.perMonth25", "per month · 25/day")}
                   </div>
+                  <div className="mt-2 text-[11px] text-white/45">
+                    {tm("crosscheck.plans.autosaveIncluded", "Autosave included")}
+                  </div>
                   <button
                     onClick={() => startCheckout("1")}
                     disabled={checkoutLoadingTier !== null}
@@ -2089,6 +2262,9 @@ export default function CrosscheckPage() {
                   <div className="mt-1 text-xs text-white/60">
                     {tm("crosscheck.plans.perMonthUnlimited", "per month · unlimited")}
                   </div>
+                  <div className="mt-2 text-[11px] text-white/45">
+                    {tm("crosscheck.plans.autosaveIncluded", "Autosave included")}
+                  </div>
                   <button
                     onClick={() => startCheckout("2")}
                     disabled={checkoutLoadingTier !== null}
@@ -2118,6 +2294,9 @@ export default function CrosscheckPage() {
                   <div className="mt-1 text-2xl font-semibold text-white">$79.99</div>
                   <div className="mt-1 text-xs text-white/60">
                     {tm("crosscheck.plans.perMonthTeam", "per month · Tier 2 for team")}
+                  </div>
+                  <div className="mt-2 text-[11px] text-white/45">
+                    {tm("crosscheck.plans.autosaveIncluded", "Autosave included")}
                   </div>
                   <button
                     onClick={() => go("/corporate")}
@@ -2164,7 +2343,7 @@ export default function CrosscheckPage() {
                   "This will clear the current question, facts, overrides, output, and follow-up thread."
                 )}
                 {hasUnsavedWork
-                  ? tm("crosscheck.resetModal.unsaved", " If you haven’t saved, this conversation will be lost.")
+                  ? tm("crosscheck.resetModal.unsaved", " If you haven’t exported anything, this conversation will be lost.")
                   : ""}
               </div>
 
@@ -2199,7 +2378,15 @@ export default function CrosscheckPage() {
                     {tm("crosscheck.history.title", "Case history")}
                   </div>
                   <div className="mt-1 text-xs text-white/50">
-                    {tm("crosscheck.history.subtitle", "Saved on this device (localStorage).")}
+                    {tier === "0"
+                      ? tm(
+                          "crosscheck.history.subtitleFree",
+                          "Free tier does not include permanent case history."
+                        )
+                      : tm(
+                          "crosscheck.history.subtitlePaid",
+                          "Recent local mirror of your autosaved paid runs on this device."
+                        )}
                   </div>
                 </div>
                 <button onClick={() => setHistoryOpen(false)} className="text-white/60 hover:text-white" aria-label="Close">
@@ -2251,7 +2438,12 @@ export default function CrosscheckPage() {
                   ))
                 ) : (
                   <div className="rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-white/50">
-                    {tm("crosscheck.history.empty", "No saved runs yet.")}
+                    {tier === "0"
+                      ? tm(
+                          "crosscheck.history.emptyFree",
+                          "No permanent history on the free tier. Upgrade to save analyses automatically."
+                        )
+                      : tm("crosscheck.history.empty", "No saved runs yet.")}
                   </div>
                 )}
               </div>
