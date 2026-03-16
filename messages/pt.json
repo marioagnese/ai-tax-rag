@@ -1,5 +1,5 @@
 {
-   "auth": {
+  "auth": {
     "signin": {
       "howItWorks": "Como funciona",
       "howItWorksTitle": "Como o TaxAiPro funciona",
@@ -7,8 +7,8 @@
       "headline": "Análise tributária com múltiplos modelos,",
       "subheadline": "projetada para reduzir a incerteza.",
       "bodyPrefix": "O TaxAiPro executa vários modelos de IA em paralelo, comparando onde eles concordam e onde diferem para produzir",
-      "bodyEmphasis": "uma resposta mais confiável",
-      "bodySuffix": "Em vez de depender de uma única resposta de IA, ele compara modelos independentes e destaca premissas, ressalvas e fatos ausentes. Foi projetado como um motor global de pesquisa tributária capaz de analisar questões em praticamente todas as jurisdições do mundo.",
+      "bodyEmphasis": "uma resposta mais confiável e conservadora.",
+      "bodySuffix": "Em vez de depender de uma única resposta de IA, ele compara resultados de modelos independentes e destaca premissas, ressalvas, divergências e fatos faltantes. O TaxAiPro não é seu próprio modelo de IA: é um motor de orquestração e síntese voltado para a área tributária, projetado para ajudar profissionais a analisar questões em praticamente todas as jurisdições do mundo.",
       "builtBy": "Criado por um executivo tributário",
       "for": "para",
       "forWhom": "profissionais e qualquer pessoa com uma dúvida tributária",
@@ -16,7 +16,9 @@
       "ctaHint": "Crie sua conta uma vez e depois entre sempre que quiser.",
       "firebaseMissing": "Firebase não está configurado nas variáveis de ambiente",
       "disclaimer": "Os resultados são rascunhos para triagem — não constituem aconselhamento jurídico ou tributário.",
-      "videoFallback": "Seu navegador não suporta a tag de vídeo."
+      "videoFallback": "Seu navegador não suporta a tag de vídeo.",
+      "watchGuide": "Ver guia",
+      "watchGuideTitle": "Abrir guia do produto TaxAiPro"
     }
   },
   "crosscheck": {
@@ -126,10 +128,10 @@
     },
     "advanced": {
       "title": "Avançado",
-      "subtitle": "Padrões + substituições desta execução (usuários avançados).",
+      "subtitle": "Padrões + ajustes desta execução (usuários avançados).",
       "globalDefaults": "Padrões globais",
       "globalDefaultsHelper": "Postura estável entre execuções.",
-      "runOverrides": "Substituições desta execução",
+      "runOverrides": "Ajustes desta execução",
       "runOverridesHelper": "Somente para esta execução (ex.: “focar apenas em retenção na fonte”).",
       "runOverridesPlaceholder": "Exemplo: focar apenas em retenção na fonte + benefício de tratado."
     },
@@ -143,7 +145,7 @@
       "download": "Baixar",
       "runFollowup": "Executar seguimento",
       "clear": "Limpar",
-      "clearOverrides": "Limpar substituições",
+      "clearOverrides": "Limpar ajustes",
       "resetCase": "Reiniciar caso",
       "resetTitle": "Reinicia o estado atual do caso."
     },
@@ -173,7 +175,7 @@
     "missingFactsBlockTitle": "Fatos faltantes para confirmar:",
     "diagnostics": {
       "runsLeft": "Execuções restantes",
-      "resets": "Reinicia",
+      "resets": "Reinícios",
       "threadMsgs": "Mensagens",
       "modelsOk": "Modelos ok",
       "modelsFailed": "Modelos falharam",
@@ -183,7 +185,7 @@
       "title": "Planos e níveis",
       "subtitle": "O upgrade aumenta as execuções diárias. Reinicia diariamente (meia-noite UTC).",
       "runsLeftToday": "Execuções restantes hoje",
-      "resets": "Reinicia",
+      "resets": "Reinícios",
       "tier0": "Nível 0 — Simples",
       "tier1": "Nível 1 — Pro",
       "tier2": "Nível 2 — Ilimitado",
@@ -203,7 +205,7 @@
     },
     "resetModal": {
       "title": "Reiniciar caso atual?",
-      "body": "Isso limpará a pergunta atual, fatos, substituições, resultado e a conversa de seguimento.",
+      "body": "Isso limpará a pergunta atual, fatos, ajustes, resultado e a conversa de seguimento.",
       "unsaved": " Se você não salvou, esta conversa será perdida.",
       "confirm": "Sim, reiniciar"
     },
@@ -240,5 +242,69 @@
       "footer": "Isso pode levar alguns segundos porque vários modelos estão sendo comparados.",
       "elapsed": "Tempo decorrido"
     }
+  },
+  "howItWorks": {
+    "metaTitle": "Como funciona — TaxAiPro",
+    "title": "Como o TaxAiPro funciona",
+    "subtitle": "Análise multimodelo de IA projetada para profissionais tributários.",
+    "intro1": "O TaxAiPro é uma ferramenta profissional de análise projetada para ajudar profissionais tributários a avaliar questões complexas por meio de um fluxo de análise cruzada com múltiplos modelos de IA.",
+    "intro2": "Em vez de depender de um único sistema de inteligência artificial, o TaxAiPro envia a pergunta do usuário para vários modelos líderes ao mesmo tempo, compara suas respostas e gera uma síntese conservadora.",
+    "intro3": "O objetivo não é substituir o julgamento profissional, mas ajudar a identificar premissas, detectar fatos faltantes e destacar áreas de incerteza com mais rapidez.",
+    "intro4": "É importante esclarecer que o TaxAiPro não é seu próprio Large Language Model. A plataforma não treina nem opera uma IA proprietária. Em vez disso, funciona como uma camada de análise e orquestração que compara resultados de vários sistemas externos de IA.",
+    "backToCrosscheck": "Voltar para Crosscheck",
+    "watchGuide": "Ver guia do produto",
+    "openGuideVideo": "Abrir vídeo guia do TaxAiPro",
+    "guideCardTitle": "Visão rápida do produto",
+    "guideCardBody": "Prefere uma explicação visual? Abra o vídeo curto para ver uma visão rápida do fluxo de trabalho e da experiência de uso do TaxAiPro.",
+    "cards": {
+      "whyTitle": "1) Por que a análise multimodelo é importante",
+      "why1": "Um único sistema de IA pode omitir ressalvas ou demonstrar confiança excessiva.",
+      "why2": "Modelos diferentes podem interpretar os mesmos fatos de maneiras diferentes.",
+      "why3": "Executar vários sistemas cria uma perspectiva analítica mais ampla.",
+      "why4": "A concordância entre modelos pode aumentar a confiança.",
+      "why5": "As divergências destacam áreas que exigem revisão profissional.",
+      "workflowTitle": "2) Fluxo de trabalho passo a passo",
+      "workflow1": "Selecione a jurisdição relevante para a questão tributária.",
+      "workflow2": "Descreva os fatos, incluindo entidades, momento e estrutura da operação.",
+      "workflow3": "Digite a pergunta tributária específica que deseja analisar.",
+      "workflow4": "Execute a análise, o que aciona vários sistemas de IA simultaneamente.",
+      "workflow5": "Revise a síntese gerada, incluindo premissas e ressalvas.",
+      "parallelTitle": "3) Análise paralela de modelos de IA",
+      "parallelBody1": "O TaxAiPro envia o prompt para múltiplos provedores externos de IA. Cada sistema gera de forma independente sua própria interpretação do tema.",
+      "parallelBody2": "O TaxAiPro não modifica essas respostas nesta primeira etapa. Os resultados são coletados e preparados para a comparação cruzada.",
+      "providers": {
+        "openai": "OpenAI",
+        "gemini": "Google Gemini",
+        "grok": "Grok",
+        "perplexity": "Perplexity",
+        "deepseek": "DeepSeek"
+      },
+      "comparisonTitle": "4) Comparação entre modelos",
+      "comparison1": "Identificar conclusões coincidentes entre os modelos.",
+      "comparison2": "Extrair ressalvas ou raciocínios condicionais.",
+      "comparison3": "Destacar divergências entre os modelos.",
+      "comparison4": "Detectar fatos faltantes mencionados por alguns sistemas.",
+      "comparison5": "Avaliar a consistência do raciocínio entre as respostas.",
+      "comparisonBody": "Essa comparação transforma várias respostas independentes em uma visão analítica estruturada do tema.",
+      "consensusTitle": "5) Síntese conservadora",
+      "consensusBody": "Depois de analisar as respostas dos modelos, o TaxAiPro gera um rascunho conservador e sintetizado.",
+      "consensus1": "Resumo da conclusão mais provável",
+      "consensus2": "Premissas que influenciam a análise",
+      "consensus3": "Ressalvas identificadas entre os modelos",
+      "consensus4": "Fatos faltantes que podem alterar a conclusão",
+      "consensus5": "Áreas em que os modelos divergem",
+      "consensus6": "Indicador de confiança baseado no alinhamento entre os modelos",
+      "toolsTitle": "6) Ferramentas de fluxo profissional",
+      "tools1": "Exportar resultados como rascunho de memorando ou email.",
+      "tools2": "Salvar execuções para revisão posterior.",
+      "tools3": "Testar cenários factuais alternativos.",
+      "tools4": "Executar perguntas adicionais com fatos complementares.",
+      "misunderstandingTitle": "Equívoco comum",
+      "misunderstanding1": "Alguns usuários assumem que o TaxAiPro é um modelo proprietário de inteligência artificial.",
+      "misunderstanding2": "Na realidade, o TaxAiPro não treina seu próprio sistema de IA nem “aprende” com as perguntas dos usuários da forma como um modelo tradicional de machine learning faria.",
+      "misunderstanding3": "Em vez disso, a plataforma funciona como um motor de análise e síntese multimodelo que compara resultados de vários sistemas externos de IA.",
+      "misunderstanding4": "Os usuários estão pagando por validação cruzada estruturada, síntese conservadora e ferramentas de fluxo desenvolvidas especificamente para profissionais tributários."
+    },
+    "footerDisclaimer": "O TaxAiPro é uma ferramenta de apoio à decisão e não fornece aconselhamento jurídico ou tributário. Sempre valide os resultados com fontes primárias e julgamento profissional."
   }
 }
