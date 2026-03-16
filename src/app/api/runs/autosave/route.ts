@@ -1,8 +1,8 @@
 // app/api/runs/autosave/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { requireSessionUser } from "../../../../src/lib/auth/session";
-import { getAdminDb } from "../../../../../lib/firebase/admin";
-import { stripe, getPriceIds } from "../../../../src/lib/stripe/server";
+import { requireSessionUser } from "../../../../lib/auth/session";
+import { getAdminDb } from "../../../../lib/firebase/admin";
+import { stripe, getPriceIds } from "../../../../lib/stripe/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
