@@ -24,7 +24,8 @@ async function extractTxt(buffer: Buffer) {
 }
 
 async function extractPdf(buffer: Buffer) {
-  const pdfParse = (await import("pdf-parse")).default;
+  const pdfParseModule = await import("pdf-parse");
+  const pdfParse = (pdfParseModule as any).default || pdfParseModule;
   const result = await pdfParse(buffer);
   return normalizeWhitespace(result.text || "");
 }
