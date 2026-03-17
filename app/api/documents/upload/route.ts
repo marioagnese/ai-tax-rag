@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import mammoth from "mammoth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,17 +24,38 @@ async function extractTxt(buffer: Buffer) {
   return normalizeWhitespace(buffer.toString("utf-8"));
 }
 
-async function extractPdf(buffer: Buffer) {
-  const pdfParseModule = await import("pdf-parse");
-  const pdfParse = (pdfParseModule as any).default || pdfParseModule;
-  const result = await pdfParse(buffer);
-  return normalizeWhitespace(result.text || "");
-}
-
 async function extractDocx(buffer: Buffer) {
-  const mammoth = await import("mammoth");
   const result = await mammoth.extractRawText({ buffer });
   return normalizeWhitespace(result.value || "");
+}
+
+async function extractPdf(buffer: Buffer) {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(buffer),
+    useWorkerFetch: false,
+    isEvalSupported: false,
+    useSystemFonts: true,
+  });
+
+  const pdf = await loadingTask.promise;
+  const pages: string[] = [];
+
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+    const page = await pdf.getPage(pageNum);
+    const content = await page.getTextContent();
+
+    const pageText = content.items
+      .map((item: any) => ("str" in item ? item.str : ""))
+      .join(" ");
+
+    if (pageText.trim()) {
+      pages.push(pageText);
+    }
+  }
+
+  return normalizeWhitespace(pages.join("\n\n"));
 }
 
 function buildSummary(text: string, filename: string) {
@@ -44,9 +66,7 @@ function buildSummary(text: string, filename: string) {
     .slice(0, 3)
     .join(" ");
 
-  if (!firstLines) {
-    return `Document uploaded: ${filename}`;
-  }
+  if (!firstLines) return `Document uploaded: ${filename}`;
 
   const short = firstLines.slice(0, 240);
   return short.length < firstLines.length ? `${short}…` : short;
@@ -58,10 +78,7 @@ export async function POST(req: Request) {
     const file = formData.get("file");
 
     if (!(file instanceof File)) {
-      return NextResponse.json(
-        { ok: false, error: "Missing file." },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: "Missing file." }, { status: 400 });
     }
 
     if (!ALLOWED_TYPES.has(file.type)) {
@@ -85,13 +102,13 @@ export async function POST(req: Request) {
 
     if (file.type === "text/plain") {
       text = await extractTxt(buffer);
-    } else if (file.type === "application/pdf") {
-      text = await extractPdf(buffer);
     } else if (
       file.type ===
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     ) {
       text = await extractDocx(buffer);
+    } else if (file.type === "application/pdf") {
+      text = await extractPdf(buffer);
     }
 
     text = truncateText(text);
