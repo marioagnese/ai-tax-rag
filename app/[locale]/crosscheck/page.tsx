@@ -39,6 +39,17 @@ type ThreadMessage = {
   text: string;
 };
 
+type AttachedDoc = {
+  id: string;
+  name: string;
+  size: number;
+  mimeType: string;
+  status: "uploading" | "processing" | "ready" | "error";
+  extractedText?: string;
+  summary?: string;
+  error?: string;
+};
+
 type SavedRun = {
   id: string;
   createdAt: number;
@@ -54,6 +65,7 @@ type SavedRun = {
   disagreements?: string[];
   confidence?: "low" | "medium" | "high";
   thread?: ThreadMessage[];
+  documents?: AttachedDoc[];
 };
 
 type DerivedConsensus = {
@@ -70,6 +82,14 @@ const LS_KEY = "taxaipro_runs_v1";
 const LS_TIER_KEY = "taxaipro_tier";
 const LS_ACTIVE_THREAD = "taxaipro_active_thread_v1";
 const LS_CORP_KEY = "taxaipro_corp_v1";
+
+const MAX_DOCS = 3;
+const MAX_DOC_SIZE_MB = 10;
+const ALLOWED_DOC_TYPES = [
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "text/plain",
+];
 
 /* ---------------- UI primitives ---------------- */
 
@@ -147,8 +167,19 @@ function formatMemo(args: {
   followups?: string[];
   disagreements?: string[];
   confidence?: string;
+  documents?: AttachedDoc[];
 }) {
-  const { jurisdiction, facts, question, answer, caveats = [], followups = [], disagreements = [], confidence } = args;
+  const {
+    jurisdiction,
+    facts,
+    question,
+    answer,
+    caveats = [],
+    followups = [],
+    disagreements = [],
+    confidence,
+    documents = [],
+  } = args;
 
   const lines: string[] = [];
   lines.push(`MEMO — TaxAiPro™ (Draft)`);
@@ -163,6 +194,12 @@ function formatMemo(args: {
   if (facts?.trim()) {
     lines.push("Key facts provided:");
     lines.push(facts.trim());
+    lines.push("");
+  }
+
+  if (documents.length) {
+    lines.push("Attached documents reviewed:");
+    documents.forEach((d) => lines.push(`- ${d.name}`));
     lines.push("");
   }
 
@@ -198,8 +235,9 @@ function formatEmail(args: {
   answer?: string;
   caveats?: string[];
   followups?: string[];
+  documents?: AttachedDoc[];
 }) {
-  const { jurisdiction, question, answer, caveats = [], followups = [] } = args;
+  const { jurisdiction, question, answer, caveats = [], followups = [], documents = [] } = args;
 
   const lines: string[] = [];
   lines.push(`Subject: Tax question follow-up${jurisdiction ? ` (${jurisdiction})` : ""}`);
@@ -210,6 +248,13 @@ function formatEmail(args: {
   lines.push("");
   lines.push(`Question: ${question.trim()}`);
   lines.push("");
+
+  if (documents.length) {
+    lines.push("Documents reviewed:");
+    documents.forEach((d) => lines.push(`• ${d.name}`));
+    lines.push("");
+  }
+
   lines.push("Answer (preliminary):");
   lines.push((answer || "—").trim());
   lines.push("");
@@ -244,6 +289,13 @@ function downloadText(filename: string, content: string) {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+function formatFileSize(bytes?: number) {
+  const n = Number(bytes || 0);
+  if (!Number.isFinite(n) || n <= 0) return "0 KB";
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /* ---------------- Parsing helpers ---------------- */
@@ -438,6 +490,25 @@ function normalizeThreadMessage(m: any): ThreadMessage | null {
   };
 }
 
+function normalizeAttachedDoc(d: any): AttachedDoc | null {
+  const name = String(d?.name ?? "").trim();
+  if (!name) return null;
+
+  return {
+    id: String(d?.id ?? crypto.randomUUID()),
+    name,
+    size: Number.isFinite(Number(d?.size)) ? Number(d.size) : 0,
+    mimeType: String(d?.mimeType ?? "application/octet-stream"),
+    status:
+      d?.status === "uploading" || d?.status === "processing" || d?.status === "ready" || d?.status === "error"
+        ? d.status
+        : "ready",
+    extractedText: d?.extractedText ? String(d.extractedText) : undefined,
+    summary: d?.summary ? String(d.summary) : undefined,
+    error: d?.error ? String(d.error) : undefined,
+  };
+}
+
 function safeParseRuns(): SavedRun[] {
   try {
     const raw = localStorage.getItem(LS_KEY);
@@ -453,6 +524,7 @@ function safeParseRuns(): SavedRun[] {
           followups?: unknown;
           disagreements?: unknown;
           thread?: unknown;
+          documents?: unknown;
         };
 
         const thread: ThreadMessage[] =
@@ -461,6 +533,13 @@ function safeParseRuns(): SavedRun[] {
                 .map(normalizeThreadMessage)
                 .filter((m): m is ThreadMessage => !!m)
                 .sort((a, b) => a.createdAt - b.createdAt)
+            : [];
+
+        const documents: AttachedDoc[] =
+          Array.isArray(r.documents) && r.documents.length
+            ? (r.documents as any[])
+                .map(normalizeAttachedDoc)
+                .filter((d): d is AttachedDoc => !!d)
             : [];
 
         return {
@@ -481,6 +560,7 @@ function safeParseRuns(): SavedRun[] {
               ? r.confidence
               : undefined,
           thread,
+          documents,
         };
       })
       .sort((a, b) => b.createdAt - a.createdAt);
@@ -698,6 +778,8 @@ export default function CrosscheckPage() {
   );
   const [runOverrides, setRunOverrides] = useState("");
   const [question, setQuestion] = useState("");
+  const [attachedDocs, setAttachedDocs] = useState<AttachedDoc[]>([]);
+  const [docUploadError, setDocUploadError] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [resp, setResp] = useState<CrosscheckResponse | null>(null);
@@ -733,6 +815,7 @@ export default function CrosscheckPage() {
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
 
   const runFnRef = useRef<() => void>(() => {});
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   function setTierLocal(next: Tier) {
     try {
@@ -898,18 +981,32 @@ export default function CrosscheckPage() {
       followups: derivedConsensus.followups || [],
       disagreements: derivedConsensus.disagreements || [],
       confidence: derivedConsensus.confidence,
+      documents: attachedDocs.filter((d) => d.status === "ready"),
     };
 
     if (outputStyle === "memo") return formatMemo(base);
     if (outputStyle === "email") return formatEmail(base);
     return (derivedConsensus.answer || tm("crosscheck.output.placeholder", "Your answer will appear here.")).trim();
-  }, [outputStyle, derivedConsensus, jurisdiction, facts, effectiveQuestionForOutput, tm]);
+  }, [outputStyle, derivedConsensus, jurisdiction, facts, effectiveQuestionForOutput, attachedDocs, tm]);
 
   function upsertLocalRun(run: SavedRun) {
     const next = [run, ...history.filter((h) => h.id !== run.id)].slice(0, 50);
     setHistory(next);
     persistRuns(next);
     setSelectedId(run.id);
+  }
+
+  function buildDocumentPayload() {
+    return attachedDocs
+      .filter((d) => d.status === "ready" && d.extractedText?.trim())
+      .map((d) => ({
+        id: d.id,
+        name: d.name,
+        size: d.size,
+        mimeType: d.mimeType,
+        extractedText: d.extractedText || "",
+        summary: d.summary,
+      }));
   }
 
   async function autosaveRun(args: {
@@ -941,6 +1038,7 @@ export default function CrosscheckPage() {
       disagreements: derivedConsensus.disagreements || [],
       confidence: derivedConsensus.confidence,
       thread: args.thread,
+      documents: buildDocumentPayload(),
     };
 
     try {
@@ -978,6 +1076,7 @@ export default function CrosscheckPage() {
         disagreements: derivedConsensus.disagreements || [],
         confidence: derivedConsensus.confidence,
         thread: args.thread,
+        documents: attachedDocs,
       });
     } catch (e: any) {
       setAutosaveState("error");
@@ -993,6 +1092,8 @@ export default function CrosscheckPage() {
     setGlobalDefaults(r.globalDefaults || globalDefaults);
     setRunOverrides(r.runOverrides || "");
     setQuestion(r.question || "");
+    setAttachedDocs(Array.isArray(r.documents) ? r.documents : []);
+    setDocUploadError(null);
 
     const restoredThread =
       r.thread && r.thread.length
@@ -1061,6 +1162,8 @@ export default function CrosscheckPage() {
     setCurrentRunId(null);
     setAutosaveState("idle");
     setAutosaveMessage("");
+    setAttachedDocs([]);
+    setDocUploadError(null);
   }
 
   function updateRateFromHeaders(h: Headers) {
@@ -1114,6 +1217,114 @@ export default function CrosscheckPage() {
     }
   }
 
+  async function uploadFiles(files: FileList | File[]) {
+    const items = Array.from(files || []);
+    if (!items.length) return;
+
+    setDocUploadError(null);
+
+    const remainingSlots = MAX_DOCS - attachedDocs.length;
+    if (remainingSlots <= 0) {
+      setDocUploadError(tm("crosscheck.documents.maxReached", `You can attach up to ${MAX_DOCS} documents.`));
+      return;
+    }
+
+    const selected = items.slice(0, remainingSlots);
+
+    for (const file of selected) {
+      const tooLarge = file.size > MAX_DOC_SIZE_MB * 1024 * 1024;
+      const invalidType = !ALLOWED_DOC_TYPES.includes(file.type);
+
+      if (tooLarge) {
+        setDocUploadError(
+          tm("crosscheck.documents.fileTooLarge", `File too large. Maximum size is ${MAX_DOC_SIZE_MB} MB.`)
+        );
+        continue;
+      }
+
+      if (invalidType) {
+        setDocUploadError(
+          tm("crosscheck.documents.unsupportedType", "Unsupported file type. Use PDF, DOCX, or TXT.")
+        );
+        continue;
+      }
+
+      const tempId = crypto.randomUUID();
+
+      setAttachedDocs((prev) => [
+        ...prev,
+        {
+          id: tempId,
+          name: file.name,
+          size: file.size,
+          mimeType: file.type,
+          status: "uploading",
+        },
+      ]);
+
+      try {
+        const form = new FormData();
+        form.append("file", file);
+
+        setAttachedDocs((prev) =>
+          prev.map((d) => (d.id === tempId ? { ...d, status: "processing" } : d))
+        );
+
+        const r = await fetch("/api/documents/upload", {
+          method: "POST",
+          body: form,
+        });
+
+        const j = (await r.json().catch(() => null)) as any;
+
+        if (!r.ok || !j?.ok || !j?.document) {
+          setAttachedDocs((prev) =>
+            prev.map((d) =>
+              d.id === tempId
+                ? {
+                    ...d,
+                    status: "error",
+                    error: j?.error || tm("crosscheck.documents.uploadFailed", "Document upload failed."),
+                  }
+                : d
+            )
+          );
+          continue;
+        }
+
+        const doc = j.document;
+
+        setAttachedDocs((prev) =>
+          prev.map((d) =>
+            d.id === tempId
+              ? {
+                  id: String(doc.id || tempId),
+                  name: String(doc.name || file.name),
+                  size: Number.isFinite(Number(doc.size)) ? Number(doc.size) : file.size,
+                  mimeType: String(doc.mimeType || file.type),
+                  status: "ready",
+                  extractedText: String(doc.text || doc.extractedText || ""),
+                  summary: doc.summary ? String(doc.summary) : undefined,
+                }
+              : d
+          )
+        );
+      } catch (e: any) {
+        setAttachedDocs((prev) =>
+          prev.map((d) =>
+            d.id === tempId
+              ? {
+                  ...d,
+                  status: "error",
+                  error: e?.message || tm("crosscheck.documents.uploadFailed", "Document upload failed."),
+                }
+              : d
+          )
+        );
+      }
+    }
+  }
+
   async function run() {
     setError(null);
     setResp(null);
@@ -1141,6 +1352,7 @@ export default function CrosscheckPage() {
           facts: facts.trim() || undefined,
           constraints,
           question: q,
+          documents: buildDocumentPayload(),
         }),
       });
 
@@ -1233,6 +1445,7 @@ export default function CrosscheckPage() {
           facts: facts.trim() || undefined,
           constraints,
           question: composite,
+          documents: buildDocumentPayload(),
         }),
       });
 
@@ -1325,9 +1538,10 @@ export default function CrosscheckPage() {
       runOverrides.trim() ||
       followUp.trim() ||
       thread.length ||
-      derivedConsensus.answer.trim()
+      derivedConsensus.answer.trim() ||
+      attachedDocs.length
     );
-  }, [question, facts, runOverrides, followUp, thread.length, derivedConsensus.answer]);
+  }, [question, facts, runOverrides, followUp, thread.length, derivedConsensus.answer, attachedDocs.length]);
 
   const runsLeft = typeof rate.remaining === "number" ? (rate.remaining === -1 ? "∞" : String(rate.remaining)) : null;
   const resetLocal = formatResetLocal(rate.resetAt);
@@ -1402,6 +1616,8 @@ export default function CrosscheckPage() {
     setCurrentRunId(null);
     setAutosaveState("idle");
     setAutosaveMessage("");
+    setAttachedDocs([]);
+    setDocUploadError(null);
     setExamplesOpen(false);
   }
 
@@ -1684,6 +1900,125 @@ export default function CrosscheckPage() {
                       </button>
                     </div>
                   </details>
+                </Card>
+
+                <Card className="p-5">
+                  <SectionTitle
+                    title={tm("crosscheck.documents.title", "Attach documents")}
+                    subtitle={tm(
+                      "crosscheck.documents.subtitle",
+                      "Add up to 3 PDF, DOCX, or TXT files to this case."
+                    )}
+                    right={<Pill>{tm("crosscheck.common.optional", "Optional")}</Pill>}
+                  />
+
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      const files = e.target.files;
+                      if (files?.length) uploadFiles(files);
+                      e.currentTarget.value = "";
+                    }}
+                  />
+
+                  <div className="mt-4 rounded-2xl border border-dashed border-white/15 bg-black/20 p-4">
+                    <div className="text-sm text-white/80">
+                      {tm(
+                        "crosscheck.documents.help",
+                        "Use documents as supplemental context for the current run and follow-ups."
+                      )}
+                    </div>
+                    <div className="mt-2 text-[11px] text-white/45">
+                      {tm(
+                        "crosscheck.documents.guardrail",
+                        "Do not upload SSNs, bank numbers, or highly sensitive client data."
+                      )}
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={attachedDocs.length >= MAX_DOCS}
+                        className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10 disabled:opacity-40"
+                      >
+                        {tm("crosscheck.documents.add", "Add documents")}
+                      </button>
+                      <div className="text-[11px] text-white/45">
+                        {attachedDocs.length}/{MAX_DOCS} · {tm("crosscheck.documents.supported", "PDF / DOCX / TXT")} ·{" "}
+                        {MAX_DOC_SIZE_MB}MB max
+                      </div>
+                    </div>
+
+                    {docUploadError ? (
+                      <div className="mt-3 rounded-xl border border-red-500/25 bg-red-500/10 p-3 text-xs text-red-100">
+                        {docUploadError}
+                      </div>
+                    ) : null}
+
+                    <div className="mt-4 space-y-2">
+                      {attachedDocs.length ? (
+                        attachedDocs.map((doc) => (
+                          <div
+                            key={doc.id}
+                            className="rounded-xl border border-white/10 bg-black/25 p-3"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="truncate text-xs font-semibold text-white/85">{doc.name}</div>
+                                <div className="mt-1 text-[11px] text-white/45">
+                                  {formatFileSize(doc.size)} · {doc.mimeType}
+                                </div>
+                                <div className="mt-2">
+                                  <Pill
+                                    tone={
+                                      doc.status === "ready"
+                                        ? "good"
+                                        : doc.status === "error"
+                                        ? "bad"
+                                        : "warn"
+                                    }
+                                  >
+                                    {doc.status === "uploading"
+                                      ? tm("crosscheck.documents.statusUploading", "Uploading")
+                                      : doc.status === "processing"
+                                      ? tm("crosscheck.documents.statusProcessing", "Processing")
+                                      : doc.status === "ready"
+                                      ? tm("crosscheck.documents.statusReady", "Ready")
+                                      : tm("crosscheck.documents.statusError", "Error")}
+                                  </Pill>
+                                </div>
+                                {doc.error ? (
+                                  <div className="mt-2 text-[11px] text-red-200">{doc.error}</div>
+                                ) : null}
+                                {doc.summary ? (
+                                  <div className="mt-2 text-[11px] text-white/55">{doc.summary}</div>
+                                ) : null}
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setAttachedDocs((prev) => prev.filter((d) => d.id !== doc.id))
+                                }
+                                className="rounded-xl border border-white/15 bg-white/5 px-2.5 py-1.5 text-[11px] text-white/75 hover:bg-white/10"
+                              >
+                                {tm("crosscheck.documents.remove", "Remove")}
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-[11px] text-white/45">
+                          {tm("crosscheck.documents.empty", "No documents attached yet.")}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </Card>
               </div>
 
@@ -2417,6 +2752,7 @@ export default function CrosscheckPage() {
                                 Math.floor(h.thread.length / 2)
                               )}`
                             : ""}
+                          {h.documents?.length ? ` · Docs: ${h.documents.length}` : ""}
                         </div>
                       </button>
 
