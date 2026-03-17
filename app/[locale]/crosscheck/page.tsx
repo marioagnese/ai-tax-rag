@@ -86,7 +86,6 @@ const LS_CORP_KEY = "taxaipro_corp_v1";
 const MAX_DOCS = 3;
 const MAX_DOC_SIZE_MB = 10;
 const ALLOWED_DOC_TYPES = [
-  "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "text/plain",
 ];
@@ -1244,7 +1243,7 @@ export default function CrosscheckPage() {
 
       if (invalidType) {
         setDocUploadError(
-          tm("crosscheck.documents.unsupportedType", "Unsupported file type. Use PDF, DOCX, or TXT.")
+          tm("crosscheck.documents.unsupportedType", "Unsupported file type. Use DOCX or TXT.")
         );
         continue;
       }
@@ -1907,7 +1906,7 @@ export default function CrosscheckPage() {
                     title={tm("crosscheck.documents.title", "Attach documents")}
                     subtitle={tm(
                       "crosscheck.documents.subtitle",
-                      "Add up to 3 PDF, DOCX, or TXT files to this case."
+                      "Add up to 3 DOCX or TXT files to this case."
                     )}
                     right={<Pill>{tm("crosscheck.common.optional", "Optional")}</Pill>}
                   />
@@ -1915,7 +1914,7 @@ export default function CrosscheckPage() {
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                    accept=".docx,.txt,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
                     multiple
                     className="hidden"
                     onChange={(e) => {
@@ -1949,7 +1948,7 @@ export default function CrosscheckPage() {
                         {tm("crosscheck.documents.add", "Add documents")}
                       </button>
                       <div className="text-[11px] text-white/45">
-                        {attachedDocs.length}/{MAX_DOCS} · {tm("crosscheck.documents.supported", "PDF / DOCX / TXT")} ·{" "}
+                        {attachedDocs.length}/{MAX_DOCS} · {tm("crosscheck.documents.supported", "DOCX / TXT")} ·{" "}
                         {MAX_DOC_SIZE_MB}MB max
                       </div>
                     </div>
