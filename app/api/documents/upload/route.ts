@@ -6,7 +6,6 @@ export const dynamic = "force-dynamic";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 const ALLOWED_TYPES = new Set([
-  "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "text/plain",
 ]);
@@ -27,35 +26,6 @@ async function extractTxt(buffer: Buffer) {
 async function extractDocx(buffer: Buffer) {
   const result = await mammoth.extractRawText({ buffer });
   return normalizeWhitespace(result.value || "");
-}
-
-async function extractPdf(buffer: Buffer) {
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-
-  const loadingTask = pdfjs.getDocument({
-    data: new Uint8Array(buffer),
-    useWorkerFetch: false,
-    isEvalSupported: false,
-    useSystemFonts: true,
-  });
-
-  const pdf = await loadingTask.promise;
-  const pages: string[] = [];
-
-  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-    const page = await pdf.getPage(pageNum);
-    const content = await page.getTextContent();
-
-    const pageText = content.items
-      .map((item: any) => ("str" in item ? item.str : ""))
-      .join(" ");
-
-    if (pageText.trim()) {
-      pages.push(pageText);
-    }
-  }
-
-  return normalizeWhitespace(pages.join("\n\n"));
 }
 
 function buildSummary(text: string, filename: string) {
@@ -81,9 +51,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Missing file." }, { status: 400 });
     }
 
+    if (file.type === "application/pdf") {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "PDF support is temporarily disabled while the parser is being stabilized. Please use DOCX or TXT for now."
+        },
+        { status: 400 }
+      );
+    }
+
     if (!ALLOWED_TYPES.has(file.type)) {
       return NextResponse.json(
-        { ok: false, error: "Unsupported file type. Use PDF, DOCX, or TXT." },
+        { ok: false, error: "Unsupported file type. Use DOCX or TXT." },
         { status: 400 }
       );
     }
@@ -107,8 +87,6 @@ export async function POST(req: Request) {
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     ) {
       text = await extractDocx(buffer);
-    } else if (file.type === "application/pdf") {
-      text = await extractPdf(buffer);
     }
 
     text = truncateText(text);
@@ -135,10 +113,7 @@ export async function POST(req: Request) {
     });
   } catch (error: any) {
     return NextResponse.json(
-      {
-        ok: false,
-        error: error?.message || "Document upload failed.",
-      },
+      { ok: false, error: error?.message || "Document upload failed." },
       { status: 500 }
     );
   }
