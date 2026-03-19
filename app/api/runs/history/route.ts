@@ -18,18 +18,22 @@ type AttachedDoc = {
   name: string;
   size: number;
   mimeType: string;
+  status: "uploading" | "processing" | "ready" | "error";
   extractedText?: string;
   summary?: string;
+  error?: string;
 };
 
-type AutosaveBody = {
-  runId?: string;
-  title?: string;
+type SavedRun = {
+  id: string;
+  createdAt: number;
+  updatedAt?: number;
+  title: string;
   jurisdiction?: string;
   facts?: string;
   globalDefaults?: string;
   runOverrides?: string;
-  question?: string;
+  question: string;
   answer?: string;
   caveats?: string[];
   followups?: string[];
@@ -65,7 +69,8 @@ function normalizeThread(value: unknown): ThreadMessage[] {
       if (!item || typeof item !== "object") return null;
 
       const role = (item as any).role === "assistant" ? "assistant" : "user";
-      const text = typeof (item as any).text === "string" ? (item as any).text.trim() : "";
+      const text =
+        typeof (item as any).text === "string" ? (item as any).text.trim() : "";
       if (!text) return null;
 
       const id =
@@ -97,36 +102,42 @@ function normalizeDocuments(value: unknown): AttachedDoc[] {
     if (!item || typeof item !== "object") continue;
 
     const name = normalizeString((item as any).name);
-    const mimeType = normalizeString((item as any).mimeType);
-    if (!name || !mimeType) continue;
+    if (!name) continue;
+
+    const status =
+      (item as any).status === "uploading" ||
+      (item as any).status === "processing" ||
+      (item as any).status === "ready" ||
+      (item as any).status === "error"
+        ? ((item as any).status as AttachedDoc["status"])
+        : "ready";
 
     const id =
       typeof (item as any).id === "string" && (item as any).id.trim()
         ? (item as any).id.trim()
         : crypto.randomUUID();
 
-    const sizeRaw = Number((item as any).size);
-    const size = Number.isFinite(sizeRaw) && sizeRaw >= 0 ? sizeRaw : 0;
+    const mimeType =
+      typeof (item as any).mimeType === "string" && (item as any).mimeType.trim()
+        ? (item as any).mimeType.trim()
+        : "application/octet-stream";
 
-    const extractedText = normalizeString((item as any).extractedText);
-    const summary = normalizeString((item as any).summary);
+    const sizeRaw = Number((item as any).size);
+    const size = Number.isFinite(sizeRaw) ? sizeRaw : 0;
 
     out.push({
       id,
       name,
       size,
       mimeType,
-      extractedText,
-      summary,
+      status,
+      extractedText: normalizeString((item as any).extractedText),
+      summary: normalizeString((item as any).summary),
+      error: normalizeString((item as any).error),
     });
   }
 
   return out.slice(0, 10);
-}
-
-function clampTitleFromQuestion(q?: string) {
-  const value = (q || "").trim().replace(/\s+/g, " ");
-  return value.slice(0, 60) || "Untitled";
 }
 
 async function resolveTierForUserEmail(email: string | undefined): Promise<"0" | "1" | "2"> {
@@ -168,84 +179,81 @@ async function resolveTierForUserEmail(email: string | undefined): Promise<"0" |
   return best;
 }
 
-export async function POST(req: NextRequest) {
+function mapRunDoc(data: Record<string, unknown>, fallbackId: string): SavedRun {
+  const createdAtRaw = Number(data.createdAt);
+  const updatedAtRaw = Number(data.updatedAt);
+
+  return {
+    id: normalizeString(data.id) || fallbackId,
+    createdAt: Number.isFinite(createdAtRaw) ? createdAtRaw : Date.now(),
+    updatedAt: Number.isFinite(updatedAtRaw) ? updatedAtRaw : undefined,
+    title: normalizeString(data.title) || "Untitled",
+    jurisdiction: normalizeString(data.jurisdiction),
+    facts: normalizeString(data.facts),
+    globalDefaults: normalizeString(data.globalDefaults),
+    runOverrides: normalizeString(data.runOverrides),
+    question: normalizeString(data.question) || "",
+    answer: normalizeString(data.answer),
+    caveats: normalizeStringArray(data.caveats),
+    followups: normalizeStringArray(data.followups),
+    disagreements: normalizeStringArray(data.disagreements),
+    confidence: normalizeConfidence(data.confidence),
+    thread: normalizeThread(data.thread),
+    documents: normalizeDocuments(data.documents),
+  };
+}
+
+export async function GET(req: NextRequest) {
   try {
     const user = await requireSessionUser();
     const tier = await resolveTierForUserEmail(user.email);
 
     if (tier === "0") {
       return NextResponse.json(
-        { ok: false, error: "Permanent autosave is not available on the free tier." },
-        { status: 403 }
+        {
+          ok: true,
+          tier,
+          runs: [],
+          source: "backend",
+          message: "Permanent history is not available on the free tier.",
+        },
+        { status: 200 }
       );
     }
 
-    const raw = (await req.json().catch(() => ({}))) as AutosaveBody;
-
-    const question = normalizeString(raw.question);
-    const answer = normalizeString(raw.answer);
-
-    if (!question || !answer) {
-      return NextResponse.json(
-        { ok: false, error: "Missing required fields: question and answer." },
-        { status: 400 }
-      );
-    }
-
-    const runId = normalizeString(raw.runId) || crypto.randomUUID();
-    const title = normalizeString(raw.title) || clampTitleFromQuestion(question);
-    const jurisdiction = normalizeString(raw.jurisdiction);
-    const facts = normalizeString(raw.facts);
-    const globalDefaults = normalizeString(raw.globalDefaults);
-    const runOverrides = normalizeString(raw.runOverrides);
-    const caveats = normalizeStringArray(raw.caveats);
-    const followups = normalizeStringArray(raw.followups);
-    const disagreements = normalizeStringArray(raw.disagreements);
-    const confidence = normalizeConfidence(raw.confidence);
-    const thread = normalizeThread(raw.thread);
-    const documents = normalizeDocuments(raw.documents);
+    const { searchParams } = new URL(req.url);
+    const limitRaw = Number(searchParams.get("limit"));
+    const limit =
+      Number.isFinite(limitRaw) && limitRaw > 0
+        ? Math.min(Math.floor(limitRaw), 100)
+        : 50;
 
     const db = getAdminDb();
-    const now = Date.now();
 
-    const docRef = db.collection("users").doc(user.uid).collection("runs").doc(runId);
+    const snap = await db
+      .collection("users")
+      .doc(user.uid)
+      .collection("runs")
+      .orderBy("updatedAt", "desc")
+      .limit(limit)
+      .get();
 
-    const existing = await docRef.get();
-    const createdAt = existing.exists ? Number(existing.get("createdAt")) || now : now;
-
-    const payload = {
-      id: runId,
-      uid: user.uid,
-      email: user.email || null,
-      title,
-      jurisdiction: jurisdiction || null,
-      facts: facts || null,
-      globalDefaults: globalDefaults || null,
-      runOverrides: runOverrides || null,
-      question,
-      answer,
-      caveats,
-      followups,
-      disagreements,
-      confidence: confidence || null,
-      thread,
-      documents,
-      tier,
-      createdAt,
-      updatedAt: now,
-    };
-
-    await docRef.set(payload, { merge: true });
+    const runs: SavedRun[] = snap.docs.map((doc) =>
+      mapRunDoc((doc.data() || {}) as Record<string, unknown>, doc.id)
+    );
 
     return NextResponse.json({
       ok: true,
-      runId,
-      savedAt: now,
       tier,
+      runs,
+      source: "backend",
     });
   } catch (err: any) {
     if (err?.message === "UNAUTHORIZED") {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { ok: false, error: "Unauthorized" },
+        { status: 401 }
+      );
     }
 
     return NextResponse.json(

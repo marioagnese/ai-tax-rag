@@ -1,4 +1,3 @@
-// src/core/crosscheck/orchestrator.ts
 import type {
   CrosscheckInput,
   CrosscheckResult,
@@ -11,12 +10,6 @@ import OpenAI from "openai";
 
 function env(name: string): string {
   return process.env[name] || "";
-}
-
-function requireEnv(name: string) {
-  const v = env(name);
-  if (!v) throw new Error(`Missing env var: ${name}`);
-  return v;
 }
 
 function uniq(xs: string[]) {
@@ -38,14 +31,12 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 function defaultOpenRouterModels(): string[] {
-  // Example: OPENROUTER_MODELS="anthropic/claude-3.5-sonnet,deepseek/deepseek-chat,x-ai/grok-4.1-fast"
   const raw = env("OPENROUTER_MODELS") || env("OPENROUTER_MODEL");
   const models = (raw || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
 
-  // Keep a conservative, stable default
   return models.length ? models : ["anthropic/claude-3.5-sonnet"];
 }
 
@@ -55,16 +46,34 @@ function pickBest(outputs: ProviderOutput[]): ProviderOutput | null {
   );
   if (!ok.length) return null;
 
-  // crude scoring: longer + fewer obvious refusal/error words
   const scored = ok.map((o) => {
     const text = (o.text || "").toLowerCase();
-    const bad = ["i don't know", "cannot", "unable", "no information"].some((k) =>
+
+    const refusalPenalty = ["i don't know", "cannot", "unable", "no information"].some((k) =>
       text.includes(k)
     )
       ? 1
       : 0;
+
+    const weakLanguagePenalty = ["may vary", "depends", "consult a professional"].filter((k) =>
+      text.includes(k)
+    ).length;
+
+    const usefulSignals =
+      [
+        "however",
+        "but",
+        "title",
+        "risk",
+        "depends on contract",
+        "missing facts",
+        "caveat",
+        "assumption",
+      ].filter((k) => text.includes(k)).length * 80;
+
     const len = (o.text || "").length;
-    const score = len - bad * 400;
+    const score = len + usefulSignals - refusalPenalty * 500 - weakLanguagePenalty * 80;
+
     return { o, score };
   });
 
@@ -80,18 +89,13 @@ function safeJsonParse<T>(s: string): T | null {
   }
 }
 
-/**
- * Many models wrap JSON in ```json ... ``` fences. Strip those safely.
- */
 function extractJsonObject(raw: string): string {
   const s = (raw || "").trim();
   if (!s) return "{}";
 
-  // fenced block
   const fence = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   if (fence?.[1]) return fence[1].trim();
 
-  // try to pull the first {...} block
   const firstBrace = s.indexOf("{");
   const lastBrace = s.lastIndexOf("}");
   if (firstBrace >= 0 && lastBrace > firstBrace) {
@@ -101,18 +105,76 @@ function extractJsonObject(raw: string): string {
   return s;
 }
 
-function normalizeConsensus(parsed: any) {
-  const answer = String(parsed?.answer || "").trim();
+type SynthJson = {
+  bottom_line?: string;
+  common_ground?: string[];
+  material_nuances?: string[];
+  differences_in_emphasis?: string[];
+  conservative_recommendation?: string;
+  missing_facts?: string[];
+  caveats?: string[];
+  disagreements?: string[];
+  confidence?: "low" | "medium" | "high" | string;
+};
 
-  const caveats = Array.isArray(parsed?.caveats)
-    ? parsed.caveats.map(String)
-    : [];
-  const followups = Array.isArray(parsed?.followups)
-    ? parsed.followups.map(String)
-    : [];
-  const disagreements = Array.isArray(parsed?.disagreements)
-    ? parsed.disagreements.map(String)
-    : [];
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return uniq(value.map(String));
+}
+
+function buildStructuredAnswer(parsed: SynthJson): string {
+  const bottomLine = String(parsed?.bottom_line || "").trim();
+  const commonGround = normalizeStringArray(parsed?.common_ground);
+  const materialNuances = normalizeStringArray(parsed?.material_nuances);
+  const differences = normalizeStringArray(parsed?.differences_in_emphasis);
+  const recommendation = String(parsed?.conservative_recommendation || "").trim();
+  const missingFacts = normalizeStringArray(parsed?.missing_facts);
+
+  const lines: string[] = [];
+
+  if (bottomLine) {
+    lines.push(bottomLine);
+  }
+
+  if (commonGround.length) {
+    lines.push("");
+    lines.push("Common ground:");
+    commonGround.forEach((x) => lines.push(`- ${x}`));
+  }
+
+  if (materialNuances.length) {
+    lines.push("");
+    lines.push("Material nuances:");
+    materialNuances.forEach((x) => lines.push(`- ${x}`));
+  }
+
+  if (differences.length) {
+    lines.push("");
+    lines.push("Differences in emphasis:");
+    differences.forEach((x) => lines.push(`- ${x}`));
+  }
+
+  if (recommendation) {
+    lines.push("");
+    lines.push("Conservative recommendation:");
+    lines.push(recommendation);
+  }
+
+  if (missingFacts.length) {
+    lines.push("");
+    lines.push("Missing facts / follow-ups needed:");
+    missingFacts.forEach((x) => lines.push(`- ${x}`));
+  }
+
+  return lines.join("\n").trim();
+}
+
+function normalizeConsensus(parsed: any) {
+  const caveats = normalizeStringArray(parsed?.caveats);
+  const followups = normalizeStringArray(parsed?.missing_facts ?? parsed?.followups);
+  const differences = normalizeStringArray(parsed?.differences_in_emphasis);
+  const disagreementsRaw = normalizeStringArray(parsed?.disagreements);
+  const materialNuances = normalizeStringArray(parsed?.material_nuances);
 
   const confidenceRaw = String(parsed?.confidence || "").toLowerCase();
   const confidence =
@@ -120,11 +182,21 @@ function normalizeConsensus(parsed: any) {
       ? (confidenceRaw as "low" | "medium" | "high")
       : "low";
 
+  const answer =
+    buildStructuredAnswer(parsed) ||
+    String(parsed?.answer || "").trim();
+
+  const disagreements = uniq([
+    ...differences,
+    ...disagreementsRaw,
+    ...materialNuances.filter((x) => /^minority view:/i.test(x) || /^one model/i.test(x)),
+  ]);
+
   return {
     answer,
-    caveats: uniq(caveats),
-    followups: uniq(followups),
-    disagreements: uniq(disagreements),
+    caveats,
+    followups,
+    disagreements,
     confidence,
   };
 }
@@ -139,24 +211,36 @@ function classifyProviderError(e: any): { status: "timeout" | "error"; error: st
   return { status, error: msg };
 }
 
+function packProviderOutputs(outputs: ProviderOutput[]): string {
+  return outputs
+    .map((o) => {
+      const head = `=== PROVIDER ${o.provider} (${o.model}) status=${o.status} ===`;
+      const body = (o.text || o.error || "").slice(0, 12000);
+      return `${head}\n${body}`;
+    })
+    .join("\n\n");
+}
+
 async function synthesizeWithOpenAI(
   input: CrosscheckInput,
   outputs: ProviderOutput[]
 ) {
-  // If no OpenAI key, degrade gracefully: synthesize from best provider.
   const apiKey = env("OPENAI_API_KEY");
+
   if (!apiKey) {
     const best = pickBest(outputs);
     return normalizeConsensus({
-      answer: best?.text || "",
+      bottom_line: best?.text || "",
+      common_ground: [],
+      material_nuances: [
+        "Synthesis model unavailable (missing OPENAI_API_KEY). Returned best single-provider output only.",
+      ],
+      differences_in_emphasis: [],
+      conservative_recommendation: "",
+      missing_facts: [],
       caveats: best?.text
-        ? [
-            "Synthesis model unavailable (missing OPENAI_API_KEY). Returned best single-provider output.",
-          ]
-        : [
-            "Synthesis model unavailable (missing OPENAI_API_KEY). No successful provider output.",
-          ],
-      followups: [],
+        ? ["Synthesis model unavailable; this is not a true adjudicated consensus."]
+        : ["Synthesis model unavailable and no successful provider output was available."],
       disagreements: [],
       confidence: "low",
     });
@@ -166,22 +250,41 @@ async function synthesizeWithOpenAI(
     env("OPENAI_SYNTH_MODEL") || env("OPENAI_MODEL") || "gpt-4.1-mini";
   const client = new OpenAI({ apiKey });
 
-  const packed = outputs
-    .map((o) => {
-      const head = `=== PROVIDER ${o.provider} (${o.model}) status=${o.status} ===`;
-      const body = (o.text || o.error || "").slice(0, 12000);
-      return `${head}\n${body}`;
-    })
-    .join("\n\n");
+  const packed = packProviderOutputs(outputs);
 
   const sys = [
-    "You are the Crosscheck Orchestrator for a tax AI product.",
-    "Your job: synthesize a conservative consensus answer from multiple model outputs.",
-    "Do NOT invent citations. If you reference an authority, name it only if it was mentioned by providers or is truly standard/common doctrine.",
-    "Be explicit about assumptions, caveats, and missing facts needed to confirm.",
-    "If providers disagree, summarize the disagreement in plain language.",
-    "Return STRICT JSON ONLY with keys: answer, caveats, followups, disagreements, confidence.",
-    "caveats/followups/disagreements must be arrays of strings. confidence must be one of: low, medium, high.",
+    "You are the Crosscheck Orchestrator for a tax analysis platform.",
+    "Your role is NOT to produce a generic summary.",
+    "Your role is to adjudicate multiple model answers like a conservative senior tax professional.",
+    "",
+    "Decision rules:",
+    "1. Distinguish common ground from legally material nuance.",
+    "2. If only one or two models raise an important legal distinction, do NOT discard it merely because it is a minority view.",
+    "3. A narrower but more legally precise distinction can outweigh broader generic consensus.",
+    "4. Treat differences in emphasis as meaningful, even if there is no direct contradiction.",
+    "5. Prioritize legal precision, assumptions, contract-dependence, and missing facts over fluency.",
+    "6. Do not invent authority or citations.",
+    "7. Be conservative and explicit about uncertainty.",
+    "",
+    "Return STRICT JSON ONLY with these exact keys:",
+    "{",
+    '  "bottom_line": string,',
+    '  "common_ground": string[],',
+    '  "material_nuances": string[],',
+    '  "differences_in_emphasis": string[],',
+    '  "conservative_recommendation": string,',
+    '  "missing_facts": string[],',
+    '  "caveats": string[],',
+    '  "disagreements": string[],',
+    '  "confidence": "low" | "medium" | "high"',
+    "}",
+    "",
+    "Important:",
+    "- 'material_nuances' should include minority-but-important legal distinctions.",
+    "- 'differences_in_emphasis' should capture meaningful differences even without direct contradiction.",
+    "- 'disagreements' should be reserved for actual competing conclusions or materially different legal framing.",
+    "- 'bottom_line' must be concise and conservative.",
+    "- 'conservative_recommendation' should tell the user what to do next before relying on the conclusion.",
   ].join("\n");
 
   const user = [
@@ -190,14 +293,13 @@ async function synthesizeWithOpenAI(
     input.facts ? `Facts:\n${input.facts}` : "",
     `Question:\n${input.question}`,
     "",
-    "Provider outputs:",
+    "Provider outputs to adjudicate:",
     packed,
   ]
     .filter(Boolean)
     .join("\n\n");
 
-  // Keep synth reasonably bounded
-  const max_tokens = clampInt((input as any)?.maxTokens, 256, 1200, 900);
+  const max_tokens = clampInt((input as any)?.maxTokens, 400, 1800, 1200);
 
   const resp = await client.chat.completions.create({
     model,
@@ -211,14 +313,17 @@ async function synthesizeWithOpenAI(
 
   const raw = resp.choices?.[0]?.message?.content || "{}";
   const extracted = extractJsonObject(raw);
-  const parsed = safeJsonParse<any>(extracted);
+  const parsed = safeJsonParse<SynthJson>(extracted);
 
   if (!parsed) {
-    // fallback: keep raw in answer
     return normalizeConsensus({
-      answer: raw,
-      caveats: ["Synthesis did not return valid JSON; returning raw output."],
-      followups: [],
+      bottom_line: raw,
+      common_ground: [],
+      material_nuances: ["Synthesis did not return valid JSON; raw synthesis output returned."],
+      differences_in_emphasis: [],
+      conservative_recommendation: "",
+      missing_facts: [],
+      caveats: ["Synthesis output format was invalid."],
       disagreements: [],
       confidence: "low",
     });
@@ -237,8 +342,6 @@ export async function runCrosscheck(
   const attempted: ProviderCall[] = [];
   const tasks: Array<Promise<ProviderOutput>> = [];
 
-  // We need to preserve provider/model labeling even when a task errors.
-  // Wrap each call so we always return a ProviderOutput tagged correctly.
   const wrap = (
     call: ProviderCall,
     fn: () => Promise<ProviderOutput>
@@ -256,17 +359,11 @@ export async function runCrosscheck(
     });
   };
 
-  // OpenAI provider call (if configured, callOpenAI should handle missing key gracefully,
-  // but we still attempt so meta shows it)
   const openaiModel = env("OPENAI_MODEL") || "gpt-4.1-mini";
   tasks.push(
     wrap({ provider: "openai", model: openaiModel }, () => callOpenAI(input))
   );
 
-  // NOTE: Gemini disabled for now to stabilize deployment.
-  // Re-enable later behind a GEMINI_ENABLED flag once provider is stable.
-
-  // OpenRouter fan-out
   for (const m of defaultOpenRouterModels()) {
     tasks.push(
       wrap({ provider: "openrouter", model: m }, () => callOpenRouter(input, m))
@@ -277,6 +374,7 @@ export async function runCrosscheck(
 
   const succeededCalls: ProviderCall[] = [];
   const failedCalls: ProviderCall[] = [];
+
   for (const p of providers) {
     const call = summarizeProviderForMeta(p);
     if (p.status === "ok") succeededCalls.push(call);
@@ -285,8 +383,8 @@ export async function runCrosscheck(
 
   const synth = await synthesizeWithOpenAI(input, providers);
 
-  // Degrade gracefully if synth came back empty
   const best = pickBest(providers);
+
   const answer =
     synth.answer ||
     (best?.text?.trim() ||
@@ -299,6 +397,11 @@ export async function runCrosscheck(
     ...(!succeededCalls.length
       ? [
           "No providers returned a successful answer. Check API keys, model names, and network access.",
+        ]
+      : []),
+    ...(succeededCalls.length === 1
+      ? [
+          "Only one provider returned a successful answer, so the result is weaker than a true cross-model adjudication.",
         ]
       : []),
   ]);

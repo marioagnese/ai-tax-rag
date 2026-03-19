@@ -53,6 +53,7 @@ type AttachedDoc = {
 type SavedRun = {
   id: string;
   createdAt: number;
+  updatedAt?: number;
   title: string;
   jurisdiction?: string;
   facts?: string;
@@ -77,6 +78,15 @@ type DerivedConsensus = {
 };
 
 type AutosaveState = "idle" | "saving" | "saved" | "unavailable" | "error";
+
+type HistoryApiResponse = {
+  ok: boolean;
+  tier?: Tier;
+  runs?: SavedRun[];
+  source?: "backend";
+  message?: string;
+  error?: string;
+};
 
 const LS_KEY = "taxaipro_runs_v1";
 const LS_TIER_KEY = "taxaipro_tier";
@@ -474,7 +484,7 @@ function deriveConsensus(resp: CrosscheckResponse | null): DerivedConsensus {
   };
 }
 
-/* ---------------- Local history ---------------- */
+/* ---------------- Local + backend history helpers ---------------- */
 
 function normalizeThreadMessage(m: any): ThreadMessage | null {
   const text = String(m?.text ?? "").trim();
@@ -508,6 +518,64 @@ function normalizeAttachedDoc(d: any): AttachedDoc | null {
   };
 }
 
+function normalizeSavedRun(x: unknown): SavedRun | null {
+  const r = x as Partial<SavedRun> & {
+    caveats?: unknown;
+    followups?: unknown;
+    disagreements?: unknown;
+    thread?: unknown;
+    documents?: unknown;
+    updatedAt?: unknown;
+  };
+
+  if (!r || typeof r !== "object") return null;
+
+  const thread: ThreadMessage[] =
+    Array.isArray(r.thread) && r.thread.length
+      ? (r.thread as any[])
+          .map(normalizeThreadMessage)
+          .filter((m): m is ThreadMessage => !!m)
+          .sort((a, b) => a.createdAt - b.createdAt)
+      : [];
+
+  const documents: AttachedDoc[] =
+    Array.isArray(r.documents) && r.documents.length
+      ? (r.documents as any[])
+          .map(normalizeAttachedDoc)
+          .filter((d): d is AttachedDoc => !!d)
+      : [];
+
+  return {
+    id: String(r.id || crypto.randomUUID()),
+    createdAt: Number.isFinite(Number(r.createdAt)) ? Number(r.createdAt) : Date.now(),
+    updatedAt: Number.isFinite(Number(r.updatedAt)) ? Number(r.updatedAt) : undefined,
+    title: String(r.title || "Untitled"),
+    jurisdiction: r.jurisdiction ? String(r.jurisdiction) : undefined,
+    facts: r.facts ? String(r.facts) : undefined,
+    globalDefaults: r.globalDefaults ? String(r.globalDefaults) : undefined,
+    runOverrides: r.runOverrides ? String(r.runOverrides) : undefined,
+    question: String(r.question || ""),
+    answer: r.answer ? String(r.answer) : undefined,
+    caveats: Array.isArray(r.caveats) ? (r.caveats as any[]).map(String) : [],
+    followups: Array.isArray(r.followups) ? (r.followups as any[]).map(String) : [],
+    disagreements: Array.isArray(r.disagreements) ? (r.disagreements as any[]).map(String) : [],
+    confidence:
+      r.confidence === "low" || r.confidence === "medium" || r.confidence === "high"
+        ? r.confidence
+        : undefined,
+    thread,
+    documents,
+  };
+}
+
+function sortRunsNewestFirst(runs: SavedRun[]) {
+  return [...runs].sort((a, b) => {
+    const aKey = a.updatedAt || a.createdAt || 0;
+    const bKey = b.updatedAt || b.createdAt || 0;
+    return bKey - aKey;
+  });
+}
+
 function safeParseRuns(): SavedRun[] {
   try {
     const raw = localStorage.getItem(LS_KEY);
@@ -515,54 +583,12 @@ function safeParseRuns(): SavedRun[] {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
 
-    return parsed
-      .filter(Boolean)
-      .map((x: unknown): SavedRun => {
-        const r = x as Partial<SavedRun> & {
-          caveats?: unknown;
-          followups?: unknown;
-          disagreements?: unknown;
-          thread?: unknown;
-          documents?: unknown;
-        };
-
-        const thread: ThreadMessage[] =
-          Array.isArray(r.thread) && r.thread.length
-            ? (r.thread as any[])
-                .map(normalizeThreadMessage)
-                .filter((m): m is ThreadMessage => !!m)
-                .sort((a, b) => a.createdAt - b.createdAt)
-            : [];
-
-        const documents: AttachedDoc[] =
-          Array.isArray(r.documents) && r.documents.length
-            ? (r.documents as any[])
-                .map(normalizeAttachedDoc)
-                .filter((d): d is AttachedDoc => !!d)
-            : [];
-
-        return {
-          id: String(r.id || crypto.randomUUID()),
-          createdAt: Number.isFinite(Number(r.createdAt)) ? Number(r.createdAt) : Date.now(),
-          title: String(r.title || "Untitled"),
-          jurisdiction: r.jurisdiction ? String(r.jurisdiction) : undefined,
-          facts: r.facts ? String(r.facts) : undefined,
-          globalDefaults: r.globalDefaults ? String(r.globalDefaults) : undefined,
-          runOverrides: r.runOverrides ? String(r.runOverrides) : undefined,
-          question: String(r.question || ""),
-          answer: r.answer ? String(r.answer) : undefined,
-          caveats: Array.isArray(r.caveats) ? (r.caveats as any[]).map(String) : [],
-          followups: Array.isArray(r.followups) ? (r.followups as any[]).map(String) : [],
-          disagreements: Array.isArray(r.disagreements) ? (r.disagreements as any[]).map(String) : [],
-          confidence:
-            r.confidence === "low" || r.confidence === "medium" || r.confidence === "high"
-              ? r.confidence
-              : undefined,
-          thread,
-          documents,
-        };
-      })
-      .sort((a, b) => b.createdAt - a.createdAt);
+    return sortRunsNewestFirst(
+      parsed
+        .filter(Boolean)
+        .map(normalizeSavedRun)
+        .filter((r): r is SavedRun => !!r)
+    );
   } catch {
     return [];
   }
@@ -591,7 +617,9 @@ function persistActiveThread(thread: ThreadMessage[]) {
 }
 
 function persistRuns(runs: SavedRun[]) {
-  localStorage.setItem(LS_KEY, JSON.stringify(runs.slice(0, 50)));
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(sortRunsNewestFirst(runs).slice(0, 50)));
+  } catch {}
 }
 
 function buildConstraints(globalDefaults: string, runOverrides: string) {
@@ -789,6 +817,7 @@ export default function CrosscheckPage() {
   const [history, setHistory] = useState<SavedRun[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const [thread, setThread] = useState<ThreadMessage[]>([]);
   const [followUp, setFollowUp] = useState("");
@@ -821,6 +850,55 @@ export default function CrosscheckPage() {
       localStorage.setItem(LS_TIER_KEY, next);
     } catch {}
     setTier(next);
+  }
+
+  function replaceHistory(nextRuns: SavedRun[]) {
+    const sorted = sortRunsNewestFirst(nextRuns);
+    setHistory(sorted);
+    persistRuns(sorted);
+  }
+
+  function upsertLocalRun(run: SavedRun) {
+    const next = sortRunsNewestFirst([run, ...history.filter((h) => h.id !== run.id)]).slice(0, 50);
+    setHistory(next);
+    persistRuns(next);
+    setSelectedId(run.id);
+  }
+
+  async function fetchBackendHistory(opts?: { silent?: boolean }) {
+    const silent = !!opts?.silent;
+
+    if (tier === "0") return;
+
+    if (!silent) setHistoryLoading(true);
+
+    try {
+      const r = await fetch("/api/runs/history?limit=50", {
+        method: "GET",
+        headers: { "content-type": "application/json" },
+        cache: "no-store",
+      });
+
+      const j = (await r.json().catch(() => null)) as HistoryApiResponse | null;
+
+      if (!r.ok || !j?.ok) {
+        return;
+      }
+
+      if (j.tier === "0" || j.tier === "1" || j.tier === "2") {
+        setTierLocal(j.tier);
+      }
+
+      const backendRuns = Array.isArray(j.runs)
+        ? j.runs.map(normalizeSavedRun).filter((x): x is SavedRun => !!x)
+        : [];
+
+      replaceHistory(backendRuns);
+    } catch {
+      // keep local mirror if backend fetch fails
+    } finally {
+      if (!silent) setHistoryLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -896,7 +974,8 @@ export default function CrosscheckPage() {
   }, []);
 
   useEffect(() => {
-    setHistory(safeParseRuns());
+    const localRuns = safeParseRuns();
+    replaceHistory(localRuns);
     setTier(readTier());
     setThread(loadActiveThread());
   }, []);
@@ -925,6 +1004,12 @@ export default function CrosscheckPage() {
     return () => {
       cancelled = true;
     };
+  }, [tier]);
+
+  useEffect(() => {
+    if (tier === "1" || tier === "2") {
+      fetchBackendHistory({ silent: false });
+    }
   }, [tier]);
 
   const succeeded = resp?.meta?.succeeded ?? [];
@@ -988,13 +1073,6 @@ export default function CrosscheckPage() {
     return (derivedConsensus.answer || tm("crosscheck.output.placeholder", "Your answer will appear here.")).trim();
   }, [outputStyle, derivedConsensus, jurisdiction, facts, effectiveQuestionForOutput, attachedDocs, tm]);
 
-  function upsertLocalRun(run: SavedRun) {
-    const next = [run, ...history.filter((h) => h.id !== run.id)].slice(0, 50);
-    setHistory(next);
-    persistRuns(next);
-    setSelectedId(run.id);
-  }
-
   function buildDocumentPayload() {
     return attachedDocs
       .filter((d) => d.status === "ready" && d.extractedText?.trim())
@@ -1023,14 +1101,16 @@ export default function CrosscheckPage() {
     setAutosaveState("saving");
     setAutosaveMessage(tm("crosscheck.autosave.saving", "Saving automatically…"));
 
+    const now = Date.now();
+
     const payload = {
       runId: args.runId || undefined,
-      title: clampTitleFromQuestion(question),
+      title: clampTitleFromQuestion(args.question),
       jurisdiction: jurisdiction.trim() || undefined,
       facts: facts.trim() || undefined,
       globalDefaults: globalDefaults.trim() || undefined,
       runOverrides: runOverrides.trim() || undefined,
-      question: question.trim(),
+      question: args.question.trim(),
       answer: args.answer,
       caveats: derivedConsensus.caveats || [],
       followups: derivedConsensus.followups || [],
@@ -1062,13 +1142,14 @@ export default function CrosscheckPage() {
 
       upsertLocalRun({
         id: nextRunId,
-        createdAt: Date.now(),
-        title: clampTitleFromQuestion(question),
+        createdAt: now,
+        updatedAt: now,
+        title: clampTitleFromQuestion(args.question),
         jurisdiction: jurisdiction.trim() || undefined,
         facts: facts.trim() || undefined,
         globalDefaults: globalDefaults.trim() || undefined,
         runOverrides: runOverrides.trim() || undefined,
-        question: question.trim(),
+        question: args.question.trim(),
         answer: args.answer,
         caveats: derivedConsensus.caveats || [],
         followups: derivedConsensus.followups || [],
@@ -1077,6 +1158,8 @@ export default function CrosscheckPage() {
         thread: args.thread,
         documents: attachedDocs,
       });
+
+      await fetchBackendHistory({ silent: true });
     } catch (e: any) {
       setAutosaveState("error");
       setAutosaveMessage(e?.message || tm("crosscheck.autosave.failed", "Autosave failed."));
@@ -1698,7 +1781,10 @@ export default function CrosscheckPage() {
             </button>
 
             <button
-              onClick={() => setHistoryOpen(true)}
+              onClick={() => {
+                setHistoryOpen(true);
+                if (tier === "1" || tier === "2") fetchBackendHistory({ silent: false });
+              }}
               className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10"
             >
               {tm("crosscheck.nav.history", "History")}
@@ -2719,7 +2805,7 @@ export default function CrosscheckPage() {
                         )
                       : tm(
                           "crosscheck.history.subtitlePaid",
-                          "Recent local mirror of your autosaved paid runs on this device."
+                          "Your autosaved paid runs are loaded from the cloud and mirrored locally on this device."
                         )}
                   </div>
                 </div>
@@ -2727,6 +2813,12 @@ export default function CrosscheckPage() {
                   ✕
                 </button>
               </div>
+
+              {historyLoading ? (
+                <div className="mt-4 rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-white/50">
+                  {tm("crosscheck.history.loading", "Loading history…")}
+                </div>
+              ) : null}
 
               <div className="mt-4 space-y-2 overflow-auto pr-1" style={{ maxHeight: "calc(100vh - 84px)" }}>
                 {history.length ? (
@@ -2741,7 +2833,7 @@ export default function CrosscheckPage() {
                       <button onClick={() => loadRun(h)} className="w-full text-left">
                         <div className="line-clamp-2 text-xs font-semibold text-white/85">{h.title}</div>
                         <div className="mt-1 text-[11px] text-white/45">
-                          {new Date(h.createdAt).toLocaleDateString()} · {h.jurisdiction || "—"} ·{" "}
+                          {new Date(h.updatedAt || h.createdAt).toLocaleDateString()} · {h.jurisdiction || "—"} ·{" "}
                           {h.confidence
                             ? `${tm("crosscheck.history.conf", "Conf")}: ${h.confidence}`
                             : `${tm("crosscheck.history.conf", "Conf")}: —`}
