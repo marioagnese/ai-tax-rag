@@ -83,10 +83,29 @@ function pickBest(outputs: ProviderOutput[]): ProviderOutput | null {
         "diferencial",
         "difal",
         "substituição tributária",
+        "final consumer",
+        "fixed assets",
+        "consumption",
+        "resale",
+        "industrialization",
+        "constitutional",
+        "complementary law",
       ].filter((k) => text.includes(k)).length * 80;
 
+    const overgeneralizationPenalty =
+      [
+        "typically",
+        "generally",
+        "usually",
+      ].filter((k) => text.includes(k)).length * 35;
+
     const len = (o.text || "").length;
-    const score = len + usefulSignals - refusalPenalty * 500 - weakLanguagePenalty * 80;
+    const score =
+      len +
+      usefulSignals -
+      refusalPenalty * 500 -
+      weakLanguagePenalty * 80 -
+      overgeneralizationPenalty;
 
     return { o, score };
   });
@@ -158,7 +177,7 @@ function buildStructuredAnswer(parsed: AdjudicationJson): string {
 
   if (materialNuances.length) {
     lines.push("");
-    lines.push("Material nuances:");
+    lines.push("Material legal distinctions:");
     materialNuances.forEach((x) => lines.push(`- ${x}`));
   }
 
@@ -239,14 +258,25 @@ function buildAdjudicationSystemPrompt(label: "GPT" | "CLAUDE") {
     "Your role is NOT to produce a generic summary.",
     "Your role is to adjudicate multiple model answers like a conservative senior tax professional.",
     "",
+    "Core principle:",
+    "A legally significant distinction can control the answer even if only one model raised it.",
+    "",
     "Decision rules:",
-    "1. Distinguish common ground from legally material nuance.",
+    "1. Distinguish broad common ground from controlling legal distinctions.",
     "2. If only one or two models raise an important legal distinction, do NOT discard it merely because it is a minority view.",
     "3. A narrower but more legally precise distinction can outweigh broader generic consensus.",
     "4. Treat differences in emphasis as meaningful, even if there is no direct contradiction.",
-    "5. Prioritize legal precision, assumptions, transaction mechanics, taxpayer status, and missing facts over fluency.",
-    "6. Do not invent authority or citations.",
-    "7. Be conservative and explicit about uncertainty.",
+    "5. Prioritize legal precision, taxpayer status, transaction purpose, destination/origin mechanics, and missing facts over fluency.",
+    "6. Penalize answers that sound smooth but collapse multiple legal regimes into one simplified statement.",
+    "7. If a statement is only true for one transaction profile (for example B2C but not all B2B), do not state it as a general rule.",
+    "8. If a constitutional rule, statutory framework, or transaction-classification distinction appears, elevate it above generic summary language.",
+    "9. Do not invent authority or citations.",
+    "10. Be conservative and explicit about uncertainty.",
+    "",
+    "When relevant, separate these transaction categories instead of blending them:",
+    "- B2B for resale / industrialization",
+    "- B2B for own use, consumption, or fixed assets",
+    "- B2C / final consumer",
     "",
     "Return STRICT JSON ONLY with these exact keys:",
     "{",
@@ -261,12 +291,14 @@ function buildAdjudicationSystemPrompt(label: "GPT" | "CLAUDE") {
     '  "confidence": "low" | "medium" | "high"',
     "}",
     "",
-    "Important:",
-    "- 'material_nuances' should include minority-but-important legal distinctions.",
-    "- 'differences_in_emphasis' should capture meaningful differences even without direct contradiction.",
-    "- 'disagreements' should be reserved for actual competing conclusions or materially different legal framing.",
-    "- 'bottom_line' must be concise and conservative.",
-    "- 'conservative_recommendation' should say what facts or validations are needed before relying on the conclusion.",
+    "Important output rules:",
+    "- 'common_ground' = high-level points most models share.",
+    "- 'material_nuances' = legally significant distinctions, including minority-but-important points.",
+    "- 'differences_in_emphasis' = meaningful differences that do not necessarily create conflicting conclusions.",
+    "- 'disagreements' = actual competing legal conclusions or materially different legal framing.",
+    "- 'bottom_line' must be concise, conservative, and not over-generalized.",
+    "- 'conservative_recommendation' should say what must be verified before relying on the answer.",
+    "- If a so-called nuance is actually outcome-determinative, still place it in 'material_nuances' and phrase it as controlling.",
   ].join("\n");
 }
 
@@ -385,7 +417,11 @@ async function mergeAdjudicationsWithOpenAI(args: {
     "",
     "Your job is to produce the safest, most conservative merged answer.",
     "Do NOT average them blindly.",
+    "Do NOT prefer the smoother or more general answer merely because it sounds cleaner.",
     "If one adjudicator captures a more precise legal distinction, keep it.",
+    "If one adjudicator separates transaction categories correctly and the other blends them, prefer the separated analysis.",
+    "If a minority view introduces a constitutional, statutory, or classification-based distinction, treat it as potentially controlling.",
+    "Broad consensus does not override a narrower legally correct distinction.",
     "Distinguish common ground, material nuances, differences in emphasis, and true disagreements.",
     "Do not invent authority or citations.",
     "",
@@ -401,6 +437,11 @@ async function mergeAdjudicationsWithOpenAI(args: {
     '  "disagreements": string[],',
     '  "confidence": "low" | "medium" | "high"',
     "}",
+    "",
+    "Important:",
+    "- Do not overstate general rules when they only apply to specific transaction types.",
+    "- Prefer legal precision over brevity.",
+    "- If needed, narrow the bottom line rather than making it over-broad.",
   ].join("\n");
 
   const user = [
