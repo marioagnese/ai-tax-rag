@@ -1,4 +1,8 @@
-export type CrosscheckProviderId = "openai" | "openrouter" | "gemini";
+export type CrosscheckProviderId =
+  | "openai"
+  | "openrouter"
+  | "gemini"
+  | "anthropic";
 
 export type ProviderStatus = "ok" | "error" | "timeout";
 

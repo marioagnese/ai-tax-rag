@@ -6,6 +6,8 @@ import type {
 } from "./types";
 import { callOpenAI } from "./providers/openai";
 import { callOpenRouter } from "./providers/openrouter";
+import { callGemini } from "./providers/gemini";
+import { callAnthropic } from "./providers/anthropic";
 import OpenAI from "openai";
 
 function env(name: string): string {
@@ -40,6 +42,15 @@ function defaultOpenRouterModels(): string[] {
   return models.length ? models : ["anthropic/claude-3.5-sonnet"];
 }
 
+function dualAdjudicatorEnabled(): boolean {
+  const raw = (env("CROSSCHECK_DUAL_ADJUDICATOR") || "true").trim().toLowerCase();
+  return raw !== "false" && raw !== "0" && raw !== "off";
+}
+
+function geminiEnabled(): boolean {
+  return (env("GEMINI_ENABLED") || "").trim().toLowerCase() === "true";
+}
+
 function pickBest(outputs: ProviderOutput[]): ProviderOutput | null {
   const ok = outputs.filter(
     (o) => o.status === "ok" && (o.text || "").trim().length > 50
@@ -69,6 +80,9 @@ function pickBest(outputs: ProviderOutput[]): ProviderOutput | null {
         "missing facts",
         "caveat",
         "assumption",
+        "diferencial",
+        "difal",
+        "substituição tributária",
       ].filter((k) => text.includes(k)).length * 80;
 
     const len = (o.text || "").length;
@@ -105,7 +119,7 @@ function extractJsonObject(raw: string): string {
   return s;
 }
 
-type SynthJson = {
+type AdjudicationJson = {
   bottom_line?: string;
   common_ground?: string[];
   material_nuances?: string[];
@@ -122,7 +136,7 @@ function normalizeStringArray(value: unknown): string[] {
   return uniq(value.map(String));
 }
 
-function buildStructuredAnswer(parsed: SynthJson): string {
+function buildStructuredAnswer(parsed: AdjudicationJson): string {
   const bottomLine = String(parsed?.bottom_line || "").trim();
   const commonGround = normalizeStringArray(parsed?.common_ground);
   const materialNuances = normalizeStringArray(parsed?.material_nuances);
@@ -182,9 +196,7 @@ function normalizeConsensus(parsed: any) {
       ? (confidenceRaw as "low" | "medium" | "high")
       : "low";
 
-  const answer =
-    buildStructuredAnswer(parsed) ||
-    String(parsed?.answer || "").trim();
+  const answer = buildStructuredAnswer(parsed) || String(parsed?.answer || "").trim();
 
   const disagreements = uniq([
     ...differences,
@@ -221,39 +233,9 @@ function packProviderOutputs(outputs: ProviderOutput[]): string {
     .join("\n\n");
 }
 
-async function synthesizeWithOpenAI(
-  input: CrosscheckInput,
-  outputs: ProviderOutput[]
-) {
-  const apiKey = env("OPENAI_API_KEY");
-
-  if (!apiKey) {
-    const best = pickBest(outputs);
-    return normalizeConsensus({
-      bottom_line: best?.text || "",
-      common_ground: [],
-      material_nuances: [
-        "Synthesis model unavailable (missing OPENAI_API_KEY). Returned best single-provider output only.",
-      ],
-      differences_in_emphasis: [],
-      conservative_recommendation: "",
-      missing_facts: [],
-      caveats: best?.text
-        ? ["Synthesis model unavailable; this is not a true adjudicated consensus."]
-        : ["Synthesis model unavailable and no successful provider output was available."],
-      disagreements: [],
-      confidence: "low",
-    });
-  }
-
-  const model =
-    env("OPENAI_SYNTH_MODEL") || env("OPENAI_MODEL") || "gpt-4.1-mini";
-  const client = new OpenAI({ apiKey });
-
-  const packed = packProviderOutputs(outputs);
-
-  const sys = [
-    "You are the Crosscheck Orchestrator for a tax analysis platform.",
+function buildAdjudicationSystemPrompt(label: "GPT" | "CLAUDE") {
+  return [
+    `You are ${label}, acting as a tax adjudicator inside a multi-model tax analysis platform.`,
     "Your role is NOT to produce a generic summary.",
     "Your role is to adjudicate multiple model answers like a conservative senior tax professional.",
     "",
@@ -262,7 +244,7 @@ async function synthesizeWithOpenAI(
     "2. If only one or two models raise an important legal distinction, do NOT discard it merely because it is a minority view.",
     "3. A narrower but more legally precise distinction can outweigh broader generic consensus.",
     "4. Treat differences in emphasis as meaningful, even if there is no direct contradiction.",
-    "5. Prioritize legal precision, assumptions, contract-dependence, and missing facts over fluency.",
+    "5. Prioritize legal precision, assumptions, transaction mechanics, taxpayer status, and missing facts over fluency.",
     "6. Do not invent authority or citations.",
     "7. Be conservative and explicit about uncertainty.",
     "",
@@ -284,8 +266,25 @@ async function synthesizeWithOpenAI(
     "- 'differences_in_emphasis' should capture meaningful differences even without direct contradiction.",
     "- 'disagreements' should be reserved for actual competing conclusions or materially different legal framing.",
     "- 'bottom_line' must be concise and conservative.",
-    "- 'conservative_recommendation' should tell the user what to do next before relying on the conclusion.",
+    "- 'conservative_recommendation' should say what facts or validations are needed before relying on the conclusion.",
   ].join("\n");
+}
+
+async function adjudicateWithOpenAI(
+  input: CrosscheckInput,
+  outputs: ProviderOutput[]
+) {
+  const apiKey = env("OPENAI_API_KEY");
+  if (!apiKey) return null;
+
+  const model =
+    env("OPENAI_ADJUDICATOR_MODEL") ||
+    env("OPENAI_SYNTH_MODEL") ||
+    env("OPENAI_MODEL") ||
+    "gpt-4.1-mini";
+
+  const client = new OpenAI({ apiKey });
+  const packed = packProviderOutputs(outputs);
 
   const user = [
     input.jurisdiction ? `Jurisdiction: ${input.jurisdiction}` : "",
@@ -299,7 +298,128 @@ async function synthesizeWithOpenAI(
     .filter(Boolean)
     .join("\n\n");
 
-  const max_tokens = clampInt((input as any)?.maxTokens, 400, 1800, 1200);
+  const max_tokens = clampInt((input as any)?.maxTokens, 500, 2000, 1400);
+
+  const resp = await client.chat.completions.create({
+    model,
+    temperature: 0.1,
+    messages: [
+      { role: "system", content: buildAdjudicationSystemPrompt("GPT") },
+      { role: "user", content: user },
+    ],
+    max_tokens,
+  });
+
+  const raw = resp.choices?.[0]?.message?.content || "{}";
+  const extracted = extractJsonObject(raw);
+  const parsed = safeJsonParse<AdjudicationJson>(extracted);
+
+  if (!parsed) return null;
+  return normalizeConsensus(parsed);
+}
+
+async function adjudicateWithClaude(
+  input: CrosscheckInput,
+  outputs: ProviderOutput[]
+) {
+  const packed = packProviderOutputs(outputs);
+
+  const prompt = [
+    input.jurisdiction ? `Jurisdiction: ${input.jurisdiction}` : "",
+    input.constraints ? `Constraints: ${input.constraints}` : "",
+    input.facts ? `Facts:\n${input.facts}` : "",
+    `Question:\n${input.question}`,
+    "",
+    "Provider outputs to adjudicate:",
+    packed,
+    "",
+    buildAdjudicationSystemPrompt("CLAUDE"),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const result = await callAnthropic({
+    ...input,
+    question: prompt,
+    maxTokens: clampInt((input as any)?.maxTokens, 500, 3000, 1600),
+  });
+
+  if (result.status !== "ok" || !result.text) return null;
+
+  const extracted = extractJsonObject(result.text);
+  const parsed = safeJsonParse<AdjudicationJson>(extracted);
+
+  if (!parsed) return null;
+  return normalizeConsensus(parsed);
+}
+
+async function mergeAdjudicationsWithOpenAI(args: {
+  input: CrosscheckInput;
+  providerOutputs: ProviderOutput[];
+  gpt: ReturnType<typeof normalizeConsensus> | null;
+  claude: ReturnType<typeof normalizeConsensus> | null;
+}) {
+  const apiKey = env("OPENAI_API_KEY");
+  if (!apiKey) return args.gpt || args.claude || null;
+
+  const model =
+    env("OPENAI_MERGER_MODEL") ||
+    env("OPENAI_ADJUDICATOR_MODEL") ||
+    env("OPENAI_SYNTH_MODEL") ||
+    env("OPENAI_MODEL") ||
+    "gpt-4.1-mini";
+
+  const client = new OpenAI({ apiKey });
+
+  const packedProviders = packProviderOutputs(args.providerOutputs);
+
+  const gptJson = JSON.stringify(args.gpt || {}, null, 2);
+  const claudeJson = JSON.stringify(args.claude || {}, null, 2);
+
+  const sys = [
+    "You are the final merger model for a tax adjudication engine.",
+    "You are receiving:",
+    "1. raw provider outputs,",
+    "2. a GPT adjudication, and",
+    "3. a Claude adjudication.",
+    "",
+    "Your job is to produce the safest, most conservative merged answer.",
+    "Do NOT average them blindly.",
+    "If one adjudicator captures a more precise legal distinction, keep it.",
+    "Distinguish common ground, material nuances, differences in emphasis, and true disagreements.",
+    "Do not invent authority or citations.",
+    "",
+    "Return STRICT JSON ONLY with these exact keys:",
+    "{",
+    '  "bottom_line": string,',
+    '  "common_ground": string[],',
+    '  "material_nuances": string[],',
+    '  "differences_in_emphasis": string[],',
+    '  "conservative_recommendation": string,',
+    '  "missing_facts": string[],',
+    '  "caveats": string[],',
+    '  "disagreements": string[],',
+    '  "confidence": "low" | "medium" | "high"',
+    "}",
+  ].join("\n");
+
+  const user = [
+    args.input.jurisdiction ? `Jurisdiction: ${args.input.jurisdiction}` : "",
+    args.input.constraints ? `Constraints: ${args.input.constraints}` : "",
+    args.input.facts ? `Facts:\n${args.input.facts}` : "",
+    `Question:\n${args.input.question}`,
+    "",
+    "Raw provider outputs:",
+    packedProviders,
+    "",
+    "GPT adjudication:",
+    gptJson,
+    "",
+    "Claude adjudication:",
+    claudeJson,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   const resp = await client.chat.completions.create({
     model,
@@ -308,27 +428,14 @@ async function synthesizeWithOpenAI(
       { role: "system", content: sys },
       { role: "user", content: user },
     ],
-    max_tokens,
+    max_tokens: 1600,
   });
 
   const raw = resp.choices?.[0]?.message?.content || "{}";
   const extracted = extractJsonObject(raw);
-  const parsed = safeJsonParse<SynthJson>(extracted);
+  const parsed = safeJsonParse<AdjudicationJson>(extracted);
 
-  if (!parsed) {
-    return normalizeConsensus({
-      bottom_line: raw,
-      common_ground: [],
-      material_nuances: ["Synthesis did not return valid JSON; raw synthesis output returned."],
-      differences_in_emphasis: [],
-      conservative_recommendation: "",
-      missing_facts: [],
-      caveats: ["Synthesis output format was invalid."],
-      disagreements: [],
-      confidence: "low",
-    });
-  }
-
+  if (!parsed) return args.gpt || args.claude || null;
   return normalizeConsensus(parsed);
 }
 
@@ -370,6 +477,13 @@ export async function runCrosscheck(
     );
   }
 
+  if (geminiEnabled()) {
+    const geminiModel = env("GEMINI_MODEL") || "gemini-2.5-flash";
+    tasks.push(
+      wrap({ provider: "gemini", model: geminiModel }, () => callGemini(input))
+    );
+  }
+
   const providers = await Promise.all(tasks);
 
   const succeededCalls: ProviderCall[] = [];
@@ -381,19 +495,35 @@ export async function runCrosscheck(
     else failedCalls.push(call);
   }
 
-  const synth = await synthesizeWithOpenAI(input, providers);
-
   const best = pickBest(providers);
 
+  let finalConsensus: ReturnType<typeof normalizeConsensus> | null = null;
+
+  if (dualAdjudicatorEnabled()) {
+    const [gptAdj, claudeAdj] = await Promise.all([
+      adjudicateWithOpenAI(input, providers).catch(() => null),
+      adjudicateWithClaude(input, providers).catch(() => null),
+    ]);
+
+    finalConsensus = await mergeAdjudicationsWithOpenAI({
+      input,
+      providerOutputs: providers,
+      gpt: gptAdj,
+      claude: claudeAdj,
+    }).catch(() => gptAdj || claudeAdj || null);
+  } else {
+    finalConsensus = await adjudicateWithOpenAI(input, providers).catch(() => null);
+  }
+
   const answer =
-    synth.answer ||
+    finalConsensus?.answer ||
     (best?.text?.trim() ||
       `I couldn't get a successful provider response yet. Providers attempted: ${attempted
         .map((a) => `${a.provider}:${a.model}`)
         .join(", ")}`);
 
   const caveats = uniq([
-    ...synth.caveats,
+    ...(finalConsensus?.caveats || []),
     ...(!succeededCalls.length
       ? [
           "No providers returned a successful answer. Check API keys, model names, and network access.",
@@ -406,8 +536,12 @@ export async function runCrosscheck(
       : []),
   ]);
 
-  const followups = uniq(synth.followups);
-  const disagreements = uniq(synth.disagreements);
+  const followups = uniq(finalConsensus?.followups || []);
+  const disagreements = uniq(finalConsensus?.disagreements || []);
+
+  const confidence =
+    finalConsensus?.confidence ||
+    (succeededCalls.length >= 2 ? "medium" : "low");
 
   const runtime_ms = Date.now() - t0;
 
@@ -423,7 +557,7 @@ export async function runCrosscheck(
       answer,
       caveats,
       followups,
-      confidence: synth.confidence,
+      confidence,
       disagreements,
     },
     providers,

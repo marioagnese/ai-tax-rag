@@ -1,7 +1,6 @@
-// app/api/ui/crosscheck/route.ts
 import { NextResponse, type NextRequest } from "next/server";
-import { GoogleGenAI } from "@google/genai";
 import { requireSessionUser } from "../../../../src/lib/auth/session";
+import { runCrosscheck } from "../../../../src/core/crosscheck/orchestrator";
 import {
   assertWithinDailyLimit,
   getClientId,
@@ -12,20 +11,6 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/* ---------------- Env helpers ---------------- */
-
-function env(name: string): string {
-  return (process.env[name] || "").trim();
-}
-
-function requireEnv(name: string) {
-  const v = env(name);
-  if (!v) throw new Error(`Missing env var: ${name}`);
-  return v;
-}
-
-/* ---------------- Types ---------------- */
-
 type CrosscheckUiBody = {
   jurisdiction?: string;
   facts?: string;
@@ -35,62 +20,6 @@ type CrosscheckUiBody = {
   maxTokens?: number;
   [k: string]: unknown;
 };
-
-type ProviderResult = {
-  provider: string;
-  model: string;
-  status: "ok" | "error" | "timeout";
-  ms: number;
-  text?: string;
-  error?: string;
-};
-
-type CrosscheckResponse = {
-  ok: boolean;
-  meta?: {
-    attempted?: Array<{ provider: string; model: string }>;
-    succeeded?: Array<{ provider: string; model: string }>;
-    failed?: Array<{ provider: string; model: string }>;
-    runtime_ms?: number;
-  };
-  consensus?: {
-    answer?: string;
-    caveats?: string[];
-    followups?: string[];
-    disagreements?: string[];
-    confidence?: "low" | "medium" | "high";
-  };
-  providers?: ProviderResult[];
-  error?: string;
-};
-
-type ChatMsg = { role: "system" | "user" | "assistant"; content: string };
-
-type OpenAiCompatibleProvider = {
-  provider: "openai" | "perplexity" | "xai" | "deepseek";
-  kind: "openai-compatible";
-  baseURL: string;
-  apiKey: string;
-  model: string;
-};
-
-type GeminiProvider = {
-  provider: "gemini";
-  kind: "gemini";
-  apiKey: string;
-  model: string;
-};
-
-type ProviderConfig = OpenAiCompatibleProvider | GeminiProvider;
-
-type ParsedSections = {
-  answer: string;
-  caveats: string[];
-  followups: string[];
-  disagreements: string[];
-};
-
-/* ---------------- Sanitization ---------------- */
 
 function sanitizeBody(raw: unknown): CrosscheckUiBody {
   const b: CrosscheckUiBody = raw && typeof raw === "object" ? (raw as any) : {};
@@ -122,8 +51,6 @@ function sanitizeBody(raw: unknown): CrosscheckUiBody {
   };
 }
 
-/* ---------------- Rate-limit headers ---------------- */
-
 function applyRateLimitHeaders(h: Headers, meta?: RateLimitMeta) {
   if (!meta) return;
 
@@ -133,483 +60,6 @@ function applyRateLimitHeaders(h: Headers, meta?: RateLimitMeta) {
   h.set("x-ratelimit-remaining", String(meta.remaining));
   h.set("x-ratelimit-reset", meta.resetAt);
 }
-
-/* ---------------- Provider calls (OpenAI-compatible) ---------------- */
-
-function normalizeBaseForProvider(provider: string, baseURL: string) {
-  const base = (baseURL || "").trim().replace(/\/+$/, "");
-
-  if (!base) {
-    if (provider === "openai") return "https://api.openai.com/v1";
-    if (provider === "perplexity") return "https://api.perplexity.ai";
-    if (provider === "xai") return "https://api.x.ai/v1";
-    if (provider === "deepseek") return "https://api.deepseek.com";
-    return "";
-  }
-
-  if (provider === "xai") {
-    return base.endsWith("/v1") ? base : `${base}/v1`;
-  }
-
-  return base;
-}
-
-async function callChatCompletions(args: {
-  provider: string;
-  baseURL: string;
-  apiKey: string;
-  model: string;
-  messages: ChatMsg[];
-  temperature: number;
-  timeoutMs: number;
-  maxTokens?: number;
-}): Promise<ProviderResult> {
-  const started = Date.now();
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), args.timeoutMs);
-
-  try {
-    const base = normalizeBaseForProvider(args.provider, args.baseURL);
-    const url = `${base.replace(/\/+$/, "")}/chat/completions`;
-
-    const r = await fetch(url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${args.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: args.model,
-        messages: args.messages,
-        temperature: args.temperature,
-        max_tokens: args.maxTokens,
-        stream: false,
-      }),
-      signal: ctrl.signal,
-      cache: "no-store",
-    });
-
-    const ms = Date.now() - started;
-    const text = await r.text();
-
-    if (!r.ok) {
-      return {
-        provider: args.provider,
-        model: args.model,
-        status: "error",
-        ms,
-        error: `HTTP ${r.status}: ${text.slice(0, 800)}`,
-      };
-    }
-
-    let json: any = null;
-    try {
-      json = JSON.parse(text);
-    } catch {
-      json = null;
-    }
-
-    const content = String(json?.choices?.[0]?.message?.content ?? "").trim();
-
-    if (!content) {
-      return {
-        provider: args.provider,
-        model: args.model,
-        status: "error",
-        ms,
-        error: "Empty response content.",
-      };
-    }
-
-    return {
-      provider: args.provider,
-      model: args.model,
-      status: "ok",
-      ms,
-      text: content,
-    };
-  } catch (e: any) {
-    const ms = Date.now() - started;
-    const aborted = e?.name === "AbortError";
-    return {
-      provider: args.provider,
-      model: args.model,
-      status: aborted ? "timeout" : "error",
-      ms,
-      error: aborted ? "Timed out" : e?.message || "Request failed",
-    };
-  } finally {
-    clearTimeout(t);
-  }
-}
-
-/* ---------------- Gemini ---------------- */
-
-async function callGemini(args: {
-  provider: "gemini";
-  apiKey: string;
-  model: string;
-  messages: ChatMsg[];
-  timeoutMs: number;
-}): Promise<ProviderResult> {
-  const started = Date.now();
-
-  try {
-    const client = new GoogleGenAI({ apiKey: args.apiKey });
-
-    const prompt = args.messages
-      .map((m) => `${m.role.toUpperCase()}:\n${m.content}`)
-      .join("\n\n");
-
-    const response = await Promise.race([
-      client.models.generateContent({
-        model: args.model,
-        contents: prompt,
-      }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Timed out")), args.timeoutMs)
-      ),
-    ]);
-
-    const ms = Date.now() - started;
-    const text = String((response as any)?.text ?? "").trim();
-
-    if (!text) {
-      return {
-        provider: args.provider,
-        model: args.model,
-        status: "error",
-        ms,
-        error: "Empty response content.",
-      };
-    }
-
-    return {
-      provider: args.provider,
-      model: args.model,
-      status: "ok",
-      ms,
-      text,
-    };
-  } catch (e: any) {
-    const ms = Date.now() - started;
-    const timedOut = String(e?.message || "")
-      .toLowerCase()
-      .includes("timed out");
-
-    return {
-      provider: args.provider,
-      model: args.model,
-      status: timedOut ? "timeout" : "error",
-      ms,
-      error: e?.message || "Request failed",
-    };
-  }
-}
-
-/* ---------------- Prompt building ---------------- */
-
-function buildMessages(body: CrosscheckUiBody): ChatMsg[] {
-  const sysParts: string[] = [];
-
-  if (body.constraints?.trim()) sysParts.push(body.constraints.trim());
-  if (body.jurisdiction?.trim()) {
-    sysParts.push(`Jurisdiction: ${body.jurisdiction.trim()}`);
-  }
-  if (body.facts?.trim()) {
-    sysParts.push(`Facts:\n${body.facts.trim()}`);
-  }
-
-  sysParts.push(
-    [
-      "You are a conservative senior tax specialist.",
-      "Answer the user's tax question directly, but avoid overclaiming.",
-      "Use the facts given. If key facts are missing, say so clearly.",
-      "Treat the stated jurisdiction as controlling unless the user explicitly asks to compare jurisdictions.",
-      "Do not substitute another country, tax system, or filing regime.",
-      "If the question is ambiguous, answer only for the stated jurisdiction and list the ambiguity under Missing facts.",
-      "If the stated jurisdiction conflicts with the user's wording, prioritize the stated jurisdiction and note the conflict in Caveats or Missing facts.",
-      "Return the result using exactly these section headings in this order:",
-      "",
-      "Answer:",
-      "- concise but useful answer",
-      "",
-      "Caveats:",
-      "- bullet list of caveats or limitations",
-      "",
-      "Missing facts:",
-      "- bullet list of missing facts or follow-up questions",
-      "",
-      "Disagreements:",
-      "- bullet list only if materially relevant; otherwise write '- None.'",
-      "",
-      "Do not omit the headings, even if a section is short.",
-      "Do not use markdown tables.",
-      "Keep a conservative posture.",
-    ].join("\n")
-  );
-
-  const system = sysParts.join("\n\n");
-  const user = body.question?.trim() || "";
-
-  return [
-    { role: "system", content: system },
-    { role: "user", content: user },
-  ];
-}
-
-/* ---------------- Parsing helpers ---------------- */
-
-function dedupeStrings(items: string[]) {
-  const seen = new Set<string>();
-  const out: string[] = [];
-
-  for (const raw of items) {
-    const value = String(raw || "").replace(/\s+/g, " ").trim();
-    if (!value) continue;
-
-    const normalized = value
-      .replace(/^none\.?$/i, "")
-      .replace(/^n\/a$/i, "")
-      .trim();
-
-    if (!normalized) continue;
-
-    const key = normalized.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(normalized);
-  }
-
-  return out;
-}
-
-function stripBulletPrefix(line: string) {
-  return line
-    .replace(/^\s*[•\-–—*]\s*/, "")
-    .replace(/^\s*\d+[\.\)]\s*/, "")
-    .replace(/^\s*[a-zA-Z][\.\)]\s*/, "")
-    .trim();
-}
-
-function detectSection(line: string): keyof Omit<ParsedSections, "answer"> | "answer" | null {
-  const s = line.trim().toLowerCase().replace(/:+$/, "");
-  if (!s) return null;
-
-  if (s === "answer" || s === "bottom line" || s === "conclusion") return "answer";
-
-  if (
-    s === "caveat" ||
-    s === "caveats" ||
-    s === "limitations" ||
-    s === "caveats / limitations" ||
-    s === "key caveats"
-  ) {
-    return "caveats";
-  }
-
-  if (
-    s === "missing facts" ||
-    s === "missing fact" ||
-    s === "followups" ||
-    s === "follow-ups" ||
-    s === "follow up questions" ||
-    s === "missing facts to confirm" ||
-    s === "missing facts / follow-ups needed"
-  ) {
-    return "followups";
-  }
-
-  if (
-    s === "disagreements" ||
-    s === "disagreement" ||
-    s === "where models differed"
-  ) {
-    return "disagreements";
-  }
-
-  return null;
-}
-
-function parseSections(text?: string | null): ParsedSections {
-  const raw = String(text || "").trim();
-  if (!raw) {
-    return { answer: "", caveats: [], followups: [], disagreements: [] };
-  }
-
-  const lines = raw.split(/\r?\n/);
-
-  const answerLines: string[] = [];
-  const caveats: string[] = [];
-  const followups: string[] = [];
-  const disagreements: string[] = [];
-
-  let current: "answer" | "caveats" | "followups" | "disagreements" = "answer";
-
-  for (const line of lines) {
-    const section = detectSection(line);
-    if (section) {
-      current = section;
-      continue;
-    }
-
-    const trimmed = line.trim();
-    if (!trimmed) {
-      if (current === "answer") answerLines.push("");
-      continue;
-    }
-
-    if (current === "answer") {
-      answerLines.push(line);
-      continue;
-    }
-
-    const cleaned = stripBulletPrefix(trimmed);
-    if (!cleaned) continue;
-
-    if (current === "caveats") caveats.push(cleaned);
-    if (current === "followups") followups.push(cleaned);
-    if (current === "disagreements") disagreements.push(cleaned);
-  }
-
-  const answer = answerLines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
-
-  return {
-    answer,
-    caveats: dedupeStrings(caveats),
-    followups: dedupeStrings(followups),
-    disagreements: dedupeStrings(disagreements),
-  };
-}
-
-/* ---------------- Consensus (structured + conservative) ---------------- */
-
-function buildConsensus(
-  providers: ProviderResult[]
-): CrosscheckResponse["consensus"] {
-  const oks = providers.filter((p) => p.status === "ok" && p.text?.trim());
-  const fails = providers.filter((p) => p.status !== "ok");
-
-  if (!oks.length) {
-    return {
-      answer: "",
-      caveats: [],
-      followups: [],
-      disagreements: [],
-      confidence: "low",
-    };
-  }
-
-  const parsed = oks.map((p) => ({
-    provider: p.provider,
-    model: p.model,
-    parsed: parseSections(p.text),
-    raw: (p.text || "").trim(),
-  }));
-
-  const openai = parsed.find((p) => p.provider === "openai");
-  const chosen = openai ?? parsed[0];
-
-  const answer = chosen.parsed.answer.trim() || chosen.raw;
-
-  const caveats = dedupeStrings(parsed.flatMap((p) => p.parsed.caveats));
-  const followups = dedupeStrings(parsed.flatMap((p) => p.parsed.followups));
-
-  const answerSnippets = Array.from(
-    new Set(
-      parsed
-        .map((p) =>
-          (p.parsed.answer.trim() || p.raw)
-            .replace(/\s+/g, " ")
-            .trim()
-            .slice(0, 220)
-        )
-        .filter(Boolean)
-    )
-  );
-
-  let disagreements = dedupeStrings(parsed.flatMap((p) => p.parsed.disagreements));
-
-  if (!disagreements.length && answerSnippets.length > 1) {
-    disagreements = answerSnippets.slice(0, 3).map(
-      (u, i) => `Model disagreement #${i + 1}: ${u}${u.length >= 220 ? "…" : ""}`
-    );
-  }
-
-  const confidence: "low" | "medium" | "high" =
-    oks.length >= 5 && fails.length === 0 && disagreements.length === 0
-      ? "high"
-      : oks.length >= 2
-      ? "medium"
-      : "low";
-
-  return {
-    answer,
-    caveats,
-    followups,
-    disagreements,
-    confidence,
-  };
-}
-
-/* ---------------- xAI model normalization ---------------- */
-
-function normalizeXaiModel(maybe: string) {
-  const m = (maybe || "").trim();
-  if (!m) return "grok-4-1-fast-reasoning";
-
-  if (/-latest$/i.test(m)) return "grok-4-1-fast-reasoning";
-
-  return m;
-}
-
-/* ---------------- Provider config ---------------- */
-
-function getProvidersToRun(): ProviderConfig[] {
-  const providers: ProviderConfig[] = [
-    {
-      provider: "openai",
-      kind: "openai-compatible",
-      baseURL: env("OPENAI_BASE_URL") || "https://api.openai.com/v1",
-      apiKey: requireEnv("OPENAI_API_KEY"),
-      model: env("OPENAI_MODEL") || "gpt-4.1-mini",
-    },
-    {
-      provider: "perplexity",
-      kind: "openai-compatible",
-      baseURL: env("PERPLEXITY_BASE_URL") || "https://api.perplexity.ai",
-      apiKey: requireEnv("PERPLEXITY_API_KEY"),
-      model: env("PERPLEXITY_MODEL") || "sonar-pro",
-    },
-    {
-      provider: "xai",
-      kind: "openai-compatible",
-      baseURL: env("XAI_BASE_URL") || "https://api.x.ai",
-      apiKey: requireEnv("XAI_API_KEY"),
-      model: normalizeXaiModel(env("XAI_MODEL") || "grok-4-1-fast-reasoning"),
-    },
-    {
-      provider: "deepseek",
-      kind: "openai-compatible",
-      baseURL: env("DEEPSEEK_BASE_URL") || "https://api.deepseek.com",
-      apiKey: requireEnv("DEEPSEEK_API_KEY"),
-      model: env("DEEPSEEK_MODEL") || "deepseek-chat",
-    },
-  ];
-
-  if (env("GEMINI_ENABLED").toLowerCase() === "true") {
-    providers.push({
-      provider: "gemini",
-      kind: "gemini",
-      apiKey: requireEnv("GEMINI_API_KEY"),
-      model: env("GEMINI_MODEL") || "gemini-2.5-flash",
-    });
-  }
-
-  return providers;
-}
-
-/* ---------------- Route ---------------- */
 
 export async function POST(req: NextRequest) {
   let rlMeta: RateLimitMeta | undefined;
@@ -639,76 +89,28 @@ export async function POST(req: NextRequest) {
       return res;
     }
 
-    const timeoutMs = body.timeoutMs ?? 35_000;
-    const maxTokens = body.maxTokens ?? 1_200;
-    const messages = buildMessages(body);
-    const providersToRun = getProvidersToRun();
-
-    const startedAll = Date.now();
-
-    const settled = await Promise.allSettled(
-      providersToRun.map((p) => {
-        if (p.kind === "gemini") {
-          return callGemini({
-            provider: p.provider,
-            apiKey: p.apiKey,
-            model: p.model,
-            messages,
-            timeoutMs,
-          });
-        }
-
-        return callChatCompletions({
-          provider: p.provider,
-          baseURL: p.baseURL,
-          apiKey: p.apiKey,
-          model: p.model,
-          messages,
-          temperature: 0.2,
-          timeoutMs,
-          maxTokens,
-        });
-      })
-    );
-
-    const results: ProviderResult[] = settled.map((s, i) => {
-      if (s.status === "fulfilled") return s.value;
-      return {
-        provider: providersToRun[i].provider,
-        model: providersToRun[i].model,
-        status: "error",
-        ms: Date.now() - startedAll,
-        error: String((s.reason as any)?.message ?? s.reason ?? "error"),
-      };
+    const result = await runCrosscheck({
+      question: body.question,
+      jurisdiction: body.jurisdiction,
+      facts: body.facts,
+      constraints: body.constraints,
+      timeoutMs: body.timeoutMs,
+      maxTokens: body.maxTokens,
     });
 
-    const attempted = providersToRun.map((p) => ({
-      provider: p.provider,
-      model: p.model,
-    }));
-    const succeeded = results
-      .filter((r) => r.status === "ok")
-      .map((r) => ({ provider: r.provider, model: r.model }));
-    const failed = results
-      .filter((r) => r.status !== "ok")
-      .map((r) => ({ provider: r.provider, model: r.model }));
+    const status = result.ok ? 200 : 502;
 
-    const response: CrosscheckResponse = {
-      ok: succeeded.length > 0,
-      meta: {
-        attempted,
-        succeeded,
-        failed,
-        runtime_ms: Date.now() - startedAll,
+    const res = NextResponse.json(
+      {
+        ok: result.ok,
+        meta: result.meta,
+        consensus: result.consensus,
+        providers: result.providers,
+        error: result.ok ? undefined : "All providers failed.",
       },
-      consensus: buildConsensus(results),
-      providers: results,
-      error: succeeded.length > 0 ? undefined : "All providers failed.",
-    };
+      { status }
+    );
 
-    const status = response.ok ? 200 : 502;
-
-    const res = NextResponse.json(response, { status });
     applyRateLimitHeaders(res.headers, rlMeta);
     res.headers.set("cache-control", "no-store, max-age=0");
     return res;
@@ -738,14 +140,10 @@ export async function POST(req: NextRequest) {
       return res;
     }
 
-    if (msg.startsWith("Missing env var:")) {
-      const res = NextResponse.json({ ok: false, error: msg }, { status: 500 });
-      applyRateLimitHeaders(res.headers, rlMeta);
-      res.headers.set("cache-control", "no-store, max-age=0");
-      return res;
-    }
-
-    const res = NextResponse.json({ ok: false, error: msg }, { status: 500 });
+    const res = NextResponse.json(
+      { ok: false, error: msg },
+      { status: 500 }
+    );
     applyRateLimitHeaders(res.headers, rlMeta);
     res.headers.set("cache-control", "no-store, max-age=0");
     return res;
