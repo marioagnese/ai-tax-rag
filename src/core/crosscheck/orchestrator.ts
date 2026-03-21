@@ -502,6 +502,10 @@ function normalizeIssueConsensus(parsed: IssueAdjudicationJson): NormalizedIssue
     decision_steps = fallbackDecisionSteps(transaction_branches, issue_results);
   }
 
+  console.log("ILAM issue_results count:", issue_results.length);
+  console.log("ILAM decision_steps count:", decision_steps.length);
+  console.log("ILAM transaction_branches count:", transaction_branches.length);
+
   const normalized = {
     transaction_branches,
     decision_steps,
@@ -1137,7 +1141,12 @@ async function adjudicateIssueMatrixWithOpenAI(args: {
   const raw = resp.choices?.[0]?.message?.content || "{}";
   const extracted = extractJsonObject(raw);
   const parsed = safeJsonParse<IssueAdjudicationJson>(extracted);
-  if (!parsed) return null;
+  console.log("ILAM OpenAI parsed:", !!parsed);
+  if (!parsed) {
+    console.log("ILAM OpenAI raw:", raw);
+    console.log("ILAM OpenAI extracted:", extracted);
+    return null;
+  }
 
   return normalizeIssueConsensus(parsed);
 }
@@ -1172,7 +1181,12 @@ async function adjudicateIssueMatrixWithClaude(args: {
 
   const extracted = extractJsonObject(result.text);
   const parsed = safeJsonParse<IssueAdjudicationJson>(extracted);
-  if (!parsed) return null;
+  console.log("ILAM Claude parsed:", !!parsed);
+  if (!parsed) {
+    console.log("ILAM Claude raw:", result.text);
+    console.log("ILAM Claude extracted:", extracted);
+    return null;
+  }
 
   return normalizeIssueConsensus(parsed);
 }
@@ -1231,7 +1245,12 @@ async function mergeIssueAdjudicationsWithOpenAI(args: {
   const raw = resp.choices?.[0]?.message?.content || "{}";
   const extracted = extractJsonObject(raw);
   const parsed = safeJsonParse<IssueAdjudicationJson>(extracted);
-  if (!parsed) return args.gpt || args.claude || null;
+  console.log("ILAM Merger parsed:", !!parsed);
+  if (!parsed) {
+    console.log("ILAM Merger raw:", raw);
+    console.log("ILAM Merger extracted:", extracted);
+    return args.gpt || args.claude || null;
+  }
 
   return normalizeIssueConsensus(parsed);
 }
@@ -1382,6 +1401,7 @@ export async function runCrosscheck(
 
   if (succeededCalls.length >= 2) {
     const matrix = buildIssueMatrix(input, providers);
+    console.log("Issue matrix built:", JSON.stringify(matrix.issues.map((i) => i.id), null, 2));
 
     if (dualAdjudicatorEnabled()) {
       const [gptIssueAdj, claudeIssueAdj] = await Promise.all([
@@ -1420,6 +1440,20 @@ export async function runCrosscheck(
       finalConsensus = await adjudicateWithOpenAI(input, providers).catch(() => null);
     }
   }
+
+  console.log("succeededCalls:", succeededCalls.length);
+  console.log("finalIssueConsensus exists:", !!finalIssueConsensus);
+  console.log("finalConsensus exists:", !!finalConsensus);
+  console.log(
+    "answer source:",
+    finalIssueConsensus
+      ? "ILAM"
+      : finalConsensus
+      ? "LEGACY"
+      : best
+      ? "BEST_PROVIDER"
+      : "NONE"
+  );
 
   const answer =
     finalIssueConsensus?.answer ||
