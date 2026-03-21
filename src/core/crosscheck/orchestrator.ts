@@ -219,9 +219,16 @@ type IssueResultJson = {
   missing_facts?: string[];
 };
 
+type DecisionStepJson = {
+  step_title?: string;
+  step_rule?: string;
+  branch_outcomes?: string[];
+};
+
 type IssueAdjudicationJson = {
   bottom_line?: string;
   transaction_branches?: string[];
+  decision_steps?: DecisionStepJson[];
   issue_results?: IssueResultJson[];
   cross_issue_warnings?: string[];
   conservative_recommendation?: string;
@@ -244,9 +251,16 @@ type NormalizedIssueResult = {
   missing_facts: string[];
 };
 
+type NormalizedDecisionStep = {
+  step_title: string;
+  step_rule: string;
+  branch_outcomes: string[];
+};
+
 type NormalizedIssueConsensus = {
   answer: string;
   transaction_branches: string[];
+  decision_steps: NormalizedDecisionStep[];
   issue_results: NormalizedIssueResult[];
   cross_issue_warnings: string[];
   conservative_recommendation: string;
@@ -334,18 +348,101 @@ function normalizeConsensus(parsed: any) {
   };
 }
 
+function normalizeDecisionSteps(value: unknown): NormalizedDecisionStep[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((x) => {
+      const step_title = String((x as DecisionStepJson)?.step_title || "").trim();
+      const step_rule = String((x as DecisionStepJson)?.step_rule || "").trim();
+      const branch_outcomes = normalizeStringArray((x as DecisionStepJson)?.branch_outcomes);
+
+      return {
+        step_title,
+        step_rule,
+        branch_outcomes,
+      };
+    })
+    .filter((x) => x.step_title || x.step_rule || x.branch_outcomes.length)
+    .map((x, idx) => ({
+      step_title: x.step_title || `Step ${idx + 1}`,
+      step_rule: x.step_rule,
+      branch_outcomes: x.branch_outcomes,
+    }));
+}
+
+function fallbackDecisionSteps(
+  transactionBranches: string[],
+  issueResults: NormalizedIssueResult[]
+): NormalizedDecisionStep[] {
+  const steps: NormalizedDecisionStep[] = [];
+
+  const classification = issueResults.find((x) =>
+    ["transaction_classification", "taxpayer_status"].includes(x.issue_id)
+  );
+
+  if (classification) {
+    steps.push({
+      step_title: "Classify the transaction and the parties",
+      step_rule: classification.conclusion,
+      branch_outcomes: [],
+    });
+  }
+
+  const trigger = issueResults.find((x) =>
+    ["trigger_conditions", "brazil_difal"].includes(x.issue_id)
+  );
+
+  if (trigger) {
+    steps.push({
+      step_title: "Apply the controlling trigger conditions",
+      step_rule: trigger.conclusion,
+      branch_outcomes: transactionBranches.length ? transactionBranches : [],
+    });
+  }
+
+  const special = issueResults.find((x) =>
+    ["special_regimes", "brazil_icms_st", "brazil_import_4_percent"].includes(x.issue_id)
+  );
+
+  if (special) {
+    steps.push({
+      step_title: "Check override regimes and exceptions",
+      step_rule: special.conclusion,
+      branch_outcomes: special.minority_view ? [special.minority_view] : [],
+    });
+  }
+
+  return steps;
+}
+
 function buildILAMAnswer(consensus: Omit<NormalizedIssueConsensus, "answer">): string {
   const lines: string[] = [];
 
   if (consensus.transaction_branches.length) {
     lines.push("Bottom line:");
-    lines.push(consensus.transaction_branches[0] || "");
+    lines.push(consensus.transaction_branches[0]);
+  } else if (consensus.issue_results.length) {
+    const firstControlling =
+      consensus.issue_results.find((x) => x.controlling) || consensus.issue_results[0];
+    lines.push("Bottom line:");
+    lines.push(firstControlling.conclusion);
   }
 
-  if (consensus.transaction_branches.length > 1) {
+  if (consensus.decision_steps.length) {
     lines.push("");
-    lines.push("Transaction branches:");
-    consensus.transaction_branches.forEach((x) => lines.push(`- ${x}`));
+    lines.push("Decision framework:");
+    consensus.decision_steps.forEach((step, idx) => {
+      lines.push(`${idx + 1}. ${step.step_title}`);
+      if (step.step_rule) {
+        lines.push(`   Rule: ${step.step_rule}`);
+      }
+      if (step.branch_outcomes.length) {
+        step.branch_outcomes.forEach((branch) => {
+          lines.push(`   - ${branch}`);
+        });
+      }
+    });
   }
 
   if (consensus.issue_results.length) {
@@ -398,8 +495,16 @@ function normalizeIssueConsensus(parsed: IssueAdjudicationJson): NormalizedIssue
     }))
     .filter((x) => x.issue_id && x.issue_label && x.conclusion);
 
+  const transaction_branches = normalizeStringArray(parsed?.transaction_branches);
+  let decision_steps = normalizeDecisionSteps(parsed?.decision_steps);
+
+  if (!decision_steps.length) {
+    decision_steps = fallbackDecisionSteps(transaction_branches, issue_results);
+  }
+
   const normalized = {
-    transaction_branches: normalizeStringArray(parsed?.transaction_branches),
+    transaction_branches,
+    decision_steps,
     issue_results,
     cross_issue_warnings: normalizeStringArray(parsed?.cross_issue_warnings),
     conservative_recommendation: String(parsed?.conservative_recommendation || "").trim(),
@@ -478,15 +583,6 @@ function buildAdjudicationSystemPrompt(label: "GPT" | "CLAUDE") {
     '  "disagreements": string[],',
     '  "confidence": "low" | "medium" | "high"',
     "}",
-    "",
-    "Important output rules:",
-    "- 'common_ground' = high-level points most models share.",
-    "- 'material_nuances' = legally significant distinctions, including minority-but-important points.",
-    "- 'differences_in_emphasis' = meaningful differences that do not necessarily create conflicting conclusions.",
-    "- 'disagreements' = actual competing legal conclusions or materially different legal framing.",
-    "- 'bottom_line' must be concise, conservative, and not over-generalized.",
-    "- 'conservative_recommendation' should say what must be verified before relying on the answer.",
-    "- If a so-called nuance is actually outcome-determinative, still place it in 'material_nuances' and phrase it as controlling.",
   ].join("\n");
 }
 
@@ -494,7 +590,7 @@ function buildILAMSystemPrompt(label: "GPT" | "CLAUDE") {
   return [
     `You are ${label}, acting as an issue-level adjudicator for a tax crosscheck engine.`,
     "You are NOT comparing whole answers holistically.",
-    "You must adjudicate ISSUE BY ISSUE.",
+    "You must adjudicate ISSUE BY ISSUE and express the result as a DECISION FRAMEWORK.",
     "",
     "Core principle:",
     "A provider can be wrong overall but still best on one issue.",
@@ -506,13 +602,22 @@ function buildILAMSystemPrompt(label: "GPT" | "CLAUDE") {
     "3. Do not reward fluency, completeness, or smooth prose unless it improves legal correctness for that issue.",
     "4. Preserve controlling minority distinctions in 'minority_view' when they should affect the final answer.",
     "5. Elevate transaction classification, taxpayer status, legal trigger conditions, special regimes, and missing facts.",
-    "6. If the issue requires branching logic, state that in the conclusion.",
-    "7. Be conservative. If facts are missing, say so explicitly.",
+    "6. Build the output as a sequence of legal decision steps, not as a narrative memo.",
+    "7. If a rule changes by fact pattern, express that as branch outcomes.",
+    "8. Do not state a conditional rule as if it were universally true.",
+    "9. Be conservative. If facts are missing, say so explicitly.",
     "",
     "Return STRICT JSON ONLY with these exact keys:",
     "{",
     '  "bottom_line": string,',
     '  "transaction_branches": string[],',
+    '  "decision_steps": [',
+    "    {",
+    '      "step_title": string,',
+    '      "step_rule": string,',
+    '      "branch_outcomes": string[]',
+    "    }",
+    "  ],",
     '  "issue_results": [',
     "    {",
     '      "issue_id": string,',
@@ -536,7 +641,8 @@ function buildILAMSystemPrompt(label: "GPT" | "CLAUDE") {
     "}",
     "",
     "Important:",
-    "- 'transaction_branches' should contain branch-specific outcomes when the legal result changes by fact pattern.",
+    "- 'transaction_branches' should contain fact-pattern-dependent outcomes.",
+    "- 'decision_steps' must drive the answer structure.",
     "- 'issue_results' must be populated from the issue matrix, not invented.",
     "- If no provider adequately addressed an issue, still return the issue with a conservative conclusion and low confidence.",
     "- Do not invent authority or citations.",
@@ -553,10 +659,11 @@ function buildMergerSystemPrompt() {
     "",
     "Your job is to produce the safest merged issue-level result.",
     "Do NOT average holistically.",
-    "Merge by issue.",
+    "Merge by issue and preserve the decision framework.",
     "If one adjudicator identifies better issue-specific reasoning, keep it.",
     "If one preserves a controlling minority distinction, do not flatten it away.",
     "If transaction branches produce different legal outcomes, preserve the branch structure.",
+    "Do not let the final answer revert to a generic narrative summary.",
     "Prioritize legal precision over elegance.",
     "Do not invent authority or citations.",
     "",
@@ -564,6 +671,13 @@ function buildMergerSystemPrompt() {
     "{",
     '  "bottom_line": string,',
     '  "transaction_branches": string[],',
+    '  "decision_steps": [',
+    "    {",
+    '      "step_title": string,',
+    '      "step_rule": string,',
+    '      "branch_outcomes": string[]',
+    "    }",
+    "  ],",
     '  "issue_results": [',
     "    {",
     '      "issue_id": string,',
@@ -832,6 +946,7 @@ function inferIssueCatalog(input: CrosscheckInput, outputs: ProviderOutput[]): I
         "collection",
         "remittance",
         "filing",
+        "nf-e",
       ],
       priority: 72,
     },
@@ -1016,7 +1131,7 @@ async function adjudicateIssueMatrixWithOpenAI(args: {
       { role: "system", content: buildILAMSystemPrompt("GPT") },
       { role: "user", content: user },
     ],
-    max_tokens: clampInt((args.input as any)?.maxTokens, 900, 2600, 1800),
+    max_tokens: clampInt((args.input as any)?.maxTokens, 900, 2800, 1900),
   });
 
   const raw = resp.choices?.[0]?.message?.content || "{}";
@@ -1050,7 +1165,7 @@ async function adjudicateIssueMatrixWithClaude(args: {
   const result = await callAnthropic({
     ...args.input,
     question: prompt,
-    maxTokens: clampInt((args.input as any)?.maxTokens, 900, 3200, 2000),
+    maxTokens: clampInt((args.input as any)?.maxTokens, 900, 3200, 2100),
   });
 
   if (result.status !== "ok" || !result.text) return null;
@@ -1110,7 +1225,7 @@ async function mergeIssueAdjudicationsWithOpenAI(args: {
       { role: "system", content: buildMergerSystemPrompt() },
       { role: "user", content: user },
     ],
-    max_tokens: 2200,
+    max_tokens: 2300,
   });
 
   const raw = resp.choices?.[0]?.message?.content || "{}";
@@ -1140,25 +1255,18 @@ async function mergeAdjudicationsWithOpenAI(args: {
   const client = new OpenAI({ apiKey });
 
   const packedProviders = packProviderOutputs(args.providerOutputs);
-
   const gptJson = JSON.stringify(args.gpt || {}, null, 2);
   const claudeJson = JSON.stringify(args.claude || {}, null, 2);
 
   const sys = [
     "You are the final merger model for a tax adjudication engine.",
-    "You are receiving:",
-    "1. raw provider outputs,",
-    "2. a GPT adjudication, and",
-    "3. a Claude adjudication.",
-    "",
-    "Your job is to produce the safest, most conservative merged answer.",
+    "You are receiving raw provider outputs and two adjudications.",
+    "Produce the safest, most conservative merged answer.",
     "Do NOT average them blindly.",
     "Do NOT prefer the smoother or more general answer merely because it sounds cleaner.",
     "If one adjudicator captures a more precise legal distinction, keep it.",
-    "If one adjudicator separates transaction categories correctly and the other blends them, prefer the separated analysis.",
-    "If a minority view introduces a constitutional, statutory, or classification-based distinction, treat it as potentially controlling.",
+    "If a minority view introduces a classification-based distinction, treat it as potentially controlling.",
     "Broad consensus does not override a narrower legally correct distinction.",
-    "Distinguish common ground, material nuances, differences in emphasis, and true disagreements.",
     "Do not invent authority or citations.",
     "",
     "Return STRICT JSON ONLY with these exact keys:",
@@ -1173,11 +1281,6 @@ async function mergeAdjudicationsWithOpenAI(args: {
     '  "disagreements": string[],',
     '  "confidence": "low" | "medium" | "high"',
     "}",
-    "",
-    "Important:",
-    "- Do not overstate general rules when they only apply to specific transaction types.",
-    "- Prefer legal precision over brevity.",
-    "- If needed, narrow the bottom line rather than making it over-broad.",
   ].join("\n");
 
   const user = [
