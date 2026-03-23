@@ -51,69 +51,6 @@ function geminiEnabled(): boolean {
   return (env("GEMINI_ENABLED") || "").trim().toLowerCase() === "true";
 }
 
-function pickBest(outputs: ProviderOutput[]): ProviderOutput | null {
-  const ok = outputs.filter(
-    (o) => o.status === "ok" && (o.text || "").trim().length > 50
-  );
-  if (!ok.length) return null;
-
-  const scored = ok.map((o) => {
-    const text = (o.text || "").toLowerCase();
-
-    const refusalPenalty = ["i don't know", "cannot", "unable", "no information"].some((k) =>
-      text.includes(k)
-    )
-      ? 1
-      : 0;
-
-    const weakLanguagePenalty = [
-      "may vary",
-      "depends",
-      "consult a professional",
-      "seek local counsel",
-      "contact tax authorities",
-    ].filter((k) => text.includes(k)).length;
-
-    const usefulSignals =
-      [
-        "however",
-        "but",
-        "risk",
-        "missing facts",
-        "assumption",
-        "difal",
-        "substituição tributária",
-        "final consumer",
-        "fixed assets",
-        "consumption",
-        "resale",
-        "industrialization",
-        "constitutional",
-        "complementary law",
-        "article 155",
-        "kandir",
-        "contributor",
-        "non-contributor",
-      ].filter((k) => text.includes(k)).length * 80;
-
-    const overgeneralizationPenalty =
-      ["typically", "generally", "usually"].filter((k) => text.includes(k)).length * 35;
-
-    const len = (o.text || "").length;
-    const score =
-      len +
-      usefulSignals -
-      refusalPenalty * 500 -
-      weakLanguagePenalty * 80 -
-      overgeneralizationPenalty;
-
-    return { o, score };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
-  return scored[0].o;
-}
-
 function safeJsonParse<T>(s: string): T | null {
   try {
     return JSON.parse(s) as T;
@@ -265,6 +202,8 @@ function cleanMemoText(s: string): string {
     .replace(/\bgnre\b[^.]*\./gi, "")
     .replace(/\bcfop\b[^.]*\./gi, "")
     .replace(/\bfci declaration\b[^.]*\./gi, "")
+    .replace(/\belectronic invoic(?:e|ing)\b[^.]*\./gi, "")
+    .replace(/\bnf-e\b[^.]*\./gi, "")
     .replace(/\s{2,}/g, " ")
     .trim();
 }
@@ -356,6 +295,219 @@ function packProviderOutputs(outputs: ProviderOutput[]): string {
     .join("\n\n");
 }
 
+function buildProviderWorkPrompt(input: CrosscheckInput, providerLabel: string): string {
+  const body = [
+    `You are ${providerLabel}, acting as a senior international tax associate preparing an internal tax memo.`,
+    "You are NOT a chatbot.",
+    "You are NOT writing a general explanation, tax alert, or study note.",
+    "You are producing a concise, decision-useful tax analysis.",
+    "",
+    "OBJECTIVE",
+    "Answer the question using professional tax reasoning.",
+    "Your answer must:",
+    "- identify the governing tax regime",
+    "- identify the controlling legal distinctions",
+    "- separate transaction types where the outcome changes",
+    "- avoid over-generalization",
+    "- avoid including non-central taxes or side topics",
+    "- read like a memo, not a primer",
+    "",
+    "MANDATORY REASONING PROCESS (DO THIS BEFORE WRITING)",
+    "1. Classify the transaction",
+    "   - What is being sold? goods / services / digital",
+    "   - Cross-border or domestic?",
+    "   - Any special context (import, resale, consumption, etc.)",
+    "2. Identify the controlling variables",
+    "   - buyer status (taxpayer vs non-taxpayer)",
+    "   - purpose (resale vs own use / fixed asset)",
+    "   - product category (if relevant)",
+    "   - place-of-taxation mechanics (origin vs destination)",
+    "3. Identify what actually changes the legal outcome",
+    "   - Do NOT treat all cases as one",
+    "   - Separate branches where the answer differs",
+    "4. Exclude non-essential topics",
+    "   - Do NOT include other taxes unless required",
+    "   - Do NOT include compliance mechanics unless outcome-relevant",
+    "   - Do NOT include penalties or litigation",
+    "",
+    "SELF-CRITIQUE BEFORE FINALIZING",
+    "Review your draft critically:",
+    "1. Did I clearly identify the governing tax?",
+    "2. Did I separate transaction types where the outcome changes?",
+    "3. Did I incorrectly generalize any conditional rule?",
+    "4. Did I include non-central topics that should be removed?",
+    "5. Does this read like a memo or like a textbook?",
+    "6. Is the conclusion clear and owned?",
+    "Rewrite the answer to improve precision, structure, memo tone, and removal of unnecessary content.",
+    "",
+    "SCOPE DISCIPLINE",
+    "- Answer only the tax question asked.",
+    "- Do not include ancillary taxes unless necessary to avoid a materially incomplete answer.",
+    "- Do not include litigation, reform, penalty ranges, filing mechanics, registration mechanics, or workflow details unless the question asks for them or they are outcome-determinative.",
+    "- If the question is general, prioritize the governing tax and the controlling legal distinctions.",
+    "- Prefer a shorter, controlled memo over a broader but noisier answer.",
+    "",
+    "OUTPUT FORMAT (STRICT JSON ONLY)",
+    "{",
+    '  "executive_summary": string,',
+    '  "analysis": string,',
+    '  "transaction_specific_treatment": string[],',
+    '  "required_confirmations": string[],',
+    '  "recommendation": string,',
+    '  "confidence": "low" | "medium" | "high"',
+    "}",
+    "",
+    "STYLE RULES",
+    "- Sound like a tax professional, not an AI",
+    "- Be concise and controlled",
+    "- Avoid 'generally', 'typically', unless necessary",
+    "- Do not recommend consulting authorities",
+    "- Do not include penalties or scare language",
+    "- Do not try to be exhaustive — be precise",
+    "- Do not invent authority or citations",
+    "",
+    input.jurisdiction ? `Jurisdiction: ${input.jurisdiction}` : "",
+    input.constraints ? `Constraints: ${input.constraints}` : "",
+    input.facts ? `Facts:\n${input.facts}` : "",
+    `Question:\n${input.question}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return body;
+}
+
+function adaptProviderOutputToMemoText(rawText: string): string {
+  const extracted = extractJsonObject(rawText);
+  const parsed = safeJsonParse<MemoJson>(extracted);
+  if (!parsed) return rawText;
+  return buildMemoAnswer(normalizeMemo(parsed));
+}
+
+function genericityPenalty(text: string): number {
+  const t = text.toLowerCase();
+
+  const penaltyTerms = [
+    "state-specific rules create complexity",
+    "consult local tax",
+    "consult a professional",
+    "may vary",
+    "depends on the facts",
+    "penalties and interest",
+    "seek local counsel",
+    "contact tax authorities",
+    "ongoing litigation",
+    "tax reform",
+    "nf-e",
+    "gnre",
+    "cfop",
+    "pis/cofins",
+    "ipi",
+  ];
+
+  return penaltyTerms.filter((x) => t.includes(x)).length * 90;
+}
+
+function memoQualityBonus(text: string): number {
+  const t = text.toLowerCase();
+
+  const bonuses = [
+    "executive summary",
+    "analysis",
+    "transaction-specific treatment",
+    "required confirmations",
+    "recommendation",
+    "resale",
+    "own use",
+    "fixed asset",
+    "final consumer",
+    "non-taxpayer",
+    "non-contributor",
+    "industrialization",
+  ];
+
+  return bonuses.filter((x) => t.includes(x)).length * 70;
+}
+
+function branchDisciplineBonus(text: string): number {
+  const t = text.toLowerCase();
+
+  let score = 0;
+  if (t.includes("resale")) score += 120;
+  if (t.includes("own use") || t.includes("fixed asset")) score += 120;
+  if (t.includes("final consumer") || t.includes("non-taxpayer") || t.includes("non-contributor")) score += 120;
+  if (t.includes("transaction-specific treatment")) score += 80;
+  return score;
+}
+
+function overgeneralizationPenalty(text: string): number {
+  const t = text.toLowerCase();
+
+  const badPatterns = [
+    "all interstate sales",
+    "interstate sales are subject to",
+    "difal applies to interstate sales",
+    "only interstate rate applies",
+    "the total effective rate typically reaches",
+    "destination state collects an additional difal amount",
+  ];
+
+  return badPatterns.filter((x) => t.includes(x)).length * 120;
+}
+
+function pickBest(outputs: ProviderOutput[]): ProviderOutput | null {
+  const ok = outputs.filter(
+    (o) => o.status === "ok" && (o.text || "").trim().length > 50
+  );
+  if (!ok.length) return null;
+
+  const scored = ok.map((o) => {
+    const text = o.text || "";
+    const refusalPenalty = ["i don't know", "cannot", "unable", "no information"].some((k) =>
+      text.toLowerCase().includes(k)
+    )
+      ? 1
+      : 0;
+
+    const usefulSignals =
+      [
+        "however",
+        "but",
+        "risk",
+        "missing facts",
+        "assumption",
+        "difal",
+        "final consumer",
+        "fixed asset",
+        "consumption",
+        "resale",
+        "industrialization",
+        "constitutional",
+        "complementary law",
+        "article 155",
+        "kandir",
+        "contributor",
+        "non-contributor",
+      ].filter((k) => text.toLowerCase().includes(k)).length * 60;
+
+    const len = text.length;
+
+    const score =
+      len +
+      usefulSignals +
+      memoQualityBonus(text) +
+      branchDisciplineBonus(text) -
+      refusalPenalty * 500 -
+      genericityPenalty(text) -
+      overgeneralizationPenalty(text);
+
+    return { o, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0].o;
+}
+
 function inferIssueCatalog(input: CrosscheckInput, outputs: ProviderOutput[]): IssueDefinition[] {
   const q = `${input.jurisdiction || ""} ${input.question || ""} ${input.facts || ""} ${input.constraints || ""} ${outputs
     .map((o) => o.text || "")
@@ -396,6 +548,7 @@ function inferIssueCatalog(input: CrosscheckInput, outputs: ProviderOutput[]): I
         "contributor",
         "non-contributor",
         "final consumer",
+        "non-taxpayer",
         "reseller",
         "buyer",
         "seller",
@@ -504,24 +657,6 @@ function inferIssueCatalog(input: CrosscheckInput, outputs: ProviderOutput[]): I
       priority: 80,
     },
     {
-      id: "compliance_and_documentation",
-      label: "Compliance, reporting, and documentation",
-      description:
-        "Identify invoice, registration, reporting, collection, and documentary implications.",
-      keywords: [
-        "invoice",
-        "report",
-        "registration",
-        "documentation",
-        "compliance",
-        "collection",
-        "remittance",
-        "filing",
-        "nf-e",
-      ],
-      priority: 72,
-    },
-    {
       id: "missing_facts",
       label: "Missing facts and factual dependencies",
       description:
@@ -568,6 +703,7 @@ function inferIssueCatalog(input: CrosscheckInput, outputs: ProviderOutput[]): I
         "fixed asset",
         "resale",
         "non-contributor",
+        "non-taxpayer",
         "contributor",
       ],
       priority: 97,
@@ -666,80 +802,39 @@ function serializeIssueMatrix(matrix: IssueMatrix): string {
   return JSON.stringify(compact, null, 2);
 }
 
-function buildMemoAdjudicationPrompt(label: "GPT" | "CLAUDE") {
-  return [
-    `You are ${label}, acting as a senior tax adjudicator inside a multi-model tax analysis platform.`,
-    "You are writing a memo-style tax answer for internal business stakeholders.",
-    "You are NOT writing a chatbot answer, tax alert, study note, or comparison of model outputs.",
-    "",
-    "Use the provider outputs only as research inputs.",
-    "Resolve the conflicts yourself and present one integrated legal analysis in your own voice.",
-    "Do NOT say things like 'some models said', 'one model emphasized', 'common ground', 'differences in emphasis', or 'minority view'.",
-    "",
-    "Tone rules:",
-    "- Write like a tax memo prepared for internal business use.",
-    "- Sound like the author owns the conclusion.",
-    "- Do not recommend contacting tax authorities.",
-    "- Do not include generic penalty scare lists unless the question specifically asks for risk quantification.",
-    "- Do not overuse caveats or disclaimers.",
-    "- Where facts matter, state the required confirmations neutrally and briefly.",
-    "",
-    "Scope discipline:",
-    "- Answer only the tax question asked.",
-    "- Do not include ancillary taxes unless they are necessary to avoid a materially incomplete answer.",
-    "- Do not include litigation, reform, penalty ranges, filing mechanics, or registration mechanics unless the question specifically asks for them or they are outcome-determinative.",
-    "- Do not include operational details such as GNRE, CFOP, EFD, FCI, or invoicing workflow unless they are necessary to explain the legal conclusion.",
-    "- If the question is general, prioritize the governing tax and the controlling legal distinctions.",
-    "- Prefer a shorter, controlled memo over a broader but noisier answer.",
-    "- Remove technically true but non-central points.",
-    "",
-    "Substantive rules:",
-    "1. A legally controlling distinction overrides broader but over-generalized consensus.",
-    "2. A minority position should be adopted if it is more legally precise and outcome-determinative.",
-    "3. Separate transaction profiles when the legal answer changes by buyer status, transaction purpose, product type, or place-of-taxation mechanics.",
-    "4. Do not state conditional rules as universal rules.",
-    "5. Be conservative, but still useful and decisive.",
-    "",
-    "When relevant, separate these transaction categories instead of blending them:",
-    "- B2B for resale / industrialization",
-    "- B2B for own use, consumption, or fixed assets",
-    "- B2C / final consumer / non-taxpayer",
-    "",
-    "Return STRICT JSON ONLY with these exact keys:",
-    "{",
-    '  "executive_summary": string,',
-    '  "analysis": string,',
-    '  "transaction_specific_treatment": string[],',
-    '  "required_confirmations": string[],',
-    '  "recommendation": string,',
-    '  "confidence": "low" | "medium" | "high"',
-    "}",
-    "",
-    "Output rules:",
-    "- executive_summary: concise memo-style conclusion.",
-    "- analysis: integrated professional narrative, not bullets about model differences.",
-    "- transaction_specific_treatment: only include branches where legal treatment changes materially.",
-    "- required_confirmations: limited to facts that actually control the answer.",
-    "- recommendation: concise next-step recommendation for internal business decision-making.",
-    "- Do not invent authority or citations.",
-  ].join("\n");
-}
-
 function buildMemoIssuePrompt(label: "GPT" | "CLAUDE") {
   return [
     `You are ${label}, acting as an issue-level tax adjudicator.`,
     "You must adjudicate issue by issue, but the final result must read like one integrated internal tax memo.",
     "You are not writing a model comparison.",
     "",
-    "Instructions:",
-    "1. Review the issue matrix.",
-    "2. For each issue, determine the legally strongest conclusion.",
-    "3. Use issue-level reasoning to build one memo-style answer in your own voice.",
-    "4. Preserve controlling distinctions by converting them into transaction-specific treatment where necessary.",
-    "5. Do not describe which provider agreed or disagreed; never do so in the user-facing memo.",
-    "6. Keep confirmations brief and only include facts that control the legal outcome.",
+    "YOUR JOB",
+    "Evaluate provider outputs based on reasoning quality, not agreement.",
     "",
-    "Scope discipline:",
+    "EVALUATION CRITERIA",
+    "1. Issue identification",
+    "   - Did the provider identify the correct tax regime?",
+    "   - Did it identify the controlling legal question?",
+    "2. Legal distinctions (MOST IMPORTANT)",
+    "   - Did it separate transaction types correctly?",
+    "   - Did it distinguish resale vs own use / fixed assets?",
+    "   - Did it distinguish taxpayer vs non-taxpayer / final consumer?",
+    "3. Over-generalization",
+    "   - Did it incorrectly state conditional rules as universal?",
+    "4. Scope discipline",
+    "   - Did it include unnecessary taxes or topics?",
+    "   - Did it drift into compliance or operational detail?",
+    "5. Memo quality",
+    "   - Does it read like a professional tax memo?",
+    "   - Or like a generic explanation?",
+    "",
+    "ADJUDICATION RULES",
+    "1. The most legally precise answer wins, even if it is a minority view.",
+    "2. Do NOT average answers.",
+    "3. Do NOT merge noise.",
+    "4. You may discard entire answers or extract only one correct section from a model.",
+    "",
+    "SCOPE DISCIPLINE",
     "- Answer only the tax question asked.",
     "- Omit ancillary taxes and side topics unless outcome-determinative.",
     "- Omit litigation, reform, penalties, filing mechanics, and operational steps unless necessary to the legal answer.",
@@ -773,6 +868,10 @@ function buildMemoIssuePrompt(label: "GPT" | "CLAUDE") {
     "- transaction_specific_treatment should contain fact-pattern-dependent outcomes only.",
     "- issue_results exist for internal support, but the memo must stand on its own.",
     "- Do not invent authority or citations.",
+    "",
+    "FINAL CHECK",
+    'Ask yourself: "Would I send this to a business stakeholder?"',
+    "If not, rewrite.",
   ].join("\n");
 }
 
@@ -832,87 +931,6 @@ function buildMemoMergerPrompt() {
     '  "confidence": "low" | "medium" | "high"',
     "}",
   ].join("\n");
-}
-
-async function adjudicateMemoWithOpenAI(
-  input: CrosscheckInput,
-  outputs: ProviderOutput[]
-): Promise<NormalizedMemo | null> {
-  const apiKey = env("OPENAI_API_KEY");
-  if (!apiKey) return null;
-
-  const model =
-    env("OPENAI_ADJUDICATOR_MODEL") ||
-    env("OPENAI_SYNTH_MODEL") ||
-    env("OPENAI_MODEL") ||
-    "gpt-4.1-mini";
-
-  const client = new OpenAI({ apiKey });
-  const packed = packProviderOutputs(outputs);
-
-  const user = [
-    input.jurisdiction ? `Jurisdiction: ${input.jurisdiction}` : "",
-    input.constraints ? `Constraints: ${input.constraints}` : "",
-    input.facts ? `Facts:\n${input.facts}` : "",
-    `Question:\n${input.question}`,
-    "",
-    "Provider outputs:",
-    packed,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-
-  const resp = await client.chat.completions.create({
-    model,
-    temperature: 0.1,
-    messages: [
-      { role: "system", content: buildMemoAdjudicationPrompt("GPT") },
-      { role: "user", content: user },
-    ],
-    max_tokens: clampInt((input as any)?.maxTokens, 700, 2400, 1700),
-  });
-
-  const raw = resp.choices?.[0]?.message?.content || "{}";
-  const extracted = extractJsonObject(raw);
-  const parsed = safeJsonParse<MemoJson>(extracted);
-
-  if (!parsed) return null;
-  return normalizeMemo(parsed);
-}
-
-async function adjudicateMemoWithClaude(
-  input: CrosscheckInput,
-  outputs: ProviderOutput[]
-): Promise<NormalizedMemo | null> {
-  const packed = packProviderOutputs(outputs);
-
-  const prompt = [
-    input.jurisdiction ? `Jurisdiction: ${input.jurisdiction}` : "",
-    input.constraints ? `Constraints: ${input.constraints}` : "",
-    input.facts ? `Facts:\n${input.facts}` : "",
-    `Question:\n${input.question}`,
-    "",
-    "Provider outputs:",
-    packed,
-    "",
-    buildMemoAdjudicationPrompt("CLAUDE"),
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-
-  const result = await callAnthropic({
-    ...input,
-    question: prompt,
-    maxTokens: clampInt((input as any)?.maxTokens, 700, 3200, 1800),
-  });
-
-  if (result.status !== "ok" || !result.text) return null;
-
-  const extracted = extractJsonObject(result.text);
-  const parsed = safeJsonParse<MemoJson>(extracted);
-
-  if (!parsed) return null;
-  return normalizeMemo(parsed);
 }
 
 async function adjudicateMemoIssueMatrixWithOpenAI(args: {
@@ -1095,94 +1113,29 @@ async function mergeMemoIssueAdjudicationsWithOpenAI(args: {
   });
 }
 
-async function mergeMemoAdjudicationsWithOpenAI(args: {
-  input: CrosscheckInput;
-  providerOutputs: ProviderOutput[];
-  gpt: NormalizedMemo | null;
-  claude: NormalizedMemo | null;
-}): Promise<NormalizedMemo | null> {
-  const apiKey = env("OPENAI_API_KEY");
-  if (!apiKey) return args.gpt || args.claude || null;
+function wrapInputForProvider(
+  input: CrosscheckInput,
+  providerLabel: string
+): CrosscheckInput {
+  return {
+    ...input,
+    question: buildProviderWorkPrompt(input, providerLabel),
+  };
+}
 
-  const model =
-    env("OPENAI_MERGER_MODEL") ||
-    env("OPENAI_ADJUDICATOR_MODEL") ||
-    env("OPENAI_SYNTH_MODEL") ||
-    env("OPENAI_MODEL") ||
-    "gpt-4.1-mini";
+function repackageProviderOutput(
+  out: ProviderOutput,
+  originalProvider: string
+): ProviderOutput {
+  if (out.status !== "ok" || !out.text) return out;
 
-  const client = new OpenAI({ apiKey });
-  const packedProviders = packProviderOutputs(args.providerOutputs);
-  const gptJson = JSON.stringify(args.gpt || {}, null, 2);
-  const claudeJson = JSON.stringify(args.claude || {}, null, 2);
+  const memoText = adaptProviderOutputToMemoText(out.text);
 
-  const sys = [
-    "You are the final merger model for a tax adjudication engine.",
-    "You are receiving raw provider outputs and two adjudications.",
-    "Produce the safest, most conservative final internal tax memo.",
-    "Do NOT write a comparison of the adjudications.",
-    "Do NOT use language such as common ground, differences in emphasis, minority view, or one model said.",
-    "Resolve conflicts yourself and present one integrated tax answer in your own voice.",
-    "Where different legal outcomes apply to different fact patterns, present transaction-specific treatment.",
-    "Prefer legal precision over smooth but over-broad summary.",
-    "Do not recommend contacting tax authorities.",
-    "Do not include generic penalty lists or boilerplate disclaimers.",
-    "",
-    "Scope discipline:",
-    "- Answer only the tax question asked.",
-    "- Omit ancillary taxes unless necessary to avoid a materially incomplete answer.",
-    "- Omit litigation, reform, penalty ranges, filing mechanics, registration mechanics, and workflow details unless the question asks for them or they are outcome-determinative.",
-    "- If the question is general, focus on the governing tax and controlling distinctions.",
-    "- Prefer memo usefulness over broad technical completeness.",
-    "- Remove technically true but non-central points.",
-    "",
-    "Do not invent authority or citations.",
-    "",
-    "Return STRICT JSON ONLY with these exact keys:",
-    "{",
-    '  "executive_summary": string,',
-    '  "analysis": string,',
-    '  "transaction_specific_treatment": string[],',
-    '  "required_confirmations": string[],',
-    '  "recommendation": string,',
-    '  "confidence": "low" | "medium" | "high"',
-    "}",
-  ].join("\n");
-
-  const user = [
-    args.input.jurisdiction ? `Jurisdiction: ${args.input.jurisdiction}` : "",
-    args.input.constraints ? `Constraints: ${args.input.constraints}` : "",
-    args.input.facts ? `Facts:\n${args.input.facts}` : "",
-    `Question:\n${args.input.question}`,
-    "",
-    "Raw provider outputs:",
-    packedProviders,
-    "",
-    "GPT adjudication:",
-    gptJson,
-    "",
-    "Claude adjudication:",
-    claudeJson,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-
-  const resp = await client.chat.completions.create({
-    model,
-    temperature: 0.1,
-    messages: [
-      { role: "system", content: sys },
-      { role: "user", content: user },
-    ],
-    max_tokens: 1800,
-  });
-
-  const raw = resp.choices?.[0]?.message?.content || "{}";
-  const extracted = extractJsonObject(raw);
-  const parsed = safeJsonParse<MemoJson>(extracted);
-
-  if (!parsed) return args.gpt || args.claude || null;
-  return normalizeMemo(parsed);
+  return {
+    ...out,
+    provider: originalProvider,
+    text: memoText,
+  };
 }
 
 export async function runCrosscheck(
@@ -1214,19 +1167,28 @@ export async function runCrosscheck(
 
   const openaiModel = env("OPENAI_MODEL") || "gpt-4.1-mini";
   tasks.push(
-    wrap({ provider: "openai", model: openaiModel }, () => callOpenAI(input))
+    wrap({ provider: "openai", model: openaiModel }, async () => {
+      const result = await callOpenAI(wrapInputForProvider(input, "OpenAI"));
+      return repackageProviderOutput(result, "openai");
+    })
   );
 
   for (const m of defaultOpenRouterModels()) {
     tasks.push(
-      wrap({ provider: "openrouter", model: m }, () => callOpenRouter(input, m))
+      wrap({ provider: "openrouter", model: m }, async () => {
+        const result = await callOpenRouter(wrapInputForProvider(input, m), m);
+        return repackageProviderOutput(result, "openrouter");
+      })
     );
   }
 
   if (geminiEnabled()) {
     const geminiModel = env("GEMINI_MODEL") || "gemini-2.5-flash";
     tasks.push(
-      wrap({ provider: "gemini", model: geminiModel }, () => callGemini(input))
+      wrap({ provider: "gemini", model: geminiModel }, async () => {
+        const result = await callGemini(wrapInputForProvider(input, "Gemini"));
+        return repackageProviderOutput(result, "gemini");
+      })
     );
   }
 
@@ -1269,20 +1231,17 @@ export async function runCrosscheck(
   }
 
   if (!finalMemo) {
-    if (dualAdjudicatorEnabled()) {
-      const [gptAdj, claudeAdj] = await Promise.all([
-        adjudicateMemoWithOpenAI(input, providers).catch(() => null),
-        adjudicateMemoWithClaude(input, providers).catch(() => null),
-      ]);
+    const fallbackText = best?.text?.trim() || "";
 
-      finalMemo = await mergeMemoAdjudicationsWithOpenAI({
-        input,
-        providerOutputs: providers,
-        gpt: gptAdj,
-        claude: claudeAdj,
-      }).catch(() => gptAdj || claudeAdj || null);
-    } else {
-      finalMemo = await adjudicateMemoWithOpenAI(input, providers).catch(() => null);
+    if (fallbackText) {
+      finalMemo = normalizeMemo({
+        executive_summary: splitIntoSnippets(fallbackText)[0] || fallbackText,
+        analysis: fallbackText,
+        transaction_specific_treatment: [],
+        required_confirmations: [],
+        recommendation: "",
+        confidence: succeededCalls.length >= 2 ? "medium" : "low",
+      });
     }
   }
 
