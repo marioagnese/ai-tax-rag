@@ -51,6 +51,14 @@ function geminiEnabled(): boolean {
   return (env("GEMINI_ENABLED") || "").trim().toLowerCase() === "true";
 }
 
+function coreProviderThreshold(): number {
+  return clampInt(env("CROSSCHECK_PROVIDER_MIN_SCORE"), 0, 1000, 260);
+}
+
+function supportingProviderThreshold(): number {
+  return clampInt(env("CROSSCHECK_PROVIDER_SUPPORT_SCORE"), 0, 1000, 170);
+}
+
 function safeJsonParse<T>(s: string): T | null {
   try {
     return JSON.parse(s) as T;
@@ -176,6 +184,16 @@ type NormalizedMemo = {
   confidence: "low" | "medium" | "high";
 };
 
+type ProviderAssessment = {
+  provider: ProviderOutput["provider"];
+  model: string;
+  status: ProviderOutput["status"];
+  score: number;
+  tier: "core" | "supporting" | "excluded" | "failed";
+  reasons: string[];
+  textPreview: string;
+};
+
 function confidenceOrLow(value: unknown): "low" | "medium" | "high" {
   const v = String(value || "").toLowerCase();
   if (v === "high" || v === "medium" || v === "low") return v;
@@ -295,6 +313,22 @@ function packProviderOutputs(outputs: ProviderOutput[]): string {
     .join("\n\n");
 }
 
+function serializeAssessments(assessments: ProviderAssessment[]): string {
+  return JSON.stringify(
+    assessments.map((a) => ({
+      provider: a.provider,
+      model: a.model,
+      status: a.status,
+      score: a.score,
+      tier: a.tier,
+      reasons: a.reasons,
+      text_preview: a.textPreview,
+    })),
+    null,
+    2
+  );
+}
+
 function buildProviderWorkPrompt(input: CrosscheckInput, providerLabel: string): string {
   const body = [
     `You are ${providerLabel}, acting as a senior international tax associate preparing an internal tax memo.`,
@@ -403,6 +437,8 @@ function genericityPenalty(text: string): number {
     "cfop",
     "pis/cofins",
     "ipi",
+    "electronic invoicing",
+    "supreme federal court",
   ];
 
   return penaltyTerms.filter((x) => t.includes(x)).length * 90;
@@ -435,7 +471,11 @@ function branchDisciplineBonus(text: string): number {
   let score = 0;
   if (t.includes("resale")) score += 120;
   if (t.includes("own use") || t.includes("fixed asset")) score += 120;
-  if (t.includes("final consumer") || t.includes("non-taxpayer") || t.includes("non-contributor")) score += 120;
+  if (
+    t.includes("final consumer") ||
+    t.includes("non-taxpayer") ||
+    t.includes("non-contributor")
+  ) score += 120;
   if (t.includes("transaction-specific treatment")) score += 80;
   return score;
 }
@@ -455,11 +495,156 @@ function overgeneralizationPenalty(text: string): number {
   return badPatterns.filter((x) => t.includes(x)).length * 120;
 }
 
-function pickBest(outputs: ProviderOutput[]): ProviderOutput | null {
+function issueIdentificationBonus(text: string): number {
+  const t = text.toLowerCase();
+  let score = 0;
+  if (t.includes("icms")) score += 80;
+  if (t.includes("buyer status")) score += 80;
+  if (t.includes("intended use") || t.includes("purpose")) score += 60;
+  if (t.includes("interstate")) score += 40;
+  return score;
+}
+
+function providerAssessmentForOutput(o: ProviderOutput): ProviderAssessment {
+  if (o.status !== "ok" || !(o.text || "").trim()) {
+    return {
+      provider: o.provider,
+      model: o.model,
+      status: o.status,
+      score: 0,
+      tier: "failed",
+      reasons: ["provider did not return a usable answer"],
+      textPreview: truncate(o.error || "", 220),
+    };
+  }
+
+  const text = o.text || "";
+  const t = text.toLowerCase();
+  const reasons: string[] = [];
+  let score = 0;
+
+  score += Math.min(text.length, 2400) / 20;
+  score += memoQualityBonus(text);
+  score += branchDisciplineBonus(text);
+  score += issueIdentificationBonus(text);
+
+  const genericPenalty = genericityPenalty(text);
+  const overgenPenalty = overgeneralizationPenalty(text);
+  score -= genericPenalty;
+  score -= overgenPenalty;
+
+  if (t.includes("transaction-specific treatment")) {
+    reasons.push("structured memo output");
+  }
+  if (
+    t.includes("resale") &&
+    (t.includes("own use") || t.includes("fixed asset")) &&
+    (t.includes("final consumer") || t.includes("non-taxpayer") || t.includes("non-contributor"))
+  ) {
+    reasons.push("good branch separation");
+  } else if (
+    t.includes("resale") ||
+    t.includes("own use") ||
+    t.includes("fixed asset") ||
+    t.includes("final consumer")
+  ) {
+    reasons.push("partial branch separation");
+  } else {
+    reasons.push("weak branch separation");
+  }
+
+  if (genericPenalty > 0) {
+    reasons.push("contains non-central or generic content");
+  }
+
+  if (overgenPenalty > 0) {
+    reasons.push("contains over-generalized legal statements");
+  }
+
+  if (t.includes("icms") && t.includes("difal")) {
+    reasons.push("addresses core tax regime");
+  }
+
+  if (
+    t.includes("pis/cofins") ||
+    t.includes("ipi") ||
+    t.includes("gnre") ||
+    t.includes("cfop") ||
+    t.includes("nf-e")
+  ) {
+    reasons.push("drifts into ancillary or operational topics");
+  }
+
+  let tier: ProviderAssessment["tier"] = "excluded";
+  if (score >= coreProviderThreshold()) {
+    tier = "core";
+  } else if (score >= supportingProviderThreshold()) {
+    tier = "supporting";
+  }
+
+  return {
+    provider: o.provider,
+    model: o.model,
+    status: o.status,
+    score: Math.round(score),
+    tier,
+    reasons: uniq(reasons),
+    textPreview: truncate(text, 260),
+  };
+}
+
+function assessProviders(outputs: ProviderOutput[]): ProviderAssessment[] {
+  return outputs.map(providerAssessmentForOutput);
+}
+
+function chooseProvidersForCoreReasoning(
+  outputs: ProviderOutput[],
+  assessments: ProviderAssessment[]
+): ProviderOutput[] {
+  const ok = outputs.filter((o) => o.status === "ok" && (o.text || "").trim());
+  if (!ok.length) return [];
+
+  const byKey = new Map(
+    assessments.map((a) => [`${a.provider}::${a.model}`, a] as const)
+  );
+
+  const core = ok.filter((o) => {
+    const a = byKey.get(`${o.provider}::${o.model}`);
+    return a?.tier === "core";
+  });
+
+  if (core.length >= 2) return core;
+
+  const supporting = ok.filter((o) => {
+    const a = byKey.get(`${o.provider}::${o.model}`);
+    return a?.tier === "supporting";
+  });
+
+  const ordered = [...ok].sort((a, b) => {
+    const aa = byKey.get(`${a.provider}::${a.model}`)?.score ?? 0;
+    const bb = byKey.get(`${b.provider}::${b.model}`)?.score ?? 0;
+    return bb - aa;
+  });
+
+  if (core.length + supporting.length >= 2) {
+    return ordered.filter((o) => {
+      const a = byKey.get(`${o.provider}::${o.model}`);
+      return a?.tier === "core" || a?.tier === "supporting";
+    });
+  }
+
+  return ordered.slice(0, Math.min(3, ordered.length));
+}
+
+function pickBest(outputs: ProviderOutput[], assessments?: ProviderAssessment[]): ProviderOutput | null {
   const ok = outputs.filter(
     (o) => o.status === "ok" && (o.text || "").trim().length > 50
   );
   if (!ok.length) return null;
+
+  const assessmentMap = new Map(
+    (assessments || []).map((a) => [`${a.provider}::${a.model}`, a] as const)
+  );
 
   const scored = ok.map((o) => {
     const text = o.text || "";
@@ -491,12 +676,15 @@ function pickBest(outputs: ProviderOutput[]): ProviderOutput | null {
       ].filter((k) => text.toLowerCase().includes(k)).length * 60;
 
     const len = text.length;
+    const assessmentScore =
+      assessmentMap.get(`${o.provider}::${o.model}`)?.score ?? 0;
 
     const score =
       len +
       usefulSignals +
       memoQualityBonus(text) +
-      branchDisciplineBonus(text) -
+      branchDisciplineBonus(text) +
+      assessmentScore * 4 -
       refusalPenalty * 500 -
       genericityPenalty(text) -
       overgeneralizationPenalty(text);
@@ -834,6 +1022,12 @@ function buildMemoIssuePrompt(label: "GPT" | "CLAUDE") {
     "3. Do NOT merge noise.",
     "4. You may discard entire answers or extract only one correct section from a model.",
     "",
+    "PROVIDER SCREENING",
+    "You will receive provider quality assessments.",
+    "Treat excluded providers as low-trust inputs unless they uniquely raise a legally controlling distinction.",
+    "Treat supporting providers as secondary support, not primary anchors.",
+    "Prefer core providers unless a lower-tier provider captures a clearly superior controlling distinction.",
+    "",
     "SCOPE DISCIPLINE",
     "- Answer only the tax question asked.",
     "- Omit ancillary taxes and side topics unless outcome-determinative.",
@@ -880,8 +1074,9 @@ function buildMemoMergerPrompt() {
     "You are the final merger model for a tax adjudication engine.",
     "You are receiving:",
     "1. the issue matrix,",
-    "2. a GPT issue-level adjudication, and",
-    "3. a Claude issue-level adjudication.",
+    "2. provider quality assessments,",
+    "3. a GPT issue-level adjudication, and",
+    "4. a Claude issue-level adjudication.",
     "",
     "Your job is to produce the safest final internal tax memo.",
     "Do NOT write a comparison of the adjudications.",
@@ -893,6 +1088,11 @@ function buildMemoMergerPrompt() {
     "- Do not recommend contacting tax authorities.",
     "- Do not include generic penalty lists or boilerplate disclaimers.",
     "- Do not let the answer drift into chatbot language.",
+    "",
+    "Provider screening rules:",
+    "- Prefer core providers as the main anchors.",
+    "- Use supporting providers only where they improve precision.",
+    "- Treat excluded providers as low-trust unless they uniquely surface a controlling distinction that is otherwise missing.",
     "",
     "Scope discipline:",
     "- Answer only the tax question asked.",
@@ -936,6 +1136,7 @@ function buildMemoMergerPrompt() {
 async function adjudicateMemoIssueMatrixWithOpenAI(args: {
   input: CrosscheckInput;
   matrix: IssueMatrix;
+  assessments: ProviderAssessment[];
 }): Promise<NormalizedMemo | null> {
   const apiKey = env("OPENAI_API_KEY");
   if (!apiKey) return null;
@@ -949,12 +1150,16 @@ async function adjudicateMemoIssueMatrixWithOpenAI(args: {
 
   const client = new OpenAI({ apiKey });
   const matrixJson = serializeIssueMatrix(args.matrix);
+  const assessmentsJson = serializeAssessments(args.assessments);
 
   const user = [
     args.input.jurisdiction ? `Jurisdiction: ${args.input.jurisdiction}` : "",
     args.input.constraints ? `Constraints: ${args.input.constraints}` : "",
     args.input.facts ? `Facts:\n${args.input.facts}` : "",
     `Question:\n${args.input.question}`,
+    "",
+    "Provider quality assessments:",
+    assessmentsJson,
     "",
     "Issue matrix:",
     matrixJson,
@@ -969,7 +1174,7 @@ async function adjudicateMemoIssueMatrixWithOpenAI(args: {
       { role: "system", content: buildMemoIssuePrompt("GPT") },
       { role: "user", content: user },
     ],
-    max_tokens: clampInt((args.input as any)?.maxTokens, 900, 2800, 1900),
+    max_tokens: clampInt((args.input as any)?.maxTokens, 900, 3200, 2100),
   });
 
   const raw = resp.choices?.[0]?.message?.content || "{}";
@@ -996,14 +1201,19 @@ async function adjudicateMemoIssueMatrixWithOpenAI(args: {
 async function adjudicateMemoIssueMatrixWithClaude(args: {
   input: CrosscheckInput;
   matrix: IssueMatrix;
+  assessments: ProviderAssessment[];
 }): Promise<NormalizedMemo | null> {
   const matrixJson = serializeIssueMatrix(args.matrix);
+  const assessmentsJson = serializeAssessments(args.assessments);
 
   const prompt = [
     args.input.jurisdiction ? `Jurisdiction: ${args.input.jurisdiction}` : "",
     args.input.constraints ? `Constraints: ${args.input.constraints}` : "",
     args.input.facts ? `Facts:\n${args.input.facts}` : "",
     `Question:\n${args.input.question}`,
+    "",
+    "Provider quality assessments:",
+    assessmentsJson,
     "",
     "Issue matrix:",
     matrixJson,
@@ -1016,7 +1226,7 @@ async function adjudicateMemoIssueMatrixWithClaude(args: {
   const result = await callAnthropic({
     ...args.input,
     question: prompt,
-    maxTokens: clampInt((args.input as any)?.maxTokens, 900, 3200, 2100),
+    maxTokens: clampInt((args.input as any)?.maxTokens, 900, 3600, 2300),
   });
 
   if (result.status !== "ok" || !result.text) return null;
@@ -1044,6 +1254,7 @@ async function adjudicateMemoIssueMatrixWithClaude(args: {
 async function mergeMemoIssueAdjudicationsWithOpenAI(args: {
   input: CrosscheckInput;
   matrix: IssueMatrix;
+  assessments: ProviderAssessment[];
   gpt: NormalizedMemo | null;
   claude: NormalizedMemo | null;
 }): Promise<NormalizedMemo | null> {
@@ -1061,6 +1272,7 @@ async function mergeMemoIssueAdjudicationsWithOpenAI(args: {
   const client = new OpenAI({ apiKey });
 
   const matrixJson = serializeIssueMatrix(args.matrix);
+  const assessmentsJson = serializeAssessments(args.assessments);
   const gptJson = JSON.stringify(args.gpt || {}, null, 2);
   const claudeJson = JSON.stringify(args.claude || {}, null, 2);
 
@@ -1069,6 +1281,9 @@ async function mergeMemoIssueAdjudicationsWithOpenAI(args: {
     args.input.constraints ? `Constraints: ${args.input.constraints}` : "",
     args.input.facts ? `Facts:\n${args.input.facts}` : "",
     `Question:\n${args.input.question}`,
+    "",
+    "Provider quality assessments:",
+    assessmentsJson,
     "",
     "Issue matrix:",
     matrixJson,
@@ -1084,12 +1299,12 @@ async function mergeMemoIssueAdjudicationsWithOpenAI(args: {
 
   const resp = await client.chat.completions.create({
     model,
-    temperature: 0.1,
+    temperature: 0.05,
     messages: [
       { role: "system", content: buildMemoMergerPrompt() },
       { role: "user", content: user },
     ],
-    max_tokens: 2300,
+    max_tokens: 2600,
   });
 
   const raw = resp.choices?.[0]?.message?.content || "{}";
@@ -1203,22 +1418,36 @@ export async function runCrosscheck(
     else failedCalls.push(call);
   }
 
-  const best = pickBest(providers);
+  const assessments = assessProviders(providers);
+  const coreReasoningProviders = chooseProvidersForCoreReasoning(
+    providers,
+    assessments
+  );
+  const best = pickBest(providers, assessments);
 
   let finalMemo: NormalizedMemo | null = null;
 
-  if (succeededCalls.length >= 2) {
-    const matrix = buildIssueMatrix(input, providers);
+  if (coreReasoningProviders.length >= 2) {
+    const matrix = buildIssueMatrix(input, coreReasoningProviders);
 
     if (dualAdjudicatorEnabled()) {
       const [gptIssueAdj, claudeIssueAdj] = await Promise.all([
-        adjudicateMemoIssueMatrixWithOpenAI({ input, matrix }).catch(() => null),
-        adjudicateMemoIssueMatrixWithClaude({ input, matrix }).catch(() => null),
+        adjudicateMemoIssueMatrixWithOpenAI({
+          input,
+          matrix,
+          assessments,
+        }).catch(() => null),
+        adjudicateMemoIssueMatrixWithClaude({
+          input,
+          matrix,
+          assessments,
+        }).catch(() => null),
       ]);
 
       finalMemo = await mergeMemoIssueAdjudicationsWithOpenAI({
         input,
         matrix,
+        assessments,
         gpt: gptIssueAdj,
         claude: claudeIssueAdj,
       }).catch(() => gptIssueAdj || claudeIssueAdj || null);
@@ -1226,6 +1455,7 @@ export async function runCrosscheck(
       finalMemo = await adjudicateMemoIssueMatrixWithOpenAI({
         input,
         matrix,
+        assessments,
       }).catch(() => null);
     }
   }
@@ -1240,7 +1470,7 @@ export async function runCrosscheck(
         transaction_specific_treatment: [],
         required_confirmations: [],
         recommendation: "",
-        confidence: succeededCalls.length >= 2 ? "medium" : "low",
+        confidence: coreReasoningProviders.length >= 2 ? "medium" : "low",
       });
     }
   }
@@ -1253,21 +1483,27 @@ export async function runCrosscheck(
       .join(", ")}`;
 
   const followups = uniq(finalMemo?.required_confirmations || []);
-  const caveats = uniq(
-    !succeededCalls.length
+  const caveats = uniq([
+    ...(!succeededCalls.length
       ? [
           "No providers returned a successful answer. Check API keys, model names, and network access.",
         ]
-      : succeededCalls.length === 1
+      : []),
+    ...(succeededCalls.length === 1
       ? [
           "Only one provider returned a successful answer, so the result is weaker than a true cross-model adjudication.",
         ]
-      : []
-  );
+      : []),
+    ...(coreReasoningProviders.length < 2 && succeededCalls.length >= 2
+      ? [
+          "Multiple providers responded, but most were screened out as too generic or low-quality for core adjudication.",
+        ]
+      : []),
+  ]);
 
   const confidence =
     finalMemo?.confidence ||
-    (succeededCalls.length >= 2 ? "medium" : "low");
+    (coreReasoningProviders.length >= 2 ? "medium" : "low");
 
   const runtime_ms = Date.now() - t0;
 
