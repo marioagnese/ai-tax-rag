@@ -1125,7 +1125,7 @@ function wrapInputForProvider(
 
 function repackageProviderOutput(
   out: ProviderOutput,
-  originalProvider: string
+  originalProvider: ProviderOutput["provider"]
 ): ProviderOutput {
   if (out.status !== "ok" || !out.text) return out;
 
