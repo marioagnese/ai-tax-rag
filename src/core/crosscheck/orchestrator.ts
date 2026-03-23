@@ -66,21 +66,21 @@ function pickBest(outputs: ProviderOutput[]): ProviderOutput | null {
       ? 1
       : 0;
 
-    const weakLanguagePenalty = ["may vary", "depends", "consult a professional"].filter((k) =>
-      text.includes(k)
-    ).length;
+    const weakLanguagePenalty = [
+      "may vary",
+      "depends",
+      "consult a professional",
+      "seek local counsel",
+      "contact tax authorities",
+    ].filter((k) => text.includes(k)).length;
 
     const usefulSignals =
       [
         "however",
         "but",
-        "title",
         "risk",
-        "depends on contract",
         "missing facts",
-        "caveat",
         "assumption",
-        "diferencial",
         "difal",
         "substituição tributária",
         "final consumer",
@@ -90,6 +90,10 @@ function pickBest(outputs: ProviderOutput[]): ProviderOutput | null {
         "industrialization",
         "constitutional",
         "complementary law",
+        "article 155",
+        "kandir",
+        "contributor",
+        "non-contributor",
       ].filter((k) => text.includes(k)).length * 80;
 
     const overgeneralizationPenalty =
@@ -147,19 +151,35 @@ function normalizeText(s: string): string {
     .trim();
 }
 
-function truncate(s: string, max = 900): string {
+function truncate(s: string, max = 1000): string {
   const v = String(s || "").trim();
   if (v.length <= max) return v;
   return `${v.slice(0, max - 3).trim()}...`;
 }
 
-type NarrativeAdjudicationJson = {
-  bottom_line?: string;
-  technical_analysis?: string;
-  branch_analysis?: string[];
-  key_risks?: string[];
-  missing_facts?: string[];
-  practical_recommendation?: string;
+function splitIntoSnippets(text: string): string[] {
+  const normalized = normalizeText(text);
+  if (!normalized) return [];
+
+  const bulletized = normalized
+    .replace(/\n[-*]\s+/g, "\n")
+    .replace(/\n\d+\.\s+/g, "\n");
+
+  const parts = bulletized
+    .split(/\n+|(?<=[.!?;:])\s+(?=[A-Z0-9(])/g)
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .filter((x) => x.length >= 20);
+
+  return uniq(parts);
+}
+
+type MemoJson = {
+  executive_summary?: string;
+  analysis?: string;
+  transaction_specific_treatment?: string[];
+  required_confirmations?: string[];
+  recommendation?: string;
   confidence?: "low" | "medium" | "high" | string;
 };
 
@@ -187,7 +207,7 @@ type IssueMatrix = {
   nodes: Record<string, IssueNode[]>;
 };
 
-type NarrativeIssueResultJson = {
+type MemoIssueResultJson = {
   issue_id?: string;
   issue_label?: string;
   selected_provider?: string;
@@ -199,25 +219,23 @@ type NarrativeIssueResultJson = {
   missing_facts?: string[];
 };
 
-type NarrativeIssueAdjudicationJson = {
-  bottom_line?: string;
-  technical_analysis?: string;
-  branch_analysis?: string[];
-  issue_results?: NarrativeIssueResultJson[];
-  key_risks?: string[];
-  missing_facts?: string[];
-  practical_recommendation?: string;
+type MemoIssueAdjudicationJson = {
+  executive_summary?: string;
+  analysis?: string;
+  transaction_specific_treatment?: string[];
+  issue_results?: MemoIssueResultJson[];
+  required_confirmations?: string[];
+  recommendation?: string;
   confidence?: "low" | "medium" | "high" | string;
 };
 
-type NormalizedNarrativeConsensus = {
+type NormalizedMemo = {
   answer: string;
-  bottom_line: string;
-  technical_analysis: string;
-  branch_analysis: string[];
-  key_risks: string[];
-  missing_facts: string[];
-  practical_recommendation: string;
+  executive_summary: string;
+  analysis: string;
+  transaction_specific_treatment: string[];
+  required_confirmations: string[];
+  recommendation: string;
   confidence: "low" | "medium" | "high";
 };
 
@@ -227,59 +245,90 @@ function confidenceOrLow(value: unknown): "low" | "medium" | "high" {
   return "low";
 }
 
-function buildNarrativeAnswer(parsed: Omit<NormalizedNarrativeConsensus, "answer">): string {
+function cleanMemoText(s: string): string {
+  return String(s || "")
+    .replace(/\bcommon ground\b:?/gi, "")
+    .replace(/\bdifferences in emphasis\b:?/gi, "")
+    .replace(/\bminority view\b:?/gi, "")
+    .replace(/\bone model\b/gi, "")
+    .replace(/\bsome models\b/gi, "")
+    .replace(/\bconsult (?:local )?counsel\b/gi, "obtain targeted review where needed")
+    .replace(/\bcontact tax authorities\b/gi, "confirm the applicable rule set")
+    .replace(/\bpenalt(?:y|ies)\b[^.]*\./gi, "")
+    .replace(/\bselic\b[^.]*\./gi, "")
+    .replace(/\bsupreme federal court\b[^.]*\./gi, "")
+    .replace(/\bongoing constitutional challenges\b[^.]*\./gi, "")
+    .replace(/\bphase-?in\b[^.]*\./gi, "")
+    .replace(/\bconstitutional amendment 132\/2023\b[^.]*\./gi, "")
+    .replace(/\bpis\/cofins\b[^.]*\./gi, "")
+    .replace(/\bipi\b[^.]*\./gi, "")
+    .replace(/\bgnre\b[^.]*\./gi, "")
+    .replace(/\bcfop\b[^.]*\./gi, "")
+    .replace(/\bfci declaration\b[^.]*\./gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function cleanMemoArray(values: string[]): string[] {
+  return uniq(
+    values
+      .map(cleanMemoText)
+      .map((x) => x.replace(/^[•\-]\s*/, "").trim())
+      .filter(Boolean)
+      .filter((x) => x.length > 8)
+  );
+}
+
+function buildMemoAnswer(parsed: Omit<NormalizedMemo, "answer">): string {
   const lines: string[] = [];
 
-  if (parsed.bottom_line) {
-    lines.push("Bottom line:");
-    lines.push(parsed.bottom_line);
+  if (parsed.executive_summary) {
+    lines.push("Executive summary");
+    lines.push(parsed.executive_summary);
   }
 
-  if (parsed.technical_analysis) {
+  if (parsed.analysis) {
     lines.push("");
-    lines.push("Technical analysis:");
-    lines.push(parsed.technical_analysis);
+    lines.push("Analysis");
+    lines.push(parsed.analysis);
   }
 
-  if (parsed.branch_analysis.length) {
+  if (parsed.transaction_specific_treatment.length) {
     lines.push("");
-    lines.push("Branch analysis:");
-    parsed.branch_analysis.forEach((x) => lines.push(`- ${x}`));
+    lines.push("Transaction-specific treatment");
+    parsed.transaction_specific_treatment.forEach((x) => lines.push(`- ${x}`));
   }
 
-  if (parsed.key_risks.length) {
+  if (parsed.required_confirmations.length) {
     lines.push("");
-    lines.push("Key risks / caveats:");
-    parsed.key_risks.forEach((x) => lines.push(`- ${x}`));
+    lines.push("Required confirmations");
+    parsed.required_confirmations.forEach((x) => lines.push(`- ${x}`));
   }
 
-  if (parsed.missing_facts.length) {
+  if (parsed.recommendation) {
     lines.push("");
-    lines.push("Missing facts / follow-ups needed:");
-    parsed.missing_facts.forEach((x) => lines.push(`- ${x}`));
-  }
-
-  if (parsed.practical_recommendation) {
-    lines.push("");
-    lines.push("Practical recommendation:");
-    lines.push(parsed.practical_recommendation);
+    lines.push("Recommendation");
+    lines.push(parsed.recommendation);
   }
 
   return lines.join("\n").trim();
 }
 
-function normalizeNarrativeConsensus(parsed: NarrativeAdjudicationJson): NormalizedNarrativeConsensus {
+function normalizeMemo(parsed: MemoJson): NormalizedMemo {
   const normalized = {
-    bottom_line: String(parsed?.bottom_line || "").trim(),
-    technical_analysis: String(parsed?.technical_analysis || "").trim(),
-    branch_analysis: normalizeStringArray(parsed?.branch_analysis),
-    key_risks: normalizeStringArray(parsed?.key_risks),
-    missing_facts: normalizeStringArray(parsed?.missing_facts),
-    practical_recommendation: String(parsed?.practical_recommendation || "").trim(),
+    executive_summary: cleanMemoText(String(parsed?.executive_summary || "").trim()),
+    analysis: cleanMemoText(String(parsed?.analysis || "").trim()),
+    transaction_specific_treatment: cleanMemoArray(
+      normalizeStringArray(parsed?.transaction_specific_treatment)
+    ),
+    required_confirmations: cleanMemoArray(
+      normalizeStringArray(parsed?.required_confirmations)
+    ),
+    recommendation: cleanMemoText(String(parsed?.recommendation || "").trim()),
     confidence: confidenceOrLow(parsed?.confidence),
   };
 
-  const answer = buildNarrativeAnswer(normalized);
+  const answer = buildMemoAnswer(normalized);
 
   return {
     ...normalized,
@@ -552,23 +601,6 @@ function inferIssueCatalog(input: CrosscheckInput, outputs: ProviderOutput[]): I
     .sort((a, b) => b.priority - a.priority);
 }
 
-function splitIntoSnippets(text: string): string[] {
-  const normalized = normalizeText(text);
-  if (!normalized) return [];
-
-  const bulletized = normalized
-    .replace(/\n[-*]\s+/g, "\n")
-    .replace(/\n\d+\.\s+/g, "\n");
-
-  const parts = bulletized
-    .split(/\n+|(?<=[.!?;:])\s+(?=[A-Z0-9(])/g)
-    .map((x) => x.trim())
-    .filter(Boolean)
-    .filter((x) => x.length >= 20);
-
-  return uniq(parts);
-}
-
 function collectIssueSnippetsForProvider(
   provider: ProviderOutput,
   issue: IssueDefinition
@@ -634,22 +666,39 @@ function serializeIssueMatrix(matrix: IssueMatrix): string {
   return JSON.stringify(compact, null, 2);
 }
 
-function buildNarrativeAdjudicationPrompt(label: "GPT" | "CLAUDE") {
+function buildMemoAdjudicationPrompt(label: "GPT" | "CLAUDE") {
   return [
     `You are ${label}, acting as a senior tax adjudicator inside a multi-model tax analysis platform.`,
-    "You are NOT writing a comparison report about model outputs.",
-    "You are writing the final professional tax answer.",
+    "You are writing a memo-style tax answer for internal business stakeholders.",
+    "You are NOT writing a chatbot answer, tax alert, study note, or comparison of model outputs.",
     "",
     "Use the provider outputs only as research inputs.",
-    "Resolve conflicts yourself and present one integrated legal analysis in your own voice.",
-    "Do NOT say things like 'some models said', 'one model emphasized', 'common ground', 'differences in emphasis', or 'minority view' in the user-facing answer.",
+    "Resolve the conflicts yourself and present one integrated legal analysis in your own voice.",
+    "Do NOT say things like 'some models said', 'one model emphasized', 'common ground', 'differences in emphasis', or 'minority view'.",
     "",
-    "Core principles:",
+    "Tone rules:",
+    "- Write like a tax memo prepared for internal business use.",
+    "- Sound like the author owns the conclusion.",
+    "- Do not recommend contacting tax authorities.",
+    "- Do not include generic penalty scare lists unless the question specifically asks for risk quantification.",
+    "- Do not overuse caveats or disclaimers.",
+    "- Where facts matter, state the required confirmations neutrally and briefly.",
+    "",
+    "Scope discipline:",
+    "- Answer only the tax question asked.",
+    "- Do not include ancillary taxes unless they are necessary to avoid a materially incomplete answer.",
+    "- Do not include litigation, reform, penalty ranges, filing mechanics, or registration mechanics unless the question specifically asks for them or they are outcome-determinative.",
+    "- Do not include operational details such as GNRE, CFOP, EFD, FCI, or invoicing workflow unless they are necessary to explain the legal conclusion.",
+    "- If the question is general, prioritize the governing tax and the controlling legal distinctions.",
+    "- Prefer a shorter, controlled memo over a broader but noisier answer.",
+    "- Remove technically true but non-central points.",
+    "",
+    "Substantive rules:",
     "1. A legally controlling distinction overrides broader but over-generalized consensus.",
     "2. A minority position should be adopted if it is more legally precise and outcome-determinative.",
     "3. Separate transaction profiles when the legal answer changes by buyer status, transaction purpose, product type, or place-of-taxation mechanics.",
     "4. Do not state conditional rules as universal rules.",
-    "5. Be conservative and explicit where facts are missing.",
+    "5. Be conservative, but still useful and decisive.",
     "",
     "When relevant, separate these transaction categories instead of blending them:",
     "- B2B for resale / industrialization",
@@ -658,44 +707,49 @@ function buildNarrativeAdjudicationPrompt(label: "GPT" | "CLAUDE") {
     "",
     "Return STRICT JSON ONLY with these exact keys:",
     "{",
-    '  "bottom_line": string,',
-    '  "technical_analysis": string,',
-    '  "branch_analysis": string[],',
-    '  "key_risks": string[],',
-    '  "missing_facts": string[],',
-    '  "practical_recommendation": string,',
+    '  "executive_summary": string,',
+    '  "analysis": string,',
+    '  "transaction_specific_treatment": string[],',
+    '  "required_confirmations": string[],',
+    '  "recommendation": string,',
     '  "confidence": "low" | "medium" | "high"',
     "}",
     "",
     "Output rules:",
-    "- bottom_line: concise professional conclusion.",
-    "- technical_analysis: integrated narrative analysis in tax-professional style.",
-    "- branch_analysis: only include separate branches where legal outcomes differ by facts.",
-    "- key_risks: legal/compliance risks and caveats, not meta-comments about the models.",
-    "- practical_recommendation: concrete next step before relying on the answer.",
+    "- executive_summary: concise memo-style conclusion.",
+    "- analysis: integrated professional narrative, not bullets about model differences.",
+    "- transaction_specific_treatment: only include branches where legal treatment changes materially.",
+    "- required_confirmations: limited to facts that actually control the answer.",
+    "- recommendation: concise next-step recommendation for internal business decision-making.",
     "- Do not invent authority or citations.",
   ].join("\n");
 }
 
-function buildNarrativeIssuePrompt(label: "GPT" | "CLAUDE") {
+function buildMemoIssuePrompt(label: "GPT" | "CLAUDE") {
   return [
     `You are ${label}, acting as an issue-level tax adjudicator.`,
-    "You must adjudicate issue by issue, but the final result must read like one integrated professional tax answer.",
+    "You must adjudicate issue by issue, but the final result must read like one integrated internal tax memo.",
     "You are not writing a model comparison.",
     "",
     "Instructions:",
     "1. Review the issue matrix.",
     "2. For each issue, determine the legally strongest conclusion.",
-    "3. Use issue-level reasoning to build one integrated answer in your own voice.",
-    "4. Preserve controlling distinctions by converting them into branch analysis where necessary.",
-    "5. Do not describe which provider agreed or disagreed unless absolutely necessary internally; never do so in the user-facing narrative.",
-    "6. Be conservative and explicit about missing facts.",
+    "3. Use issue-level reasoning to build one memo-style answer in your own voice.",
+    "4. Preserve controlling distinctions by converting them into transaction-specific treatment where necessary.",
+    "5. Do not describe which provider agreed or disagreed; never do so in the user-facing memo.",
+    "6. Keep confirmations brief and only include facts that control the legal outcome.",
+    "",
+    "Scope discipline:",
+    "- Answer only the tax question asked.",
+    "- Omit ancillary taxes and side topics unless outcome-determinative.",
+    "- Omit litigation, reform, penalties, filing mechanics, and operational steps unless necessary to the legal answer.",
+    "- Prefer a cleaner memo over a fuller but noisier one.",
     "",
     "Return STRICT JSON ONLY with these exact keys:",
     "{",
-    '  "bottom_line": string,',
-    '  "technical_analysis": string,',
-    '  "branch_analysis": string[],',
+    '  "executive_summary": string,',
+    '  "analysis": string,',
+    '  "transaction_specific_treatment": string[],',
     '  "issue_results": [',
     "    {",
     '      "issue_id": string,',
@@ -709,21 +763,20 @@ function buildNarrativeIssuePrompt(label: "GPT" | "CLAUDE") {
     '      "missing_facts": string[]',
     "    }",
     "  ],",
-    '  "key_risks": string[],',
-    '  "missing_facts": string[],',
-    '  "practical_recommendation": string,',
+    '  "required_confirmations": string[],',
+    '  "recommendation": string,',
     '  "confidence": "low" | "medium" | "high"',
     "}",
     "",
     "Important:",
-    "- technical_analysis must sound like a tax memo answer, not an adjudication report.",
-    "- branch_analysis should contain fact-pattern-dependent outcomes only.",
-    "- issue_results exist for internal support, but the narrative must stand on its own.",
+    "- analysis must sound like a tax memo, not an adjudication report.",
+    "- transaction_specific_treatment should contain fact-pattern-dependent outcomes only.",
+    "- issue_results exist for internal support, but the memo must stand on its own.",
     "- Do not invent authority or citations.",
   ].join("\n");
 }
 
-function buildNarrativeMergerPrompt() {
+function buildMemoMergerPrompt() {
   return [
     "You are the final merger model for a tax adjudication engine.",
     "You are receiving:",
@@ -731,23 +784,36 @@ function buildNarrativeMergerPrompt() {
     "2. a GPT issue-level adjudication, and",
     "3. a Claude issue-level adjudication.",
     "",
-    "Your job is to produce the safest final professional tax answer.",
+    "Your job is to produce the safest final internal tax memo.",
     "Do NOT write a comparison of the adjudications.",
-    "Do NOT mention agreement/disagreement between the adjudicators.",
+    "Do NOT mention agreement/disagreement between adjudicators or providers.",
     "Resolve the conflicts yourself and present one integrated legal answer.",
     "",
-    "Rules:",
+    "Tone rules:",
+    "- Write like a concise internal tax memo.",
+    "- Do not recommend contacting tax authorities.",
+    "- Do not include generic penalty lists or boilerplate disclaimers.",
+    "- Do not let the answer drift into chatbot language.",
+    "",
+    "Scope discipline:",
+    "- Answer only the tax question asked.",
+    "- Omit ancillary taxes unless they are necessary to avoid a materially incomplete answer.",
+    "- Omit litigation, reform, penalty ranges, filing mechanics, registration mechanics, and workflow details unless the question asks for them or they are outcome-determinative.",
+    "- If the question is general, focus on the governing tax and controlling distinctions.",
+    "- Prefer memo usefulness over broad technical completeness.",
+    "",
+    "Substantive rules:",
     "1. Preserve legally controlling distinctions.",
-    "2. Where the legal outcome changes by facts, present branch analysis.",
-    "3. Avoid meta-language such as 'some models' or 'one adjudicator'.",
-    "4. Prefer legal precision over smooth but over-broad summary.",
+    "2. Where the legal outcome changes by facts, present transaction-specific treatment.",
+    "3. Prefer legal precision over smooth but over-broad summary.",
+    "4. Keep required confirmations limited to facts that actually matter.",
     "5. Do not invent authority or citations.",
     "",
     "Return STRICT JSON ONLY with these exact keys:",
     "{",
-    '  "bottom_line": string,',
-    '  "technical_analysis": string,',
-    '  "branch_analysis": string[],',
+    '  "executive_summary": string,',
+    '  "analysis": string,',
+    '  "transaction_specific_treatment": string[],',
     '  "issue_results": [',
     "    {",
     '      "issue_id": string,',
@@ -761,18 +827,17 @@ function buildNarrativeMergerPrompt() {
     '      "missing_facts": string[]',
     "    }",
     "  ],",
-    '  "key_risks": string[],',
-    '  "missing_facts": string[],',
-    '  "practical_recommendation": string,',
+    '  "required_confirmations": string[],',
+    '  "recommendation": string,',
     '  "confidence": "low" | "medium" | "high"',
     "}",
   ].join("\n");
 }
 
-async function adjudicateNarrativeWithOpenAI(
+async function adjudicateMemoWithOpenAI(
   input: CrosscheckInput,
   outputs: ProviderOutput[]
-): Promise<NormalizedNarrativeConsensus | null> {
+): Promise<NormalizedMemo | null> {
   const apiKey = env("OPENAI_API_KEY");
   if (!apiKey) return null;
 
@@ -801,7 +866,7 @@ async function adjudicateNarrativeWithOpenAI(
     model,
     temperature: 0.1,
     messages: [
-      { role: "system", content: buildNarrativeAdjudicationPrompt("GPT") },
+      { role: "system", content: buildMemoAdjudicationPrompt("GPT") },
       { role: "user", content: user },
     ],
     max_tokens: clampInt((input as any)?.maxTokens, 700, 2400, 1700),
@@ -809,16 +874,16 @@ async function adjudicateNarrativeWithOpenAI(
 
   const raw = resp.choices?.[0]?.message?.content || "{}";
   const extracted = extractJsonObject(raw);
-  const parsed = safeJsonParse<NarrativeAdjudicationJson>(extracted);
+  const parsed = safeJsonParse<MemoJson>(extracted);
 
   if (!parsed) return null;
-  return normalizeNarrativeConsensus(parsed);
+  return normalizeMemo(parsed);
 }
 
-async function adjudicateNarrativeWithClaude(
+async function adjudicateMemoWithClaude(
   input: CrosscheckInput,
   outputs: ProviderOutput[]
-): Promise<NormalizedNarrativeConsensus | null> {
+): Promise<NormalizedMemo | null> {
   const packed = packProviderOutputs(outputs);
 
   const prompt = [
@@ -830,7 +895,7 @@ async function adjudicateNarrativeWithClaude(
     "Provider outputs:",
     packed,
     "",
-    buildNarrativeAdjudicationPrompt("CLAUDE"),
+    buildMemoAdjudicationPrompt("CLAUDE"),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -844,16 +909,16 @@ async function adjudicateNarrativeWithClaude(
   if (result.status !== "ok" || !result.text) return null;
 
   const extracted = extractJsonObject(result.text);
-  const parsed = safeJsonParse<NarrativeAdjudicationJson>(extracted);
+  const parsed = safeJsonParse<MemoJson>(extracted);
 
   if (!parsed) return null;
-  return normalizeNarrativeConsensus(parsed);
+  return normalizeMemo(parsed);
 }
 
-async function adjudicateNarrativeIssueMatrixWithOpenAI(args: {
+async function adjudicateMemoIssueMatrixWithOpenAI(args: {
   input: CrosscheckInput;
   matrix: IssueMatrix;
-}): Promise<NormalizedNarrativeConsensus | null> {
+}): Promise<NormalizedMemo | null> {
   const apiKey = env("OPENAI_API_KEY");
   if (!apiKey) return null;
 
@@ -883,7 +948,7 @@ async function adjudicateNarrativeIssueMatrixWithOpenAI(args: {
     model,
     temperature: 0.1,
     messages: [
-      { role: "system", content: buildNarrativeIssuePrompt("GPT") },
+      { role: "system", content: buildMemoIssuePrompt("GPT") },
       { role: "user", content: user },
     ],
     max_tokens: clampInt((args.input as any)?.maxTokens, 900, 2800, 1900),
@@ -891,30 +956,29 @@ async function adjudicateNarrativeIssueMatrixWithOpenAI(args: {
 
   const raw = resp.choices?.[0]?.message?.content || "{}";
   const extracted = extractJsonObject(raw);
-  const parsed = safeJsonParse<NarrativeIssueAdjudicationJson>(extracted);
+  const parsed = safeJsonParse<MemoIssueAdjudicationJson>(extracted);
 
   if (!parsed) return null;
 
-  return normalizeNarrativeConsensus({
-    bottom_line: parsed.bottom_line,
-    technical_analysis: parsed.technical_analysis,
-    branch_analysis: parsed.branch_analysis,
-    key_risks: parsed.key_risks,
-    missing_facts: uniq([
-      ...normalizeStringArray(parsed.missing_facts),
+  return normalizeMemo({
+    executive_summary: parsed.executive_summary,
+    analysis: parsed.analysis,
+    transaction_specific_treatment: parsed.transaction_specific_treatment,
+    required_confirmations: uniq([
+      ...normalizeStringArray(parsed.required_confirmations),
       ...((Array.isArray(parsed.issue_results) ? parsed.issue_results : []).flatMap((x) =>
         normalizeStringArray(x?.missing_facts)
       )),
     ]),
-    practical_recommendation: parsed.practical_recommendation,
+    recommendation: parsed.recommendation,
     confidence: parsed.confidence,
   });
 }
 
-async function adjudicateNarrativeIssueMatrixWithClaude(args: {
+async function adjudicateMemoIssueMatrixWithClaude(args: {
   input: CrosscheckInput;
   matrix: IssueMatrix;
-}): Promise<NormalizedNarrativeConsensus | null> {
+}): Promise<NormalizedMemo | null> {
   const matrixJson = serializeIssueMatrix(args.matrix);
 
   const prompt = [
@@ -926,7 +990,7 @@ async function adjudicateNarrativeIssueMatrixWithClaude(args: {
     "Issue matrix:",
     matrixJson,
     "",
-    buildNarrativeIssuePrompt("CLAUDE"),
+    buildMemoIssuePrompt("CLAUDE"),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -940,32 +1004,31 @@ async function adjudicateNarrativeIssueMatrixWithClaude(args: {
   if (result.status !== "ok" || !result.text) return null;
 
   const extracted = extractJsonObject(result.text);
-  const parsed = safeJsonParse<NarrativeIssueAdjudicationJson>(extracted);
+  const parsed = safeJsonParse<MemoIssueAdjudicationJson>(extracted);
 
   if (!parsed) return null;
 
-  return normalizeNarrativeConsensus({
-    bottom_line: parsed.bottom_line,
-    technical_analysis: parsed.technical_analysis,
-    branch_analysis: parsed.branch_analysis,
-    key_risks: parsed.key_risks,
-    missing_facts: uniq([
-      ...normalizeStringArray(parsed.missing_facts),
+  return normalizeMemo({
+    executive_summary: parsed.executive_summary,
+    analysis: parsed.analysis,
+    transaction_specific_treatment: parsed.transaction_specific_treatment,
+    required_confirmations: uniq([
+      ...normalizeStringArray(parsed.required_confirmations),
       ...((Array.isArray(parsed.issue_results) ? parsed.issue_results : []).flatMap((x) =>
         normalizeStringArray(x?.missing_facts)
       )),
     ]),
-    practical_recommendation: parsed.practical_recommendation,
+    recommendation: parsed.recommendation,
     confidence: parsed.confidence,
   });
 }
 
-async function mergeNarrativeIssueAdjudicationsWithOpenAI(args: {
+async function mergeMemoIssueAdjudicationsWithOpenAI(args: {
   input: CrosscheckInput;
   matrix: IssueMatrix;
-  gpt: NormalizedNarrativeConsensus | null;
-  claude: NormalizedNarrativeConsensus | null;
-}): Promise<NormalizedNarrativeConsensus | null> {
+  gpt: NormalizedMemo | null;
+  claude: NormalizedMemo | null;
+}): Promise<NormalizedMemo | null> {
   const apiKey = env("OPENAI_API_KEY");
   if (!apiKey) return args.gpt || args.claude || null;
 
@@ -1005,7 +1068,7 @@ async function mergeNarrativeIssueAdjudicationsWithOpenAI(args: {
     model,
     temperature: 0.1,
     messages: [
-      { role: "system", content: buildNarrativeMergerPrompt() },
+      { role: "system", content: buildMemoMergerPrompt() },
       { role: "user", content: user },
     ],
     max_tokens: 2300,
@@ -1013,32 +1076,31 @@ async function mergeNarrativeIssueAdjudicationsWithOpenAI(args: {
 
   const raw = resp.choices?.[0]?.message?.content || "{}";
   const extracted = extractJsonObject(raw);
-  const parsed = safeJsonParse<NarrativeIssueAdjudicationJson>(extracted);
+  const parsed = safeJsonParse<MemoIssueAdjudicationJson>(extracted);
 
   if (!parsed) return args.gpt || args.claude || null;
 
-  return normalizeNarrativeConsensus({
-    bottom_line: parsed.bottom_line,
-    technical_analysis: parsed.technical_analysis,
-    branch_analysis: parsed.branch_analysis,
-    key_risks: parsed.key_risks,
-    missing_facts: uniq([
-      ...normalizeStringArray(parsed.missing_facts),
+  return normalizeMemo({
+    executive_summary: parsed.executive_summary,
+    analysis: parsed.analysis,
+    transaction_specific_treatment: parsed.transaction_specific_treatment,
+    required_confirmations: uniq([
+      ...normalizeStringArray(parsed.required_confirmations),
       ...((Array.isArray(parsed.issue_results) ? parsed.issue_results : []).flatMap((x) =>
         normalizeStringArray(x?.missing_facts)
       )),
     ]),
-    practical_recommendation: parsed.practical_recommendation,
+    recommendation: parsed.recommendation,
     confidence: parsed.confidence,
   });
 }
 
-async function mergeNarrativeAdjudicationsWithOpenAI(args: {
+async function mergeMemoAdjudicationsWithOpenAI(args: {
   input: CrosscheckInput;
   providerOutputs: ProviderOutput[];
-  gpt: NormalizedNarrativeConsensus | null;
-  claude: NormalizedNarrativeConsensus | null;
-}): Promise<NormalizedNarrativeConsensus | null> {
+  gpt: NormalizedMemo | null;
+  claude: NormalizedMemo | null;
+}): Promise<NormalizedMemo | null> {
   const apiKey = env("OPENAI_API_KEY");
   if (!apiKey) return args.gpt || args.claude || null;
 
@@ -1057,22 +1119,32 @@ async function mergeNarrativeAdjudicationsWithOpenAI(args: {
   const sys = [
     "You are the final merger model for a tax adjudication engine.",
     "You are receiving raw provider outputs and two adjudications.",
-    "Produce the safest, most conservative final professional tax answer.",
+    "Produce the safest, most conservative final internal tax memo.",
     "Do NOT write a comparison of the adjudications.",
-    "Do NOT use headings or language such as common ground, differences in emphasis, minority view, or one model said.",
+    "Do NOT use language such as common ground, differences in emphasis, minority view, or one model said.",
     "Resolve conflicts yourself and present one integrated tax answer in your own voice.",
-    "Where different legal outcomes apply to different fact patterns, present branch analysis.",
+    "Where different legal outcomes apply to different fact patterns, present transaction-specific treatment.",
     "Prefer legal precision over smooth but over-broad summary.",
+    "Do not recommend contacting tax authorities.",
+    "Do not include generic penalty lists or boilerplate disclaimers.",
+    "",
+    "Scope discipline:",
+    "- Answer only the tax question asked.",
+    "- Omit ancillary taxes unless necessary to avoid a materially incomplete answer.",
+    "- Omit litigation, reform, penalty ranges, filing mechanics, registration mechanics, and workflow details unless the question asks for them or they are outcome-determinative.",
+    "- If the question is general, focus on the governing tax and controlling distinctions.",
+    "- Prefer memo usefulness over broad technical completeness.",
+    "- Remove technically true but non-central points.",
+    "",
     "Do not invent authority or citations.",
     "",
     "Return STRICT JSON ONLY with these exact keys:",
     "{",
-    '  "bottom_line": string,',
-    '  "technical_analysis": string,',
-    '  "branch_analysis": string[],',
-    '  "key_risks": string[],',
-    '  "missing_facts": string[],',
-    '  "practical_recommendation": string,',
+    '  "executive_summary": string,',
+    '  "analysis": string,',
+    '  "transaction_specific_treatment": string[],',
+    '  "required_confirmations": string[],',
+    '  "recommendation": string,',
     '  "confidence": "low" | "medium" | "high"',
     "}",
   ].join("\n");
@@ -1107,10 +1179,10 @@ async function mergeNarrativeAdjudicationsWithOpenAI(args: {
 
   const raw = resp.choices?.[0]?.message?.content || "{}";
   const extracted = extractJsonObject(raw);
-  const parsed = safeJsonParse<NarrativeAdjudicationJson>(extracted);
+  const parsed = safeJsonParse<MemoJson>(extracted);
 
   if (!parsed) return args.gpt || args.claude || null;
-  return normalizeNarrativeConsensus(parsed);
+  return normalizeMemo(parsed);
 }
 
 export async function runCrosscheck(
@@ -1171,75 +1243,71 @@ export async function runCrosscheck(
 
   const best = pickBest(providers);
 
-  let finalNarrative: NormalizedNarrativeConsensus | null = null;
+  let finalMemo: NormalizedMemo | null = null;
 
   if (succeededCalls.length >= 2) {
     const matrix = buildIssueMatrix(input, providers);
 
     if (dualAdjudicatorEnabled()) {
       const [gptIssueAdj, claudeIssueAdj] = await Promise.all([
-        adjudicateNarrativeIssueMatrixWithOpenAI({ input, matrix }).catch(() => null),
-        adjudicateNarrativeIssueMatrixWithClaude({ input, matrix }).catch(() => null),
+        adjudicateMemoIssueMatrixWithOpenAI({ input, matrix }).catch(() => null),
+        adjudicateMemoIssueMatrixWithClaude({ input, matrix }).catch(() => null),
       ]);
 
-      finalNarrative = await mergeNarrativeIssueAdjudicationsWithOpenAI({
+      finalMemo = await mergeMemoIssueAdjudicationsWithOpenAI({
         input,
         matrix,
         gpt: gptIssueAdj,
         claude: claudeIssueAdj,
       }).catch(() => gptIssueAdj || claudeIssueAdj || null);
     } else {
-      finalNarrative = await adjudicateNarrativeIssueMatrixWithOpenAI({
+      finalMemo = await adjudicateMemoIssueMatrixWithOpenAI({
         input,
         matrix,
       }).catch(() => null);
     }
   }
 
-  if (!finalNarrative) {
+  if (!finalMemo) {
     if (dualAdjudicatorEnabled()) {
       const [gptAdj, claudeAdj] = await Promise.all([
-        adjudicateNarrativeWithOpenAI(input, providers).catch(() => null),
-        adjudicateNarrativeWithClaude(input, providers).catch(() => null),
+        adjudicateMemoWithOpenAI(input, providers).catch(() => null),
+        adjudicateMemoWithClaude(input, providers).catch(() => null),
       ]);
 
-      finalNarrative = await mergeNarrativeAdjudicationsWithOpenAI({
+      finalMemo = await mergeMemoAdjudicationsWithOpenAI({
         input,
         providerOutputs: providers,
         gpt: gptAdj,
         claude: claudeAdj,
       }).catch(() => gptAdj || claudeAdj || null);
     } else {
-      finalNarrative = await adjudicateNarrativeWithOpenAI(input, providers).catch(() => null);
+      finalMemo = await adjudicateMemoWithOpenAI(input, providers).catch(() => null);
     }
   }
 
   const answer =
-    finalNarrative?.answer ||
+    finalMemo?.answer ||
     best?.text?.trim() ||
     `I couldn't get a successful provider response yet. Providers attempted: ${attempted
       .map((a) => `${a.provider}:${a.model}`)
       .join(", ")}`;
 
-  const caveats = uniq([
-    ...(finalNarrative?.key_risks || []),
-    ...(!succeededCalls.length
+  const followups = uniq(finalMemo?.required_confirmations || []);
+  const caveats = uniq(
+    !succeededCalls.length
       ? [
           "No providers returned a successful answer. Check API keys, model names, and network access.",
         ]
-      : []),
-    ...(succeededCalls.length === 1
+      : succeededCalls.length === 1
       ? [
           "Only one provider returned a successful answer, so the result is weaker than a true cross-model adjudication.",
         ]
-      : []),
-  ]);
-
-  const followups = uniq(finalNarrative?.missing_facts || []);
-  const disagreements: string[] = [];
+      : []
+  );
 
   const confidence =
-    finalNarrative?.confidence ||
+    finalMemo?.confidence ||
     (succeededCalls.length >= 2 ? "medium" : "low");
 
   const runtime_ms = Date.now() - t0;
@@ -1257,7 +1325,7 @@ export async function runCrosscheck(
       caveats,
       followups,
       confidence,
-      disagreements,
+      disagreements: [],
     },
     providers,
   };
