@@ -119,6 +119,94 @@ function splitIntoSnippets(text: string): string[] {
   return uniq(parts);
 }
 
+type BranchValidationResult = {
+  valid: boolean;
+  issues: string[];
+  penalty: number;
+  coveredBranches: string[];
+};
+
+function validateBranchIntegrity(
+  input: CrosscheckInput,
+  memo: NormalizedMemo
+): BranchValidationResult {
+  const hay = `${input.jurisdiction || ""}\n${input.question || ""}\n${input.facts || ""}`.toLowerCase();
+  const text = `${memo.executive_summary}\n${memo.analysis}\n${memo.transaction_specific_treatment.join("\n")}`.toLowerCase();
+
+  const issues: string[] = [];
+  const coveredBranches: string[] = [];
+  let penalty = 0;
+
+  const isBrazilInterstateGoods =
+    (hay.includes("brazil") || hay.includes("brasil")) &&
+    (hay.includes("interstate") || hay.includes("between states")) &&
+    hay.includes("goods");
+
+  if (!isBrazilInterstateGoods) {
+    return {
+      valid: true,
+      issues: [],
+      penalty: 0,
+      coveredBranches: [],
+    };
+  }
+
+  const hasResale =
+    text.includes("resale") || text.includes("industrialization");
+  const hasOwnUse =
+    text.includes("own use") || text.includes("fixed asset") || text.includes("consumption");
+  const hasB2C =
+    text.includes("final consumer") || text.includes("non-taxpayer") || text.includes("non-contributor");
+
+  if (hasResale) coveredBranches.push("B2B resale / industrialization");
+  if (hasOwnUse) coveredBranches.push("B2B own use / fixed assets / consumption");
+  if (hasB2C) coveredBranches.push("B2C / final consumer / non-taxpayer");
+
+  if (!hasResale) {
+    issues.push("Missing B2B resale / industrialization branch.");
+    penalty += 140;
+  }
+
+  if (!hasOwnUse) {
+    issues.push("Missing B2B own use / fixed assets / consumption branch.");
+    penalty += 180;
+  }
+
+  if (!hasB2C) {
+    issues.push("Missing B2C / final consumer / non-taxpayer branch.");
+    penalty += 140;
+  }
+
+  const badPatterns = [
+    "sales to icms taxpayers trigger only the interstate rate",
+    "sales to icms taxpayers: interstate rate only",
+    "b2b sales: interstate rate only",
+    "sales to taxpayers trigger only the interstate rate",
+    "for sales to icms taxpayers purchasing for resale or industrial use, interstate rates apply",
+  ];
+
+  for (const pat of badPatterns) {
+    if (text.includes(pat) && !hasOwnUse) {
+      issues.push("Overgeneralized B2B treatment by collapsing resale && own-use/fixed-asset scenarios.");
+      penalty += 220;
+      break;
+    }
+  }
+
+  if ((text.includes("difal applies") || text.includes("plus difal")) && !hasB2C && !hasOwnUse) {
+    issues.push("DIFAL appears in the memo without adequate branch qualification.");
+    penalty += 120;
+  }
+
+  return {
+    valid: penalty === 0,
+    issues,
+    penalty,
+    coveredBranches,
+  };
+}
+
+
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return uniq(value.map(String));
@@ -746,7 +834,10 @@ function overgeneralizationPenalty(text: string): number {
   return badPatterns.filter((x) => t.includes(x)).length * 120;
 }
 
-function providerAssessmentForArtifact(a: ProviderMemoArtifact): ProviderAssessment {
+function providerAssessmentForArtifact(
+  a: ProviderMemoArtifact,
+  input?: CrosscheckInput
+): ProviderAssessment {
   const text = a.memo.answer.toLowerCase();
   const reasons: string[] = [];
   let score = 0;
@@ -805,6 +896,24 @@ function providerAssessmentForArtifact(a: ProviderMemoArtifact): ProviderAssessm
     reasons.push("identifies controlling distinctions");
   } else {
     reasons.push("weak prioritization of controlling distinctions");
+  }
+
+  if (input) {
+    const branchValidation = validateBranchIntegrity(input, a.memo);
+
+    if (branchValidation.valid) {
+      score += 120;
+      reasons.push("branch integrity validated");
+    } else {
+      score -= branchValidation.penalty;
+      reasons.push(...branchValidation.issues);
+    }
+
+    if (branchValidation.coveredBranches.length) {
+      reasons.push(
+        `covered branches: ${branchValidation.coveredBranches.join("; ")}`
+      );
+    }
   }
 
   let tier: ProviderAssessment["tier"] = "excluded";
@@ -1423,7 +1532,7 @@ export async function runCrosscheck(
   }
 
   const round1Artifacts = buildInitialArtifacts(providers);
-  const round1Assessments = round1Artifacts.map(providerAssessmentForArtifact);
+  const round1Assessments = round1Artifacts.map((a) => providerAssessmentForArtifact(a, input));
   const selectedRound1 = chooseArtifactsForReasoning(round1Artifacts, round1Assessments);
   const selectedAssessments = summarizeAssessmentsForSelection(
     round1Assessments,
