@@ -87,7 +87,7 @@ export default function HowItWorksPage() {
               <li>{t("cards.providers.grok")}</li>
               <li>{t("cards.providers.perplexity")}</li>
               <li>{t("cards.providers.deepseek")}</li>
-              <li>{t("cards.providers.claude")}</li>
+              <li>{t("claude")}</li>
             </ul>
 
             <p className="mt-3">{t("cards.parallelBody2")}</p>
