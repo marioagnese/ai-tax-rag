@@ -57,11 +57,11 @@ function geminiEnabled(): boolean {
 }
 
 function providerCoreThreshold(): number {
-  return clampInt(env("CROSSCHECK_PROVIDER_MIN_SCORE"), 0, 1000, 250);
+  return clampInt(env("CROSSCHECK_PROVIDER_MIN_SCORE"), 0, 1000, 240);
 }
 
 function providerSupportThreshold(): number {
-  return clampInt(env("CROSSCHECK_PROVIDER_SUPPORT_SCORE"), 0, 1000, 160);
+  return clampInt(env("CROSSCHECK_PROVIDER_SUPPORT_SCORE"), 0, 1000, 150);
 }
 
 function safeJsonParse<T>(s: string): T | null {
@@ -119,94 +119,6 @@ function splitIntoSnippets(text: string): string[] {
   return uniq(parts);
 }
 
-type BranchValidationResult = {
-  valid: boolean;
-  issues: string[];
-  penalty: number;
-  coveredBranches: string[];
-};
-
-function validateBranchIntegrity(
-  input: CrosscheckInput,
-  memo: NormalizedMemo
-): BranchValidationResult {
-  const hay = `${input.jurisdiction || ""}\n${input.question || ""}\n${input.facts || ""}`.toLowerCase();
-  const text = `${memo.executive_summary}\n${memo.analysis}\n${memo.transaction_specific_treatment.join("\n")}`.toLowerCase();
-
-  const issues: string[] = [];
-  const coveredBranches: string[] = [];
-  let penalty = 0;
-
-  const isBrazilInterstateGoods =
-    (hay.includes("brazil") || hay.includes("brasil")) &&
-    (hay.includes("interstate") || hay.includes("between states")) &&
-    hay.includes("goods");
-
-  if (!isBrazilInterstateGoods) {
-    return {
-      valid: true,
-      issues: [],
-      penalty: 0,
-      coveredBranches: [],
-    };
-  }
-
-  const hasResale =
-    text.includes("resale") || text.includes("industrialization");
-  const hasOwnUse =
-    text.includes("own use") || text.includes("fixed asset") || text.includes("consumption");
-  const hasB2C =
-    text.includes("final consumer") || text.includes("non-taxpayer") || text.includes("non-contributor");
-
-  if (hasResale) coveredBranches.push("B2B resale / industrialization");
-  if (hasOwnUse) coveredBranches.push("B2B own use / fixed assets / consumption");
-  if (hasB2C) coveredBranches.push("B2C / final consumer / non-taxpayer");
-
-  if (!hasResale) {
-    issues.push("Missing B2B resale / industrialization branch.");
-    penalty += 140;
-  }
-
-  if (!hasOwnUse) {
-    issues.push("Missing B2B own use / fixed assets / consumption branch.");
-    penalty += 180;
-  }
-
-  if (!hasB2C) {
-    issues.push("Missing B2C / final consumer / non-taxpayer branch.");
-    penalty += 140;
-  }
-
-  const badPatterns = [
-    "sales to icms taxpayers trigger only the interstate rate",
-    "sales to icms taxpayers: interstate rate only",
-    "b2b sales: interstate rate only",
-    "sales to taxpayers trigger only the interstate rate",
-    "for sales to icms taxpayers purchasing for resale or industrial use, interstate rates apply",
-  ];
-
-  for (const pat of badPatterns) {
-    if (text.includes(pat) && !hasOwnUse) {
-      issues.push("Overgeneralized B2B treatment by collapsing resale && own-use/fixed-asset scenarios.");
-      penalty += 220;
-      break;
-    }
-  }
-
-  if ((text.includes("difal applies") || text.includes("plus difal")) && !hasB2C && !hasOwnUse) {
-    issues.push("DIFAL appears in the memo without adequate branch qualification.");
-    penalty += 120;
-  }
-
-  return {
-    valid: penalty === 0,
-    issues,
-    penalty,
-    coveredBranches,
-  };
-}
-
-
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return uniq(value.map(String));
@@ -235,14 +147,8 @@ type ProviderClaimJson = {
   applies_to?: string[] | string;
 };
 
-type ProviderMemoJson = {
-  executive_summary?: string;
-  analysis?: string;
-  transaction_specific_treatment?: string[];
-  required_confirmations?: string[];
-  recommendation?: string;
+type ProviderMemoJson = MemoJson & {
   claims?: ProviderClaimJson[];
-  confidence?: "low" | "medium" | "high" | string;
 };
 
 type ProviderConflictResponseJson = {
@@ -332,6 +238,13 @@ type ConflictMatrix = {
   common_claims: string[];
   disputed_claims: DisputedClaim[];
   missing_or_underdeveloped_issues: string[];
+};
+
+type StructuralValidation = {
+  valid: boolean;
+  issues: string[];
+  penalty: number;
+  dimensionsCovered: string[];
 };
 
 function cleanMemoText(s: string): string {
@@ -434,13 +347,14 @@ function normalizeClaims(claims: unknown): NormalizedClaim[] {
 
 function heuristicClaimExtraction(text: string): NormalizedClaim[] {
   const snippets = splitIntoSnippets(text);
-  const keywordPatterns: Array<{ topic: string; regex: RegExp }> = [
-    { topic: "governing_tax", regex: /\bicms\b/i },
-    { topic: "difal_scope", regex: /\bdifal\b/i },
-    { topic: "buyer_status", regex: /\bfinal consumer\b|\bnon-taxpayer\b|\bnon-contributor\b|\btaxpayer\b|\bcontributor\b/i },
-    { topic: "transaction_purpose", regex: /\bresale\b|\bindustrialization\b|\bown use\b|\bfixed asset\b|\bconsumption\b/i },
-    { topic: "interstate_rate", regex: /\b7%\b|\b12%\b|\b4%\b/i },
-    { topic: "special_regime", regex: /\bicms-st\b|\bsubstitui/i },
+  const keywordPatterns: Array<{ topic: string; regex: RegExp; controlling?: boolean }> = [
+    { topic: "governing_tax", regex: /\btax\b|\bvat\b|\bgst\b|\bicms\b|\bwithholding\b|\biss\b|\bipi\b/i, controlling: true },
+    { topic: "buyer_status", regex: /\bbuyer\b|\bcustomer\b|\bconsumer\b|\btaxpayer\b|\bnon-taxpayer\b|\bcontributor\b|\bnon-contributor\b/i, controlling: true },
+    { topic: "transaction_purpose", regex: /\bresale\b|\bindustrialization\b|\bown use\b|\bfixed asset\b|\bconsumption\b|\bpurpose\b/i, controlling: true },
+    { topic: "transaction_type", regex: /\bgoods\b|\bservices\b|\bintangibles?\b|\bdigital\b/i, controlling: true },
+    { topic: "geography", regex: /\binterstate\b|\bcross-border\b|\borigin\b|\bdestination\b|\bstate\b|\bcountry\b/i, controlling: true },
+    { topic: "rate_mechanics", regex: /\brate\b|\b7%\b|\b12%\b|\b4%\b|\bdifal\b|\bdifferential\b|\bcredit\b/i, controlling: true },
+    { topic: "special_regime", regex: /\bst\b|\bsubstitui\b|\bexempt\b|\bdeferr/i, controlling: false },
   ];
 
   const claims: NormalizedClaim[] = [];
@@ -450,11 +364,7 @@ function heuristicClaimExtraction(text: string): NormalizedClaim[] {
         claims.push({
           statement: cleanMemoText(s),
           topic: p.topic,
-          controlling:
-            p.topic === "difal_scope" ||
-            p.topic === "buyer_status" ||
-            p.topic === "transaction_purpose" ||
-            p.topic === "interstate_rate",
+          controlling: Boolean(p.controlling),
           confidence: "low",
           applies_to: [],
         });
@@ -505,9 +415,7 @@ function parseProviderMemo(rawText: string): NormalizedMemo {
   const extracted = extractJsonObject(rawText);
   const parsed = safeJsonParse<ProviderMemoJson>(extracted);
 
-  if (parsed) {
-    return normalizeMemoJson(parsed);
-  }
+  if (parsed) return normalizeMemoJson(parsed);
 
   const cleaned = cleanMemoText(rawText);
   const snippets = splitIntoSnippets(cleaned);
@@ -550,19 +458,14 @@ function normalizeConflictMatrix(parsed: ConflictMatrixJson | null): ConflictMat
           const claim_statement = cleanMemoText(
             String(d?.claim_statement || "").trim()
           );
-
           if (!claim_statement) return null;
 
           return {
             claim_id: String(d?.claim_id || `disputed_${idx + 1}`),
             claim_statement,
-            why_controlling: cleanMemoText(
-              String(d?.why_controlling || "").trim()
-            ),
+            why_controlling: cleanMemoText(String(d?.why_controlling || "").trim()),
             provider_positions,
-            challenge_prompt: cleanMemoText(
-              String(d?.challenge_prompt || "").trim()
-            ),
+            challenge_prompt: cleanMemoText(String(d?.challenge_prompt || "").trim()),
           } satisfies DisputedClaim;
         })
         .filter(Boolean) as DisputedClaim[]
@@ -606,6 +509,131 @@ function serializeConflictMatrix(matrix: ConflictMatrix): string {
   return JSON.stringify(matrix, null, 2);
 }
 
+function inferExpectedDimensions(input: CrosscheckInput): string[] {
+  const hay = `${input.question || ""}\n${input.facts || ""}\n${input.constraints || ""}\n${input.jurisdiction || ""}`.toLowerCase();
+  const out: string[] = [];
+
+  if (
+    hay.includes("buyer") ||
+    hay.includes("customer") ||
+    hay.includes("consumer") ||
+    hay.includes("taxpayer") ||
+    hay.includes("b2b") ||
+    hay.includes("b2c")
+  ) {
+    out.push("buyer_status");
+  }
+
+  if (
+    hay.includes("resale") ||
+    hay.includes("own use") ||
+    hay.includes("fixed asset") ||
+    hay.includes("consumption") ||
+    hay.includes("industrialization") ||
+    hay.includes("purpose")
+  ) {
+    out.push("transaction_purpose");
+  }
+
+  if (
+    hay.includes("goods") ||
+    hay.includes("services") ||
+    hay.includes("intangibles") ||
+    hay.includes("digital")
+  ) {
+    out.push("transaction_type");
+  }
+
+  if (
+    hay.includes("interstate") ||
+    hay.includes("cross-border") ||
+    hay.includes("between states") ||
+    hay.includes("origin") ||
+    hay.includes("destination") ||
+    hay.includes("country")
+  ) {
+    out.push("geography");
+  }
+
+  if (
+    hay.includes("product") ||
+    hay.includes("classification") ||
+    hay.includes("ncm") ||
+    hay.includes("import")
+  ) {
+    out.push("product_or_special_regime");
+  }
+
+  return uniq(out);
+}
+
+function validateStructuralCompleteness(
+  input: CrosscheckInput,
+  memo: NormalizedMemo
+): StructuralValidation {
+  const expected = inferExpectedDimensions(input);
+  if (!expected.length) {
+    return {
+      valid: true,
+      issues: [],
+      penalty: 0,
+      dimensionsCovered: [],
+    };
+  }
+
+  const text =
+    `${memo.executive_summary}\n${memo.analysis}\n${memo.transaction_specific_treatment.join("\n")}\n${memo.required_confirmations.join("\n")}`.toLowerCase();
+
+  const issues: string[] = [];
+  const dimensionsCovered: string[] = [];
+  let penalty = 0;
+
+  const has = {
+    buyer_status:
+      /\bbuyer\b|\bcustomer\b|\bconsumer\b|\btaxpayer\b|\bnon-taxpayer\b|\bcontributor\b|\bfinal consumer\b/i.test(text),
+    transaction_purpose:
+      /\bresale\b|\bown use\b|\bfixed asset\b|\bconsumption\b|\bindustrialization\b|\bpurpose\b/i.test(text),
+    transaction_type:
+      /\bgoods\b|\bservices\b|\bintangibles?\b|\bdigital\b/i.test(text),
+    geography:
+      /\binterstate\b|\bcross-border\b|\borigin\b|\bdestination\b|\bstate\b|\bcountry\b/i.test(text),
+    product_or_special_regime:
+      /\bproduct\b|\bclassification\b|\bncm\b|\bimport\b|\bspecial regime\b|\bsubstitui\b|\bexempt\b/i.test(text),
+  };
+
+  for (const dim of expected) {
+    if (has[dim as keyof typeof has]) {
+      dimensionsCovered.push(dim);
+    } else {
+      issues.push(`Missing coverage for expected dimension: ${dim.replace(/_/g, " ")}.`);
+      penalty += 70;
+    }
+  }
+
+  if (expected.length >= 2 && memo.transaction_specific_treatment.length === 0) {
+    issues.push("Missing transaction-specific treatment despite multi-branch question.");
+    penalty += 100;
+  }
+
+  if (!memo.required_confirmations.length) {
+    issues.push("Missing required confirmations.");
+    penalty += 40;
+  }
+
+  const controllingClaimCount = memo.claims.filter((c) => c.controlling).length;
+  if (controllingClaimCount < 2) {
+    issues.push("Insufficient controlling claims extracted.");
+    penalty += 60;
+  }
+
+  return {
+    valid: penalty === 0,
+    issues,
+    penalty,
+    dimensionsCovered,
+  };
+}
+
 function buildProviderWorkPrompt(input: CrosscheckInput, providerLabel: string): string {
   return [
     `You are ${providerLabel}, acting as a senior international tax associate preparing an internal tax memo.`,
@@ -624,10 +652,10 @@ function buildProviderWorkPrompt(input: CrosscheckInput, providerLabel: string):
     "- read like a memo, not a primer",
     "",
     "MANDATORY REASONING PROCESS (DO THIS BEFORE WRITING)",
-    "1. Classify the transaction",
-    "2. Identify the controlling variables",
-    "3. Identify what actually changes the legal outcome",
-    "4. Exclude non-essential topics",
+    "1. Classify the transaction.",
+    "2. Identify the controlling variables.",
+    "3. Identify what actually changes the legal outcome.",
+    "4. Exclude non-essential topics.",
     "",
     "SELF-CRITIQUE BEFORE FINALIZING",
     "Review your draft critically:",
@@ -646,7 +674,7 @@ function buildProviderWorkPrompt(input: CrosscheckInput, providerLabel: string):
     "- If the question is general, prioritize the governing tax and the controlling legal distinctions.",
     "- Prefer a shorter, controlled memo over a broader but noisier answer.",
     "",
-    "OUTPUT FORMAT (STRICT JSON ONLY)",
+    "STRICT JSON OUTPUT",
     "{",
     '  "executive_summary": string,',
     '  "analysis": string,',
@@ -669,15 +697,15 @@ function buildProviderWorkPrompt(input: CrosscheckInput, providerLabel: string):
     "- Include 5 to 12 claims.",
     "- Each claim must be one concrete legal proposition.",
     "- Claims should capture controlling mechanics, not narrative fluff.",
-    "- Include claims for key branches where treatment changes.",
+    "- Include claims for material branches where treatment changes.",
     "",
     "STYLE RULES",
-    "- Sound like a tax professional, not an AI",
-    "- Be concise and controlled",
-    "- Avoid 'generally', 'typically', unless necessary",
-    "- Do not recommend consulting authorities",
-    "- Do not include penalties or scare language",
-    "- Do not invent authority or citations",
+    "- Sound like a tax professional, not an AI.",
+    "- Be concise and controlled.",
+    "- Avoid 'generally', 'typically', unless necessary.",
+    "- Do not recommend consulting authorities.",
+    "- Do not include penalties or scare language.",
+    "- Do not invent authority or citations.",
     "",
     input.jurisdiction ? `Jurisdiction: ${input.jurisdiction}` : "",
     input.constraints ? `Constraints:\n${input.constraints}` : "",
@@ -710,7 +738,7 @@ function buildChallengePrompt(args: {
     "Your revised answer must still be an internal tax memo.",
     "Do not mention other models in the final memo text.",
     "",
-    "STRICT JSON OUTPUT:",
+    "STRICT JSON OUTPUT",
     "{",
     '  "executive_summary": string,',
     '  "analysis": string,',
@@ -771,16 +799,6 @@ function buildChallengePrompt(args: {
     .join("\n\n");
 }
 
-function packProviderOutputs(outputs: ProviderOutput[]): string {
-  return outputs
-    .map((o) => {
-      const head = `=== PROVIDER ${o.provider} (${o.model}) status=${o.status} ===`;
-      const body = truncate(o.text || o.error || "", 6000);
-      return `${head}\n${body}`;
-    })
-    .join("\n\n");
-}
-
 function memoQualityBonus(text: string): number {
   const t = text.toLowerCase();
   const bonuses = [
@@ -797,7 +815,7 @@ function memoQualityBonus(text: string): number {
     "non-contributor",
     "industrialization",
   ];
-  return bonuses.filter((x) => t.includes(x)).length * 60;
+  return bonuses.filter((x) => t.includes(x)).length * 50;
 }
 
 function genericityPenalty(text: string): number {
@@ -818,100 +836,81 @@ function genericityPenalty(text: string): number {
     "electronic invoicing",
     "supreme federal court",
   ];
-  return penaltyTerms.filter((x) => t.includes(x)).length * 90;
+  return penaltyTerms.filter((x) => t.includes(x)).length * 80;
 }
 
 function overgeneralizationPenalty(text: string): number {
   const t = text.toLowerCase();
   const badPatterns = [
+    "all transactions",
+    "all sales",
     "all interstate sales",
+    "always applies",
+    "never applies",
+    "only the interstate rate applies",
     "interstate sales are subject to",
-    "difal applies to interstate sales",
-    "only interstate rate applies",
-    "the total effective rate typically reaches",
-    "destination state collects an additional difal amount",
   ];
   return badPatterns.filter((x) => t.includes(x)).length * 120;
 }
 
 function providerAssessmentForArtifact(
-  a: ProviderMemoArtifact,
+  artifact: ProviderMemoArtifact,
   input?: CrosscheckInput
 ): ProviderAssessment {
-  const text = a.memo.answer.toLowerCase();
+  const text = artifact.memo.answer.toLowerCase();
   const reasons: string[] = [];
   let score = 0;
 
-  score += Math.min(a.memo.answer.length, 2400) / 20;
-  score += memoQualityBonus(a.memo.answer);
-  score -= genericityPenalty(a.memo.answer);
-  score -= overgeneralizationPenalty(a.memo.answer);
+  score += Math.min(artifact.memo.answer.length, 2400) / 20;
+  score += memoQualityBonus(artifact.memo.answer);
+  score -= genericityPenalty(artifact.memo.answer);
+  score -= overgeneralizationPenalty(artifact.memo.answer);
 
-  if (a.memo.claims.length >= 5) {
+  if (artifact.memo.claims.length >= 5) {
     score += 80;
     reasons.push("structured claim set");
-  } else if (a.memo.claims.length > 0) {
+  } else if (artifact.memo.claims.length > 0) {
     score += 20;
     reasons.push("partial claim set");
   } else {
     reasons.push("missing structured claims");
   }
 
-  const branchSignals = [
-    "resale",
-    "own use",
-    "fixed asset",
-    "final consumer",
-    "non-taxpayer",
-    "non-contributor",
-  ].filter((x) => text.includes(x)).length;
-
-  if (branchSignals >= 3) {
-    score += 120;
-    reasons.push("good branch separation");
-  } else if (branchSignals >= 1) {
-    score += 40;
-    reasons.push("partial branch separation");
+  if (artifact.memo.transaction_specific_treatment.length >= 2) {
+    score += 90;
+    reasons.push("good transaction-specific treatment");
+  } else if (artifact.memo.transaction_specific_treatment.length === 1) {
+    score += 30;
+    reasons.push("limited transaction-specific treatment");
   } else {
-    reasons.push("weak branch separation");
+    reasons.push("missing transaction-specific treatment");
   }
 
-  if (text.includes("icms") || text.includes("vat")) {
-    score += 60;
-    reasons.push("addresses governing tax regime");
-  }
-
-  if (
-    text.includes("pis/cofins") ||
-    text.includes("ipi") ||
-    text.includes("gnre") ||
-    text.includes("cfop")
-  ) {
-    score -= 80;
-    reasons.push("drifts into ancillary or operational topics");
-  }
-
-  if (a.memo.claims.some((c) => c.controlling)) {
-    score += 60;
+  if (artifact.memo.claims.some((c) => c.controlling)) {
+    score += 70;
     reasons.push("identifies controlling distinctions");
   } else {
     reasons.push("weak prioritization of controlling distinctions");
   }
 
-  if (input) {
-    const branchValidation = validateBranchIntegrity(input, a.memo);
+  if (text.includes("vat") || text.includes("tax") || text.includes("withholding") || text.includes("icms")) {
+    score += 40;
+    reasons.push("addresses governing tax regime");
+  }
 
-    if (branchValidation.valid) {
-      score += 120;
-      reasons.push("branch integrity validated");
+  if (input) {
+    const structural = validateStructuralCompleteness(input, artifact.memo);
+    if (structural.valid) {
+      score += 100;
+      reasons.push("structural completeness validated");
     } else {
-      score -= branchValidation.penalty;
-      reasons.push(...branchValidation.issues);
+      score -= structural.penalty;
+      reasons.push(...structural.issues);
     }
 
-    if (branchValidation.coveredBranches.length) {
+    if (structural.dimensionsCovered.length) {
       reasons.push(
-        `covered branches: ${branchValidation.coveredBranches.join("; ")}`
+        `covered dimensions: ${structural.dimensionsCovered.join("; ")}`
       );
     }
   }
@@ -921,8 +920,8 @@ function providerAssessmentForArtifact(
   else if (score >= providerSupportThreshold()) tier = "supporting";
 
   return {
-    provider: a.provider,
-    model: a.model,
+    provider: artifact.provider,
+    model: artifact.model,
     score: Math.round(score),
     tier,
     reasons: uniq(reasons),
@@ -947,14 +946,12 @@ function chooseArtifactsForReasoning(
     const s = scoreMap.get(`${a.provider}::${a.model}`);
     return s?.tier === "core";
   });
-
   if (core.length >= 2) return core.slice(0, 4);
 
   const supportOrCore = ordered.filter((a) => {
     const s = scoreMap.get(`${a.provider}::${a.model}`);
     return s?.tier === "core" || s?.tier === "supporting";
   });
-
   if (supportOrCore.length >= 2) return supportOrCore.slice(0, 4);
 
   return ordered.slice(0, Math.min(3, ordered.length));
@@ -982,6 +979,41 @@ function pickBestArtifact(
 
   scored.sort((a, b) => b.score - a.score);
   return scored[0]?.artifact ?? null;
+}
+
+function mergeConflictMatrices(
+  a: ConflictMatrix | null,
+  b: ConflictMatrix | null
+): ConflictMatrix {
+  if (!a && !b) {
+    return {
+      common_claims: [],
+      disputed_claims: [],
+      missing_or_underdeveloped_issues: [],
+    };
+  }
+  if (!a) return b as ConflictMatrix;
+  if (!b) return a;
+
+  const disputed = [...a.disputed_claims, ...b.disputed_claims];
+  const seen = new Set<string>();
+  const mergedDisputed: DisputedClaim[] = [];
+
+  for (const d of disputed) {
+    const key = d.claim_statement.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    mergedDisputed.push(d);
+  }
+
+  return {
+    common_claims: cleanArray([...a.common_claims, ...b.common_claims]),
+    disputed_claims: mergedDisputed,
+    missing_or_underdeveloped_issues: cleanArray([
+      ...a.missing_or_underdeveloped_issues,
+      ...b.missing_or_underdeveloped_issues,
+    ]),
+  };
 }
 
 async function extractConflictMatrixWithOpenAI(args: {
@@ -1012,27 +1044,8 @@ async function extractConflictMatrixWithOpenAI(args: {
     "Treat only load-bearing conflicts as disputed claims.",
     "Ignore noise and side issues.",
     "",
-    "Return STRICT JSON ONLY with these exact keys:",
-    "{",
-    '  "common_claims": string[],',
-    '  "disputed_claims": [',
-    "    {",
-    '      "claim_id": string,',
-    '      "claim_statement": string,',
-    '      "why_controlling": string,',
-    '      "provider_positions": [',
-    "        {",
-    '          "provider": string,',
-    '          "model": string,',
-    '          "position": string,',
-    '          "confidence": "low" | "medium" | "high"',
-    "        }",
-    "      ],",
-    '      "challenge_prompt": string',
-    "    }",
-    "  ],",
-    '  "missing_or_underdeveloped_issues": string[]',
-    "}",
+    "Return STRICT JSON ONLY with these keys:",
+    "common_claims, disputed_claims, missing_or_underdeveloped_issues.",
   ].join("\n");
 
   const user = [
@@ -1092,48 +1105,13 @@ async function extractConflictMatrixWithClaude(args: {
   const result = await callAnthropic({
     ...args.input,
     question: prompt,
-    maxTokens: clampInt((args.input as any)?.maxTokens, 1000, 3600, 2000),
+    maxTokens: clampInt(args.input.maxTokens, 1000, 3600, 2000),
   });
 
   if (result.status !== "ok" || !result.text) return null;
 
   const extracted = extractJsonObject(result.text);
   return normalizeConflictMatrix(safeJsonParse<ConflictMatrixJson>(extracted));
-}
-
-function mergeConflictMatrices(
-  a: ConflictMatrix | null,
-  b: ConflictMatrix | null
-): ConflictMatrix {
-  if (!a && !b) {
-    return {
-      common_claims: [],
-      disputed_claims: [],
-      missing_or_underdeveloped_issues: [],
-    };
-  }
-  if (!a) return b as ConflictMatrix;
-  if (!b) return a;
-
-  const disputed = [...a.disputed_claims, ...b.disputed_claims];
-  const seen = new Set<string>();
-  const mergedDisputed: DisputedClaim[] = [];
-
-  for (const d of disputed) {
-    const key = d.claim_statement.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    mergedDisputed.push(d);
-  }
-
-  return {
-    common_claims: cleanArray([...a.common_claims, ...b.common_claims]),
-    disputed_claims: mergedDisputed,
-    missing_or_underdeveloped_issues: cleanArray([
-      ...a.missing_or_underdeveloped_issues,
-      ...b.missing_or_underdeveloped_issues,
-    ]),
-  };
 }
 
 async function buildConflictMatrix(args: {
@@ -1192,7 +1170,6 @@ async function runProviderRound2(
 
   const extracted = extractJsonObject(result.text);
   const parsed = safeJsonParse<ProviderRevisionJson>(extracted);
-
   const memo = parsed ? normalizeMemoJson(parsed) : parseProviderMemo(result.text);
 
   return {
@@ -1215,10 +1192,72 @@ function summarizeAssessmentsForSelection(
   return assessments.filter((a) => selectedKeys.has(`${a.provider}::${a.model}`));
 }
 
+async function constructCombinedDraftWithOpenAI(args: {
+  input: CrosscheckInput;
+  artifacts: ProviderMemoArtifact[];
+  assessments: ProviderAssessment[];
+  conflictMatrix: ConflictMatrix;
+}): Promise<NormalizedMemo | null> {
+  const apiKey = env("OPENAI_API_KEY");
+  if (!apiKey) return null;
+
+  const model =
+    env("OPENAI_SYNTH_MODEL") ||
+    env("OPENAI_MODEL") ||
+    "gpt-4.1-mini";
+
+  const client = new OpenAI({ apiKey });
+
+  const sys = [
+    "You are constructing a combined tax memo draft from multiple revised model answers.",
+    "You are NOT writing a comparison.",
+    "Build one concise internal memo from the strongest surviving claims.",
+    "Do not smooth over unresolved controlling conflicts; narrow the answer if necessary.",
+    "Do not invent citations or authorities.",
+    "Return STRICT JSON ONLY with keys:",
+    "executive_summary, analysis, transaction_specific_treatment, required_confirmations, recommendation, confidence",
+  ].join("\n");
+
+  const user = [
+    args.input.jurisdiction ? `Jurisdiction: ${args.input.jurisdiction}` : "",
+    args.input.facts ? `Facts:\n${args.input.facts}` : "",
+    args.input.constraints ? `Constraints:\n${args.input.constraints}` : "",
+    `Question:\n${args.input.question}`,
+    "",
+    "Provider assessments:",
+    serializeAssessments(args.assessments),
+    "",
+    "Revised provider artifacts:",
+    serializeProviderArtifacts(args.artifacts),
+    "",
+    "Conflict matrix:",
+    serializeConflictMatrix(args.conflictMatrix),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const resp = await client.chat.completions.create({
+    model,
+    temperature: 0.05,
+    messages: [
+      { role: "system", content: sys },
+      { role: "user", content: user },
+    ],
+    max_tokens: 1800,
+  });
+
+  const raw = resp.choices?.[0]?.message?.content || "{}";
+  const extracted = extractJsonObject(raw);
+  const parsed = safeJsonParse<MemoJson>(extracted);
+  if (!parsed) return null;
+  return normalizeMemoJson(parsed);
+}
+
 async function adjudicateFinalWithOpenAI(args: {
   input: CrosscheckInput;
   round1: ProviderMemoArtifact[];
   round2: ProviderMemoArtifact[];
+  combinedDraft: NormalizedMemo | null;
   assessments: ProviderAssessment[];
   conflictMatrix1: ConflictMatrix;
   conflictMatrix2: ConflictMatrix;
@@ -1246,14 +1285,16 @@ async function adjudicateFinalWithOpenAI(args: {
     "- Round 2 revised provider memos after challenge-back",
     "- Round 2 conflict matrix",
     "- provider quality assessments",
+    "- a combined draft synthesized from the revised record",
     "",
     "DECISION RULES",
     "1. Weight round 2 higher than round 1.",
     "2. Weight providers with better assessments higher.",
-    "3. Do NOT smooth over controlling conflicts just to make the memo cleaner.",
-    "4. Prefer narrower but more legally precise analysis over broader generic statements.",
-    "5. Exclude non-central taxes and side issues unless necessary to avoid a materially incomplete answer.",
-    "6. If a controlling issue remains unresolved after round 2, narrow the answer and lower confidence.",
+    "3. Use the combined draft as a candidate, not as the unquestioned truth.",
+    "4. Do NOT smooth over controlling conflicts just to make the memo cleaner.",
+    "5. Prefer narrower but more legally precise analysis over broader generic statements.",
+    "6. Exclude non-central taxes and side issues unless necessary to avoid a materially incomplete answer.",
+    "7. If a controlling issue remains unresolved after round 2, narrow the answer and lower confidence.",
     "",
     "OUTPUT RULES",
     "- Write a concise internal memo.",
@@ -1286,6 +1327,9 @@ async function adjudicateFinalWithOpenAI(args: {
     "",
     "Round 2 conflict matrix:",
     serializeConflictMatrix(args.conflictMatrix2),
+    "",
+    "Combined draft:",
+    JSON.stringify(args.combinedDraft || {}, null, 2),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -1311,6 +1355,7 @@ async function adjudicateFinalWithClaude(args: {
   input: CrosscheckInput;
   round1: ProviderMemoArtifact[];
   round2: ProviderMemoArtifact[];
+  combinedDraft: NormalizedMemo | null;
   assessments: ProviderAssessment[];
   conflictMatrix1: ConflictMatrix;
   conflictMatrix2: ConflictMatrix;
@@ -1336,10 +1381,14 @@ async function adjudicateFinalWithClaude(args: {
     "Round 2 conflict matrix:",
     serializeConflictMatrix(args.conflictMatrix2),
     "",
+    "Combined draft:",
+    JSON.stringify(args.combinedDraft || {}, null, 2),
+    "",
     "You are the final senior tax adjudicator.",
     "Write one internal tax memo for a business stakeholder.",
     "Do NOT write a model comparison.",
     "Weight round 2 higher than round 1.",
+    "Use the combined draft as a candidate, not as unquestioned truth.",
     "Prefer legal precision over generic completeness.",
     "Do not smooth away unresolved controlling conflicts; narrow the answer if necessary.",
     "Do not recommend contacting tax authorities.",
@@ -1353,7 +1402,7 @@ async function adjudicateFinalWithClaude(args: {
   const result = await callAnthropic({
     ...args.input,
     question: prompt,
-    maxTokens: clampInt((args.input as any)?.maxTokens, 1000, 3600, 2200),
+    maxTokens: clampInt(args.input.maxTokens, 1000, 3600, 2200),
   });
 
   if (result.status !== "ok" || !result.text) return null;
@@ -1368,10 +1417,11 @@ async function mergeFinalMemosWithOpenAI(args: {
   input: CrosscheckInput;
   gpt: NormalizedMemo | null;
   claude: NormalizedMemo | null;
+  combinedDraft: NormalizedMemo | null;
   conflictMatrix2: ConflictMatrix;
 }): Promise<NormalizedMemo | null> {
   const apiKey = env("OPENAI_API_KEY");
-  if (!apiKey) return args.gpt || args.claude || null;
+  if (!apiKey) return args.gpt || args.claude || args.combinedDraft || null;
 
   const model =
     env("OPENAI_MERGER_MODEL") ||
@@ -1387,7 +1437,7 @@ async function mergeFinalMemosWithOpenAI(args: {
     "Write one concise internal tax memo.",
     "Do NOT write a comparison.",
     "Prefer the more legally precise memo where they differ.",
-    "Use the round 2 conflict matrix to avoid smoothing over unresolved controlling issues.",
+    "Use the combined draft and the round 2 conflict matrix to avoid smoothing over unresolved controlling issues.",
     "Do not invent citations or authorities.",
     "Return STRICT JSON ONLY with keys:",
     "executive_summary, analysis, transaction_specific_treatment, required_confirmations, recommendation, confidence",
@@ -1397,6 +1447,9 @@ async function mergeFinalMemosWithOpenAI(args: {
     args.input.jurisdiction ? `Jurisdiction: ${args.input.jurisdiction}` : "",
     args.input.facts ? `Facts:\n${args.input.facts}` : "",
     `Question:\n${args.input.question}`,
+    "",
+    "Combined draft:",
+    JSON.stringify(args.combinedDraft || {}, null, 2),
     "",
     "GPT final memo:",
     JSON.stringify(args.gpt || {}, null, 2),
@@ -1423,7 +1476,7 @@ async function mergeFinalMemosWithOpenAI(args: {
   const raw = resp.choices?.[0]?.message?.content || "{}";
   const extracted = extractJsonObject(raw);
   const parsed = safeJsonParse<MemoJson>(extracted);
-  if (!parsed) return args.gpt || args.claude || null;
+  if (!parsed) return args.gpt || args.claude || args.combinedDraft || null;
   return normalizeMemoJson(parsed);
 }
 
@@ -1462,6 +1515,12 @@ function buildInitialArtifacts(outputs: ProviderOutput[]): ProviderMemoArtifact[
     }));
 }
 
+function assessmentMapFor(assessments: ProviderAssessment[]) {
+  return new Map(
+    assessments.map((a) => [`${a.provider}::${a.model}`, a] as const)
+  );
+}
+
 export async function runCrosscheck(
   input: CrosscheckInput
 ): Promise<CrosscheckResult> {
@@ -1477,18 +1536,14 @@ export async function runCrosscheck(
   ): Promise<ProviderOutput> => {
     attempted.push(call);
     return withTimeout(fn(), timeoutMs).catch((e: any) => {
-      const { status, error } = (() => {
-        const msg = e?.message ? String(e.message) : String(e);
-        const s = msg.toLowerCase().includes("timeout") ? "timeout" : "error";
-        return { status: s as "timeout" | "error", error: msg };
-      })();
-
+      const msg = e?.message ? String(e.message) : String(e);
+      const status = msg.toLowerCase().includes("timeout") ? "timeout" : "error";
       return {
         provider: call.provider,
         model: call.model,
         status,
         ms: timeoutMs,
-        error,
+        error: msg,
       } satisfies ProviderOutput;
     });
   };
@@ -1532,13 +1587,14 @@ export async function runCrosscheck(
   }
 
   const round1Artifacts = buildInitialArtifacts(providers);
-  const round1Assessments = round1Artifacts.map((a) => providerAssessmentForArtifact(a, input));
+  const round1Assessments = round1Artifacts.map((a) =>
+    providerAssessmentForArtifact(a, input)
+  );
   const selectedRound1 = chooseArtifactsForReasoning(round1Artifacts, round1Assessments);
   const selectedAssessments = summarizeAssessmentsForSelection(
     round1Assessments,
     selectedRound1
   );
-
   const bestArtifact = pickBestArtifact(round1Artifacts, round1Assessments);
 
   let round1ConflictMatrix: ConflictMatrix = {
@@ -1548,6 +1604,7 @@ export async function runCrosscheck(
   };
 
   let round2Artifacts: ProviderMemoArtifact[] = [];
+  let round2Assessments: ProviderAssessment[] = [];
   let round2ConflictMatrix: ConflictMatrix = {
     common_claims: [],
     disputed_claims: [],
@@ -1565,9 +1622,7 @@ export async function runCrosscheck(
       missing_or_underdeveloped_issues: [],
     }));
 
-    const assessmentMap = new Map(
-      selectedAssessments.map((a) => [`${a.provider}::${a.model}`, a] as const)
-    );
+    const assessmentMap = assessmentMapFor(selectedAssessments);
 
     const revised = await Promise.all(
       selectedRound1.map((artifact) =>
@@ -1581,12 +1636,15 @@ export async function runCrosscheck(
     );
 
     round2Artifacts = revised.filter(Boolean) as ProviderMemoArtifact[];
+    round2Assessments = round2Artifacts.map((a) =>
+      providerAssessmentForArtifact(a, input)
+    );
 
     if (round2Artifacts.length >= 2) {
       round2ConflictMatrix = await buildConflictMatrix({
         input,
         artifacts: round2Artifacts,
-        assessments: selectedAssessments,
+        assessments: round2Assessments,
       }).catch(() => ({
         common_claims: [],
         disputed_claims: [],
@@ -1595,31 +1653,45 @@ export async function runCrosscheck(
     }
   }
 
+  const reasoningArtifacts =
+    round2Artifacts.length >= 2 ? round2Artifacts : selectedRound1;
+  const reasoningAssessments =
+    round2Artifacts.length >= 2 ? round2Assessments : selectedAssessments;
+  const reasoningConflictMatrix =
+    round2Artifacts.length >= 2 ? round2ConflictMatrix : round1ConflictMatrix;
+
+  let combinedDraft: NormalizedMemo | null = null;
+  if (reasoningArtifacts.length >= 2) {
+    combinedDraft = await constructCombinedDraftWithOpenAI({
+      input,
+      artifacts: reasoningArtifacts,
+      assessments: reasoningAssessments,
+      conflictMatrix: reasoningConflictMatrix,
+    }).catch(() => null);
+  }
+
   let finalMemo: NormalizedMemo | null = null;
 
-  const adjudicationInputRound2 =
-    round2Artifacts.length >= 2 ? round2Artifacts : selectedRound1;
-
-  if (adjudicationInputRound2.length >= 2) {
+  if (reasoningArtifacts.length >= 2) {
     if (dualAdjudicatorEnabled()) {
       const [gptFinal, claudeFinal] = await Promise.all([
         adjudicateFinalWithOpenAI({
           input,
           round1: selectedRound1,
-          round2: adjudicationInputRound2,
-          assessments: selectedAssessments,
+          round2: reasoningArtifacts,
+          combinedDraft,
+          assessments: reasoningAssessments,
           conflictMatrix1: round1ConflictMatrix,
-          conflictMatrix2:
-            round2Artifacts.length >= 2 ? round2ConflictMatrix : round1ConflictMatrix,
+          conflictMatrix2: reasoningConflictMatrix,
         }).catch(() => null),
         adjudicateFinalWithClaude({
           input,
           round1: selectedRound1,
-          round2: adjudicationInputRound2,
-          assessments: selectedAssessments,
+          round2: reasoningArtifacts,
+          combinedDraft,
+          assessments: reasoningAssessments,
           conflictMatrix1: round1ConflictMatrix,
-          conflictMatrix2:
-            round2Artifacts.length >= 2 ? round2ConflictMatrix : round1ConflictMatrix,
+          conflictMatrix2: reasoningConflictMatrix,
         }).catch(() => null),
       ]);
 
@@ -1627,20 +1699,24 @@ export async function runCrosscheck(
         input,
         gpt: gptFinal,
         claude: claudeFinal,
-        conflictMatrix2:
-          round2Artifacts.length >= 2 ? round2ConflictMatrix : round1ConflictMatrix,
-      }).catch(() => gptFinal || claudeFinal || null);
+        combinedDraft,
+        conflictMatrix2: reasoningConflictMatrix,
+      }).catch(() => gptFinal || claudeFinal || combinedDraft || null);
     } else {
       finalMemo = await adjudicateFinalWithOpenAI({
         input,
         round1: selectedRound1,
-        round2: adjudicationInputRound2,
-        assessments: selectedAssessments,
+        round2: reasoningArtifacts,
+        combinedDraft,
+        assessments: reasoningAssessments,
         conflictMatrix1: round1ConflictMatrix,
-        conflictMatrix2:
-          round2Artifacts.length >= 2 ? round2ConflictMatrix : round1ConflictMatrix,
-      }).catch(() => null);
+        conflictMatrix2: reasoningConflictMatrix,
+      }).catch(() => combinedDraft);
     }
+  }
+
+  if (!finalMemo && combinedDraft) {
+    finalMemo = combinedDraft;
   }
 
   if (!finalMemo && bestArtifact) {
@@ -1654,9 +1730,7 @@ export async function runCrosscheck(
       .map((a) => `${a.provider}:${a.model}`)
       .join(", ")}`;
 
-  const unresolvedDisagreements = (
-    round2Artifacts.length >= 2 ? round2ConflictMatrix : round1ConflictMatrix
-  ).disputed_claims
+  const unresolvedDisagreements = reasoningConflictMatrix.disputed_claims
     .map((d) => d.claim_statement)
     .slice(0, 8);
 
@@ -1676,13 +1750,27 @@ export async function runCrosscheck(
           "Multiple providers responded, but most were screened out as too generic or low-quality for core adjudication.",
         ]
       : []),
+    ...(reasoningConflictMatrix.disputed_claims.length > 0
+      ? [
+          "Some controlling differences remained unresolved after the challenge-back round; the final answer was narrowed accordingly.",
+        ]
+      : []),
   ]);
 
   const followups = uniq(finalMemo?.required_confirmations || []);
 
-  const confidence =
-    finalMemo?.confidence ||
-    (selectedRound1.length >= 2 ? "medium" : "low");
+  let confidence: "low" | "medium" | "high" =
+    finalMemo?.confidence || (selectedRound1.length >= 2 ? "medium" : "low");
+
+  const unresolvedControllingCount = reasoningConflictMatrix.disputed_claims.filter(
+    (d) =>
+      d.why_controlling ||
+      d.provider_positions.some((p) => p.confidence === "high" || p.confidence === "medium")
+  ).length;
+
+  if (unresolvedControllingCount >= 2) confidence = "low";
+  else if (unresolvedControllingCount === 1 && confidence === "high") confidence = "medium";
+  else if (selectedRound1.length < 2) confidence = "low";
 
   const runtime_ms = Date.now() - t0;
 
