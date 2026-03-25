@@ -247,6 +247,162 @@ type StructuralValidation = {
   dimensionsCovered: string[];
 };
 
+
+type ClaimKind = "numeric" | "directional" | "scope" | "branch" | "descriptive";
+
+type ClaimStability = {
+  claim: DisputedClaim;
+  kind: ClaimKind;
+  critical: boolean;
+  unstable: boolean;
+  reason: string;
+};
+
+function classifyClaimKind(text: string): ClaimKind {
+  const t = text.toLowerCase();
+
+  if (/\b\d+%|\brate\b|\bamount\b|\bthreshold\b|\bcalculation\b|\bdifferential\b/.test(t)) {
+    return "numeric";
+  }
+
+  if (
+    /\borigin\b|\bdestination\b|\bfrom\b|\bto\b|\bbetween\b|\binto\b|\bout of\b|\bdirection\b/.test(t)
+  ) {
+    return "directional";
+  }
+
+  if (
+    /\bapplies\b|\bdoes not apply\b|\bscope\b|\bonly if\b|\bunless\b|\btrigger\b|\bdue when\b/.test(t)
+  ) {
+    return "scope";
+  }
+
+  if (
+    /\bb2b\b|\bb2c\b|\bfinal consumer\b|\btaxpayer\b|\bnon-taxpayer\b|\bresale\b|\bown use\b|\bfixed asset\b|\bindustrialization\b/.test(t)
+  ) {
+    return "branch";
+  }
+
+  return "descriptive";
+}
+
+function isCriticalClaimKind(kind: ClaimKind): boolean {
+  return kind === "numeric" || kind === "directional" || kind === "scope" || kind === "branch";
+}
+
+function evaluateClaimStability(matrix: ConflictMatrix): ClaimStability[] {
+  return matrix.disputed_claims.map((claim) => {
+    const corpus = [
+      claim.claim_statement,
+      claim.why_controlling,
+      claim.challenge_prompt,
+      ...claim.provider_positions.map((p) => p.position),
+    ].join("\n");
+
+    const kind = classifyClaimKind(corpus);
+    const critical = isCriticalClaimKind(kind);
+
+    const normalizedPositions = uniq(
+      claim.provider_positions
+        .map((p) => p.position.toLowerCase().replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+    );
+
+    const confidenceMix = uniq(claim.provider_positions.map((p) => p.confidence));
+    const unstable =
+      normalizedPositions.length > 1 ||
+      confidenceMix.length > 1 ||
+      claim.provider_positions.length >= 2;
+
+    const reason = unstable
+      ? `Unstable ${kind} claim remained disputed after challenge-back.`
+      : `Claim appears stable.`;
+
+    return {
+      claim,
+      kind,
+      critical,
+      unstable,
+      reason,
+    };
+  });
+}
+
+function removeSentenceContaining(text: string, needle: string): string {
+  const sentences = text
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const n = needle.toLowerCase().trim();
+  const kept = sentences.filter((s) => !s.toLowerCase().includes(n));
+
+  return kept.join(" ").trim();
+}
+
+function applyClaimStabilityGuard(
+  memo: NormalizedMemo,
+  matrix: ConflictMatrix
+): NormalizedMemo {
+  const stability = evaluateClaimStability(matrix);
+  const unstableCritical = stability.filter((x) => x.critical && x.unstable);
+
+  if (!unstableCritical.length) return memo;
+
+  let executive_summary = memo.executive_summary;
+  let analysis = memo.analysis;
+  let transaction_specific_treatment = [...memo.transaction_specific_treatment];
+  let recommendation = memo.recommendation;
+
+  for (const item of unstableCritical) {
+    const needle = item.claim.claim_statement;
+    executive_summary = removeSentenceContaining(executive_summary, needle);
+    analysis = removeSentenceContaining(analysis, needle);
+    transaction_specific_treatment = transaction_specific_treatment.filter(
+      (x) => !x.toLowerCase().includes(needle.toLowerCase())
+    );
+    recommendation = removeSentenceContaining(recommendation, needle);
+  }
+
+  const guardNote =
+    "The final answer has been narrowed because one or more controlling mechanical claims remained disputed after cross-model challenge and re-review.";
+
+  const required_confirmations = uniq([
+    ...memo.required_confirmations,
+    ...unstableCritical.map((x) => `Resolve disputed issue before relying on precise treatment: ${x.claim.claim_statement}`),
+  ]);
+
+  if (!analysis.toLowerCase().includes("narrowed")) {
+    analysis = [analysis, guardNote].filter(Boolean).join(" ");
+  }
+
+  const nextMemo: NormalizedMemo = {
+    ...memo,
+    executive_summary: executive_summary || memo.executive_summary,
+    analysis: analysis || memo.analysis,
+    transaction_specific_treatment:
+      transaction_specific_treatment.length > 0
+        ? transaction_specific_treatment
+        : memo.transaction_specific_treatment,
+    required_confirmations,
+    recommendation: recommendation || memo.recommendation,
+    confidence: "low",
+    answer: "",
+  };
+
+  nextMemo.answer = buildMemoAnswer({
+    executive_summary: nextMemo.executive_summary,
+    analysis: nextMemo.analysis,
+    transaction_specific_treatment: nextMemo.transaction_specific_treatment,
+    required_confirmations: nextMemo.required_confirmations,
+    recommendation: nextMemo.recommendation,
+    confidence: nextMemo.confidence,
+  });
+
+  return nextMemo;
+}
+
+
 function cleanMemoText(s: string): string {
   return String(s || "")
     .replace(/\bcommon ground\b:?/gi, "")
@@ -1723,6 +1879,10 @@ export async function runCrosscheck(
     finalMemo = bestArtifact.memo;
   }
 
+  if (finalMemo) {
+    finalMemo = applyClaimStabilityGuard(finalMemo, reasoningConflictMatrix);
+  }
+
   const answer =
     finalMemo?.answer ||
     bestArtifact?.memo.answer ||
@@ -1750,9 +1910,9 @@ export async function runCrosscheck(
           "Multiple providers responded, but most were screened out as too generic or low-quality for core adjudication.",
         ]
       : []),
-    ...(reasoningConflictMatrix.disputed_claims.length > 0
+    ...(evaluateClaimStability(reasoningConflictMatrix).some((x) => x.critical && x.unstable)
       ? [
-          "Some controlling differences remained unresolved after the challenge-back round; the final answer was narrowed accordingly.",
+          "Some controlling mechanical claims remained unresolved after the challenge-back round; the final answer was narrowed accordingly.",
         ]
       : []),
   ]);
@@ -1762,14 +1922,12 @@ export async function runCrosscheck(
   let confidence: "low" | "medium" | "high" =
     finalMemo?.confidence || (selectedRound1.length >= 2 ? "medium" : "low");
 
-  const unresolvedControllingCount = reasoningConflictMatrix.disputed_claims.filter(
-    (d) =>
-      d.why_controlling ||
-      d.provider_positions.some((p) => p.confidence === "high" || p.confidence === "medium")
+  const claimStability = evaluateClaimStability(reasoningConflictMatrix);
+  const unresolvedControllingCount = claimStability.filter(
+    (x) => x.critical && x.unstable
   ).length;
 
-  if (unresolvedControllingCount >= 2) confidence = "low";
-  else if (unresolvedControllingCount === 1 && confidence === "high") confidence = "medium";
+  if (unresolvedControllingCount >= 1) confidence = "low";
   else if (selectedRound1.length < 2) confidence = "low";
 
   const runtime_ms = Date.now() - t0;
