@@ -29,6 +29,7 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   const timeout = new Promise<T>((_, rej) => {
     t = setTimeout(() => rej(new Error(`timeout after ${ms}ms`)), ms);
   });
+
   return Promise.race([
     p.finally(() => {
       if (t) clearTimeout(t);
@@ -57,11 +58,11 @@ function geminiEnabled(): boolean {
 }
 
 function providerCoreThreshold(): number {
-  return clampInt(env("CROSSCHECK_PROVIDER_MIN_SCORE"), 0, 1000, 240);
+  return clampInt(env("CROSSCHECK_PROVIDER_MIN_SCORE"), 0, 1000, 230);
 }
 
 function providerSupportThreshold(): number {
-  return clampInt(env("CROSSCHECK_PROVIDER_SUPPORT_SCORE"), 0, 1000, 150);
+  return clampInt(env("CROSSCHECK_PROVIDER_SUPPORT_SCORE"), 0, 1000, 145);
 }
 
 function safeJsonParse<T>(s: string): T | null {
@@ -110,13 +111,13 @@ function splitIntoSnippets(text: string): string[] {
     .replace(/\n[-*]\s+/g, "\n")
     .replace(/\n\d+\.\s+/g, "\n");
 
-  const parts = bulletized
-    .split(/\n+|(?<=[.!?;:])\s+(?=[A-Z0-9(])/g)
-    .map((x) => x.trim())
-    .filter(Boolean)
-    .filter((x) => x.length >= 20);
-
-  return uniq(parts);
+  return uniq(
+    bulletized
+      .split(/\n+|(?<=[.!?;:])\s+(?=[A-Z0-9(])/g)
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .filter((x) => x.length >= 20)
+  );
 }
 
 function normalizeStringArray(value: unknown): string[] {
@@ -128,6 +129,37 @@ function confidenceOrLow(value: unknown): "low" | "medium" | "high" {
   const v = String(value || "").toLowerCase();
   if (v === "high" || v === "medium" || v === "low") return v;
   return "low";
+}
+
+function cleanMemoText(s: string): string {
+  return String(s || "")
+    .replace(/\bcommon ground\b:?/gi, "")
+    .replace(/\bdifferences in emphasis\b:?/gi, "")
+    .replace(/\bminority view\b:?/gi, "")
+    .replace(/\bone model\b/gi, "")
+    .replace(/\bsome models\b/gi, "")
+    .replace(/\bconsult (?:local )?counsel\b/gi, "obtain targeted review where needed")
+    .replace(/\bcontact tax authorities\b/gi, "confirm the applicable rule set")
+    .replace(/\bpenalt(?:y|ies)\b[^.]*\./gi, "")
+    .replace(/\bselic\b[^.]*\./gi, "")
+    .replace(/\bongoing litigation\b[^.]*\./gi, "")
+    .replace(/\belectronic invoic(?:e|ing)\b[^.]*\./gi, "")
+    .replace(/\bnf-e\b[^.]*\./gi, "")
+    .replace(/\bgnre\b[^.]*\./gi, "")
+    .replace(/\bcfop\b[^.]*\./gi, "")
+    .replace(/\bfci\b[^.]*\./gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function cleanArray(values: string[]): string[] {
+  return uniq(
+    values
+      .map(cleanMemoText)
+      .map((x) => x.replace(/^[•\-]\s*/, "").trim())
+      .filter(Boolean)
+      .filter((x) => x.length > 6)
+  );
 }
 
 type MemoJson = {
@@ -151,15 +183,13 @@ type ProviderMemoJson = MemoJson & {
   claims?: ProviderClaimJson[];
 };
 
-type ProviderConflictResponseJson = {
-  claim_id?: string;
-  action?: "maintain" | "revise" | "withdraw" | string;
-  explanation?: string;
-  revised_statement?: string;
-};
-
 type ProviderRevisionJson = ProviderMemoJson & {
-  responses_to_disputed_claims?: ProviderConflictResponseJson[];
+  responses_to_disputed_claims?: Array<{
+    claim_id?: string;
+    action?: "maintain" | "revise" | "withdraw" | string;
+    explanation?: string;
+    revised_statement?: string;
+  }>;
 };
 
 type NormalizedClaim = {
@@ -247,7 +277,6 @@ type StructuralValidation = {
   dimensionsCovered: string[];
 };
 
-
 type ClaimKind = "numeric" | "directional" | "scope" | "branch" | "descriptive";
 
 type ClaimStability = {
@@ -258,181 +287,11 @@ type ClaimStability = {
   reason: string;
 };
 
-function classifyClaimKind(text: string): ClaimKind {
-  const t = text.toLowerCase();
-
-  if (/\b\d+%|\brate\b|\bamount\b|\bthreshold\b|\bcalculation\b|\bdifferential\b/.test(t)) {
-    return "numeric";
-  }
-
-  if (
-    /\borigin\b|\bdestination\b|\bfrom\b|\bto\b|\bbetween\b|\binto\b|\bout of\b|\bdirection\b/.test(t)
-  ) {
-    return "directional";
-  }
-
-  if (
-    /\bapplies\b|\bdoes not apply\b|\bscope\b|\bonly if\b|\bunless\b|\btrigger\b|\bdue when\b/.test(t)
-  ) {
-    return "scope";
-  }
-
-  if (
-    /\bb2b\b|\bb2c\b|\bfinal consumer\b|\btaxpayer\b|\bnon-taxpayer\b|\bresale\b|\bown use\b|\bfixed asset\b|\bindustrialization\b/.test(t)
-  ) {
-    return "branch";
-  }
-
-  return "descriptive";
-}
-
-function isCriticalClaimKind(kind: ClaimKind): boolean {
-  return kind === "numeric" || kind === "directional" || kind === "scope" || kind === "branch";
-}
-
-function evaluateClaimStability(matrix: ConflictMatrix): ClaimStability[] {
-  return matrix.disputed_claims.map((claim) => {
-    const corpus = [
-      claim.claim_statement,
-      claim.why_controlling,
-      claim.challenge_prompt,
-      ...claim.provider_positions.map((p) => p.position),
-    ].join("\n");
-
-    const kind = classifyClaimKind(corpus);
-    const critical = isCriticalClaimKind(kind);
-
-    const normalizedPositions = uniq(
-      claim.provider_positions
-        .map((p) => p.position.toLowerCase().replace(/\s+/g, " ").trim())
-        .filter(Boolean)
-    );
-
-    const confidenceMix = uniq(claim.provider_positions.map((p) => p.confidence));
-    const unstable =
-      normalizedPositions.length > 1 ||
-      confidenceMix.length > 1 ||
-      claim.provider_positions.length >= 2;
-
-    const reason = unstable
-      ? `Unstable ${kind} claim remained disputed after challenge-back.`
-      : `Claim appears stable.`;
-
-    return {
-      claim,
-      kind,
-      critical,
-      unstable,
-      reason,
-    };
-  });
-}
-
-function removeSentenceContaining(text: string, needle: string): string {
-  const sentences = text
-    .split(/(?<=[.!?])\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  const n = needle.toLowerCase().trim();
-  const kept = sentences.filter((s) => !s.toLowerCase().includes(n));
-
-  return kept.join(" ").trim();
-}
-
-function applyClaimStabilityGuard(
-  memo: NormalizedMemo,
-  matrix: ConflictMatrix
-): NormalizedMemo {
-  const stability = evaluateClaimStability(matrix);
-  const unstableCritical = stability.filter((x) => x.critical && x.unstable);
-
-  if (!unstableCritical.length) return memo;
-
-  let executive_summary = memo.executive_summary;
-  let analysis = memo.analysis;
-  let transaction_specific_treatment = [...memo.transaction_specific_treatment];
-  let recommendation = memo.recommendation;
-
-  for (const item of unstableCritical) {
-    const needle = item.claim.claim_statement;
-    executive_summary = removeSentenceContaining(executive_summary, needle);
-    analysis = removeSentenceContaining(analysis, needle);
-    transaction_specific_treatment = transaction_specific_treatment.filter(
-      (x) => !x.toLowerCase().includes(needle.toLowerCase())
-    );
-    recommendation = removeSentenceContaining(recommendation, needle);
-  }
-
-  const guardNote =
-    "The final answer has been narrowed because one or more controlling mechanical claims remained disputed after cross-model challenge and re-review.";
-
-  const required_confirmations = uniq([
-    ...memo.required_confirmations,
-    ...unstableCritical.map((x) => `Resolve disputed issue before relying on precise treatment: ${x.claim.claim_statement}`),
-  ]);
-
-  if (!analysis.toLowerCase().includes("narrowed")) {
-    analysis = [analysis, guardNote].filter(Boolean).join(" ");
-  }
-
-  const nextMemo: NormalizedMemo = {
-    ...memo,
-    executive_summary: executive_summary || memo.executive_summary,
-    analysis: analysis || memo.analysis,
-    transaction_specific_treatment:
-      transaction_specific_treatment.length > 0
-        ? transaction_specific_treatment
-        : memo.transaction_specific_treatment,
-    required_confirmations,
-    recommendation: recommendation || memo.recommendation,
-    confidence: "low",
-    answer: "",
-  };
-
-  nextMemo.answer = buildMemoAnswer({
-    executive_summary: nextMemo.executive_summary,
-    analysis: nextMemo.analysis,
-    transaction_specific_treatment: nextMemo.transaction_specific_treatment,
-    required_confirmations: nextMemo.required_confirmations,
-    recommendation: nextMemo.recommendation,
-    confidence: nextMemo.confidence,
-  });
-
-  return nextMemo;
-}
-
-
-function cleanMemoText(s: string): string {
-  return String(s || "")
-    .replace(/\bcommon ground\b:?/gi, "")
-    .replace(/\bdifferences in emphasis\b:?/gi, "")
-    .replace(/\bminority view\b:?/gi, "")
-    .replace(/\bone model\b/gi, "")
-    .replace(/\bsome models\b/gi, "")
-    .replace(/\bconsult (?:local )?counsel\b/gi, "obtain targeted review where needed")
-    .replace(/\bcontact tax authorities\b/gi, "confirm the applicable rule set")
-    .replace(/\bpenalt(?:y|ies)\b[^.]*\./gi, "")
-    .replace(/\bselic\b[^.]*\./gi, "")
-    .replace(/\bongoing litigation\b[^.]*\./gi, "")
-    .replace(/\belectronic invoic(?:e|ing)\b[^.]*\./gi, "")
-    .replace(/\bnf-e\b[^.]*\./gi, "")
-    .replace(/\bgnre\b[^.]*\./gi, "")
-    .replace(/\bcfop\b[^.]*\./gi, "")
-    .replace(/\bfci\b[^.]*\./gi, "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-}
-
-function cleanArray(values: string[]): string[] {
-  return uniq(
-    values
-      .map(cleanMemoText)
-      .map((x) => x.replace(/^[•\-]\s*/, "").trim())
-      .filter(Boolean)
-      .filter((x) => x.length > 6)
-  );
-}
+type SurvivingClaims = {
+  stableClaims: string[];
+  excludedClaims: string[];
+  excludedCriticalClaims: string[];
+};
 
 function buildMemoAnswer(parsed: Omit<NormalizedMemo, "answer" | "claims">): string {
   const lines: string[] = [];
@@ -790,6 +649,140 @@ function validateStructuralCompleteness(
   };
 }
 
+function classifyClaimKind(text: string): ClaimKind {
+  const t = text.toLowerCase();
+
+  if (/\b\d+%|\brate\b|\bamount\b|\bthreshold\b|\bcalculation\b|\bdifferential\b/.test(t)) {
+    return "numeric";
+  }
+
+  if (/\borigin\b|\bdestination\b|\bfrom\b|\bto\b|\bbetween\b|\binto\b|\bout of\b|\bdirection\b/.test(t)) {
+    return "directional";
+  }
+
+  if (/\bapplies\b|\bdoes not apply\b|\bscope\b|\bonly if\b|\bunless\b|\btrigger\b|\bdue when\b/.test(t)) {
+    return "scope";
+  }
+
+  if (/\bb2b\b|\bb2c\b|\bfinal consumer\b|\btaxpayer\b|\bnon-taxpayer\b|\bresale\b|\bown use\b|\bfixed asset\b|\bindustrialization\b/.test(t)) {
+    return "branch";
+  }
+
+  return "descriptive";
+}
+
+function isCriticalClaimKind(kind: ClaimKind): boolean {
+  return kind === "numeric" || kind === "directional" || kind === "scope" || kind === "branch";
+}
+
+function evaluateClaimStability(matrix: ConflictMatrix): ClaimStability[] {
+  return matrix.disputed_claims.map((claim) => {
+    const corpus = [
+      claim.claim_statement,
+      claim.why_controlling,
+      claim.challenge_prompt,
+      ...claim.provider_positions.map((p) => p.position),
+    ].join("\n");
+
+    const kind = classifyClaimKind(corpus);
+    const critical = isCriticalClaimKind(kind);
+
+    const normalizedPositions = uniq(
+      claim.provider_positions
+        .map((p) => p.position.toLowerCase().replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+    );
+
+    const unstable = normalizedPositions.length > 1 || claim.provider_positions.length >= 2;
+
+    return {
+      claim,
+      kind,
+      critical,
+      unstable,
+      reason: unstable
+        ? `Unstable ${kind} claim remained disputed after challenge-back.`
+        : "Claim appears stable.",
+    };
+  });
+}
+
+function normalizeClaimStatement(s: string): string {
+  return cleanMemoText(s).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function buildSurvivingClaims(matrix: ConflictMatrix): SurvivingClaims {
+  const stability = evaluateClaimStability(matrix);
+  const excluded = stability
+    .filter((x) => x.unstable)
+    .map((x) => normalizeClaimStatement(x.claim.claim_statement));
+
+  const excludedCritical = stability
+    .filter((x) => x.unstable && x.critical)
+    .map((x) => normalizeClaimStatement(x.claim.claim_statement));
+
+  const stableClaims = matrix.common_claims
+    .map(normalizeClaimStatement)
+    .filter(Boolean)
+    .filter((x) => !excluded.includes(x));
+
+  return {
+    stableClaims: uniq(stableClaims),
+    excludedClaims: uniq(excluded),
+    excludedCriticalClaims: uniq(excludedCritical),
+  };
+}
+
+function claimMatchesExcluded(statement: string, excluded: string[]): boolean {
+  const s = normalizeClaimStatement(statement);
+  return excluded.some((e) => s.includes(e) || e.includes(s));
+}
+
+function filterUnstableClaimsFromArtifacts(
+  artifacts: ProviderMemoArtifact[],
+  matrix: ConflictMatrix
+): ProviderMemoArtifact[] {
+  const surviving = buildSurvivingClaims(matrix);
+  if (!surviving.excludedCriticalClaims.length) return artifacts;
+
+  return artifacts.map((artifact) => {
+    const filteredClaims = artifact.memo.claims.filter(
+      (c) => !claimMatchesExcluded(c.statement, surviving.excludedCriticalClaims)
+    );
+
+    const filteredTreatment = artifact.memo.transaction_specific_treatment.filter(
+      (x) => !claimMatchesExcluded(x, surviving.excludedCriticalClaims)
+    );
+
+    const filteredMemo: NormalizedMemo = {
+      ...artifact.memo,
+      claims: filteredClaims,
+      transaction_specific_treatment: filteredTreatment,
+      confidence: "low",
+      answer: "",
+    };
+
+    filteredMemo.answer = buildMemoAnswer({
+      executive_summary: filteredMemo.executive_summary,
+      analysis: filteredMemo.analysis,
+      transaction_specific_treatment: filteredMemo.transaction_specific_treatment,
+      required_confirmations: uniq([
+        ...filteredMemo.required_confirmations,
+        ...surviving.excludedCriticalClaims.map(
+          (x) => `Unresolved controlling issue removed from final synthesis: ${x}`
+        ),
+      ]),
+      recommendation: filteredMemo.recommendation,
+      confidence: filteredMemo.confidence,
+    });
+
+    return {
+      ...artifact,
+      memo: filteredMemo,
+    };
+  });
+}
+
 function buildProviderWorkPrompt(input: CrosscheckInput, providerLabel: string): string {
   return [
     `You are ${providerLabel}, acting as a senior international tax associate preparing an internal tax memo.`,
@@ -822,13 +815,6 @@ function buildProviderWorkPrompt(input: CrosscheckInput, providerLabel: string):
     "5. Does this read like a memo or like a textbook?",
     "6. Is the conclusion clear and owned?",
     "Rewrite the answer to improve precision, structure, memo tone, and removal of unnecessary content.",
-    "",
-    "SCOPE DISCIPLINE",
-    "- Answer only the tax question asked.",
-    "- Do not include ancillary taxes unless necessary to avoid a materially incomplete answer.",
-    "- Do not include litigation, reform, penalty ranges, filing mechanics, registration mechanics, or workflow details unless the question asks for them or they are outcome-determinative.",
-    "- If the question is general, prioritize the governing tax and the controlling legal distinctions.",
-    "- Prefer a shorter, controlled memo over a broader but noisier answer.",
     "",
     "STRICT JSON OUTPUT",
     "{",
@@ -891,8 +877,9 @@ function buildChallengePrompt(args: {
     "If you revise or withdraw, explain why and update your memo accordingly.",
     "If you maintain, defend the position clearly and narrowly.",
     "",
-    "Your revised answer must still be an internal tax memo.",
-    "Do not mention other models in the final memo text.",
+    "IMPORTANT",
+    "Do not assume repetition across models means correctness.",
+    "If a claim collapses a conditional distinction, revise or withdraw it.",
     "",
     "STRICT JSON OUTPUT",
     "{",
@@ -1065,9 +1052,7 @@ function providerAssessmentForArtifact(
     }
 
     if (structural.dimensionsCovered.length) {
-      reasons.push(
-        `covered dimensions: ${structural.dimensionsCovered.join("; ")}`
-      );
+      reasons.push(`covered dimensions: ${structural.dimensionsCovered.join("; ")}`);
     }
   }
 
@@ -1137,41 +1122,6 @@ function pickBestArtifact(
   return scored[0]?.artifact ?? null;
 }
 
-function mergeConflictMatrices(
-  a: ConflictMatrix | null,
-  b: ConflictMatrix | null
-): ConflictMatrix {
-  if (!a && !b) {
-    return {
-      common_claims: [],
-      disputed_claims: [],
-      missing_or_underdeveloped_issues: [],
-    };
-  }
-  if (!a) return b as ConflictMatrix;
-  if (!b) return a;
-
-  const disputed = [...a.disputed_claims, ...b.disputed_claims];
-  const seen = new Set<string>();
-  const mergedDisputed: DisputedClaim[] = [];
-
-  for (const d of disputed) {
-    const key = d.claim_statement.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    mergedDisputed.push(d);
-  }
-
-  return {
-    common_claims: cleanArray([...a.common_claims, ...b.common_claims]),
-    disputed_claims: mergedDisputed,
-    missing_or_underdeveloped_issues: cleanArray([
-      ...a.missing_or_underdeveloped_issues,
-      ...b.missing_or_underdeveloped_issues,
-    ]),
-  };
-}
-
 async function extractConflictMatrixWithOpenAI(args: {
   input: CrosscheckInput;
   artifacts: ProviderMemoArtifact[];
@@ -1199,8 +1149,9 @@ async function extractConflictMatrixWithOpenAI(args: {
     "Focus on legal propositions, not writing style.",
     "Treat only load-bearing conflicts as disputed claims.",
     "Ignore noise and side issues.",
+    "If a claim is numeric, directional, scope-defining, or branch-defining and providers materially differ, it must appear as disputed.",
     "",
-    "Return STRICT JSON ONLY with these keys:",
+    "Return STRICT JSON ONLY with keys:",
     "common_claims, disputed_claims, missing_or_underdeveloped_issues.",
   ].join("\n");
 
@@ -1252,6 +1203,7 @@ async function extractConflictMatrixWithClaude(args: {
     "You are extracting a conflict matrix from multiple tax memo answers.",
     "Do NOT write a final memo.",
     "Identify only load-bearing conflicts.",
+    "If a claim is numeric, directional, scope-defining, or branch-defining and providers materially differ, it must be marked disputed.",
     "Return STRICT JSON ONLY with keys:",
     "common_claims, disputed_claims, missing_or_underdeveloped_issues.",
   ]
@@ -1268,6 +1220,42 @@ async function extractConflictMatrixWithClaude(args: {
 
   const extracted = extractJsonObject(result.text);
   return normalizeConflictMatrix(safeJsonParse<ConflictMatrixJson>(extracted));
+}
+
+
+function mergeConflictMatrices(
+  a: ConflictMatrix | null,
+  b: ConflictMatrix | null
+): ConflictMatrix {
+  if (!a && !b) {
+    return {
+      common_claims: [],
+      disputed_claims: [],
+      missing_or_underdeveloped_issues: [],
+    };
+  }
+  if (!a) return b as ConflictMatrix;
+  if (!b) return a;
+
+  const disputed = [...a.disputed_claims, ...b.disputed_claims];
+  const seen = new Set<string>();
+  const mergedDisputed: DisputedClaim[] = [];
+
+  for (const d of disputed) {
+    const key = d.claim_statement.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    mergedDisputed.push(d);
+  }
+
+  return {
+    common_claims: cleanArray([...a.common_claims, ...b.common_claims]),
+    disputed_claims: mergedDisputed,
+    missing_or_underdeveloped_issues: cleanArray([
+      ...a.missing_or_underdeveloped_issues,
+      ...b.missing_or_underdeveloped_issues,
+    ]),
+  };
 }
 
 async function buildConflictMatrix(args: {
@@ -1353,6 +1341,7 @@ async function constructCombinedDraftWithOpenAI(args: {
   artifacts: ProviderMemoArtifact[];
   assessments: ProviderAssessment[];
   conflictMatrix: ConflictMatrix;
+  survivingClaims: SurvivingClaims;
 }): Promise<NormalizedMemo | null> {
   const apiKey = env("OPENAI_API_KEY");
   if (!apiKey) return null;
@@ -1367,8 +1356,9 @@ async function constructCombinedDraftWithOpenAI(args: {
   const sys = [
     "You are constructing a combined tax memo draft from multiple revised model answers.",
     "You are NOT writing a comparison.",
-    "Build one concise internal memo from the strongest surviving claims.",
-    "Do not smooth over unresolved controlling conflicts; narrow the answer if necessary.",
+    "Build one concise internal memo from surviving claims only.",
+    "You MUST exclude claims listed as excluded critical claims.",
+    "Do not smooth over unresolved controlling conflicts.",
     "Do not invent citations or authorities.",
     "Return STRICT JSON ONLY with keys:",
     "executive_summary, analysis, transaction_specific_treatment, required_confirmations, recommendation, confidence",
@@ -1383,18 +1373,24 @@ async function constructCombinedDraftWithOpenAI(args: {
     "Provider assessments:",
     serializeAssessments(args.assessments),
     "",
-    "Revised provider artifacts:",
+    "Filtered revised provider artifacts:",
     serializeProviderArtifacts(args.artifacts),
     "",
     "Conflict matrix:",
     serializeConflictMatrix(args.conflictMatrix),
+    "",
+    "Stable claims allowed into draft:",
+    JSON.stringify(args.survivingClaims.stableClaims, null, 2),
+    "",
+    "Excluded critical claims that must NOT be stated as fact:",
+    JSON.stringify(args.survivingClaims.excludedCriticalClaims, null, 2),
   ]
     .filter(Boolean)
     .join("\n\n");
 
   const resp = await client.chat.completions.create({
     model,
-    temperature: 0.05,
+    temperature: 0.02,
     messages: [
       { role: "system", content: sys },
       { role: "user", content: user },
@@ -1417,6 +1413,7 @@ async function adjudicateFinalWithOpenAI(args: {
   assessments: ProviderAssessment[];
   conflictMatrix1: ConflictMatrix;
   conflictMatrix2: ConflictMatrix;
+  survivingClaims: SurvivingClaims;
 }): Promise<NormalizedMemo | null> {
   const apiKey = env("OPENAI_API_KEY");
   if (!apiKey) return null;
@@ -1435,22 +1432,14 @@ async function adjudicateFinalWithOpenAI(args: {
     "You are NOT writing a comparison of model outputs.",
     "You are NOT writing a study note or primer.",
     "",
-    "MATERIALS YOU RECEIVE",
-    "- Round 1 provider memos",
-    "- Round 1 conflict matrix",
-    "- Round 2 revised provider memos after challenge-back",
-    "- Round 2 conflict matrix",
-    "- provider quality assessments",
-    "- a combined draft synthesized from the revised record",
-    "",
-    "DECISION RULES",
-    "1. Weight round 2 higher than round 1.",
-    "2. Weight providers with better assessments higher.",
-    "3. Use the combined draft as a candidate, not as the unquestioned truth.",
-    "4. Do NOT smooth over controlling conflicts just to make the memo cleaner.",
-    "5. Prefer narrower but more legally precise analysis over broader generic statements.",
-    "6. Exclude non-central taxes and side issues unless necessary to avoid a materially incomplete answer.",
-    "7. If a controlling issue remains unresolved after round 2, narrow the answer and lower confidence.",
+    "LEVEL 2 RULES",
+    "1. Re-derive the answer from surviving claims, not from prose blending.",
+    "2. Weight round 2 higher than round 1.",
+    "3. Weight providers with better assessments higher.",
+    "4. Use the combined draft as a candidate, not as truth.",
+    "5. NEVER state excluded critical claims as fact.",
+    "6. If a disputed claim is numeric, directional, scope-defining, or branch-defining and remains unstable, convert it into a missing confirmation or narrow caveat instead of asserting it.",
+    "7. Repetition across providers is not correctness if structural completeness is weaker.",
     "",
     "OUTPUT RULES",
     "- Write a concise internal memo.",
@@ -1478,11 +1467,17 @@ async function adjudicateFinalWithOpenAI(args: {
     "Round 1 conflict matrix:",
     serializeConflictMatrix(args.conflictMatrix1),
     "",
-    "Round 2 revised provider memos:",
+    "Round 2 filtered provider memos:",
     serializeProviderArtifacts(args.round2),
     "",
     "Round 2 conflict matrix:",
     serializeConflictMatrix(args.conflictMatrix2),
+    "",
+    "Stable claims allowed into final answer:",
+    JSON.stringify(args.survivingClaims.stableClaims, null, 2),
+    "",
+    "Excluded critical claims that must NOT be stated as fact:",
+    JSON.stringify(args.survivingClaims.excludedCriticalClaims, null, 2),
     "",
     "Combined draft:",
     JSON.stringify(args.combinedDraft || {}, null, 2),
@@ -1492,7 +1487,7 @@ async function adjudicateFinalWithOpenAI(args: {
 
   const resp = await client.chat.completions.create({
     model,
-    temperature: 0.05,
+    temperature: 0.02,
     messages: [
       { role: "system", content: sys },
       { role: "user", content: user },
@@ -1515,6 +1510,7 @@ async function adjudicateFinalWithClaude(args: {
   assessments: ProviderAssessment[];
   conflictMatrix1: ConflictMatrix;
   conflictMatrix2: ConflictMatrix;
+  survivingClaims: SurvivingClaims;
 }): Promise<NormalizedMemo | null> {
   const prompt = [
     args.input.jurisdiction ? `Jurisdiction: ${args.input.jurisdiction}` : "",
@@ -1531,22 +1527,29 @@ async function adjudicateFinalWithClaude(args: {
     "Round 1 conflict matrix:",
     serializeConflictMatrix(args.conflictMatrix1),
     "",
-    "Round 2 revised provider memos:",
+    "Round 2 filtered provider memos:",
     serializeProviderArtifacts(args.round2),
     "",
     "Round 2 conflict matrix:",
     serializeConflictMatrix(args.conflictMatrix2),
     "",
+    "Stable claims allowed into final answer:",
+    JSON.stringify(args.survivingClaims.stableClaims, null, 2),
+    "",
+    "Excluded critical claims that must NOT be stated as fact:",
+    JSON.stringify(args.survivingClaims.excludedCriticalClaims, null, 2),
+    "",
     "Combined draft:",
     JSON.stringify(args.combinedDraft || {}, null, 2),
     "",
     "You are the final senior tax adjudicator.",
-    "Write one internal tax memo for a business stakeholder.",
+    "Re-derive the answer from surviving claims, not from prose blending.",
     "Do NOT write a model comparison.",
     "Weight round 2 higher than round 1.",
     "Use the combined draft as a candidate, not as unquestioned truth.",
+    "Never state excluded critical claims as fact.",
+    "If a disputed claim is numeric, directional, scope-defining, or branch-defining and remains unstable, convert it into a missing confirmation or narrow caveat instead of asserting it.",
     "Prefer legal precision over generic completeness.",
-    "Do not smooth away unresolved controlling conflicts; narrow the answer if necessary.",
     "Do not recommend contacting tax authorities.",
     "Do not invent citations.",
     "Return STRICT JSON ONLY with keys:",
@@ -1575,6 +1578,7 @@ async function mergeFinalMemosWithOpenAI(args: {
   claude: NormalizedMemo | null;
   combinedDraft: NormalizedMemo | null;
   conflictMatrix2: ConflictMatrix;
+  survivingClaims: SurvivingClaims;
 }): Promise<NormalizedMemo | null> {
   const apiKey = env("OPENAI_API_KEY");
   if (!apiKey) return args.gpt || args.claude || args.combinedDraft || null;
@@ -1593,7 +1597,8 @@ async function mergeFinalMemosWithOpenAI(args: {
     "Write one concise internal tax memo.",
     "Do NOT write a comparison.",
     "Prefer the more legally precise memo where they differ.",
-    "Use the combined draft and the round 2 conflict matrix to avoid smoothing over unresolved controlling issues.",
+    "Never state excluded critical claims as fact.",
+    "Use the combined draft and the round 2 conflict matrix only as support.",
     "Do not invent citations or authorities.",
     "Return STRICT JSON ONLY with keys:",
     "executive_summary, analysis, transaction_specific_treatment, required_confirmations, recommendation, confidence",
@@ -1612,6 +1617,9 @@ async function mergeFinalMemosWithOpenAI(args: {
     "",
     "Claude final memo:",
     JSON.stringify(args.claude || {}, null, 2),
+    "",
+    "Excluded critical claims that must NOT be stated as fact:",
+    JSON.stringify(args.survivingClaims.excludedCriticalClaims, null, 2),
     "",
     "Round 2 conflict matrix:",
     serializeConflictMatrix(args.conflictMatrix2),
@@ -1809,12 +1817,18 @@ export async function runCrosscheck(
     }
   }
 
-  const reasoningArtifacts =
+  let reasoningArtifacts =
     round2Artifacts.length >= 2 ? round2Artifacts : selectedRound1;
   const reasoningAssessments =
     round2Artifacts.length >= 2 ? round2Assessments : selectedAssessments;
   const reasoningConflictMatrix =
     round2Artifacts.length >= 2 ? round2ConflictMatrix : round1ConflictMatrix;
+
+  const survivingClaims = buildSurvivingClaims(reasoningConflictMatrix);
+  reasoningArtifacts = filterUnstableClaimsFromArtifacts(
+    reasoningArtifacts,
+    reasoningConflictMatrix
+  );
 
   let combinedDraft: NormalizedMemo | null = null;
   if (reasoningArtifacts.length >= 2) {
@@ -1823,6 +1837,7 @@ export async function runCrosscheck(
       artifacts: reasoningArtifacts,
       assessments: reasoningAssessments,
       conflictMatrix: reasoningConflictMatrix,
+      survivingClaims,
     }).catch(() => null);
   }
 
@@ -1839,6 +1854,7 @@ export async function runCrosscheck(
           assessments: reasoningAssessments,
           conflictMatrix1: round1ConflictMatrix,
           conflictMatrix2: reasoningConflictMatrix,
+          survivingClaims,
         }).catch(() => null),
         adjudicateFinalWithClaude({
           input,
@@ -1848,6 +1864,7 @@ export async function runCrosscheck(
           assessments: reasoningAssessments,
           conflictMatrix1: round1ConflictMatrix,
           conflictMatrix2: reasoningConflictMatrix,
+          survivingClaims,
         }).catch(() => null),
       ]);
 
@@ -1857,6 +1874,7 @@ export async function runCrosscheck(
         claude: claudeFinal,
         combinedDraft,
         conflictMatrix2: reasoningConflictMatrix,
+        survivingClaims,
       }).catch(() => gptFinal || claudeFinal || combinedDraft || null);
     } else {
       finalMemo = await adjudicateFinalWithOpenAI({
@@ -1867,6 +1885,7 @@ export async function runCrosscheck(
         assessments: reasoningAssessments,
         conflictMatrix1: round1ConflictMatrix,
         conflictMatrix2: reasoningConflictMatrix,
+        survivingClaims,
       }).catch(() => combinedDraft);
     }
   }
@@ -1879,10 +1898,6 @@ export async function runCrosscheck(
     finalMemo = bestArtifact.memo;
   }
 
-  if (finalMemo) {
-    finalMemo = applyClaimStabilityGuard(finalMemo, reasoningConflictMatrix);
-  }
-
   const answer =
     finalMemo?.answer ||
     bestArtifact?.memo.answer ||
@@ -1890,6 +1905,7 @@ export async function runCrosscheck(
       .map((a) => `${a.provider}:${a.model}`)
       .join(", ")}`;
 
+  const claimStability = evaluateClaimStability(reasoningConflictMatrix);
   const unresolvedDisagreements = reasoningConflictMatrix.disputed_claims
     .map((d) => d.claim_statement)
     .slice(0, 8);
@@ -1910,19 +1926,23 @@ export async function runCrosscheck(
           "Multiple providers responded, but most were screened out as too generic or low-quality for core adjudication.",
         ]
       : []),
-    ...(evaluateClaimStability(reasoningConflictMatrix).some((x) => x.critical && x.unstable)
+    ...(claimStability.some((x) => x.critical && x.unstable)
       ? [
-          "Some controlling mechanical claims remained unresolved after the challenge-back round; the final answer was narrowed accordingly.",
+          "Some controlling mechanical claims remained unresolved after the challenge-back round; those claims were excluded from final synthesis rather than narrated as fact.",
         ]
       : []),
   ]);
 
-  const followups = uniq(finalMemo?.required_confirmations || []);
+  const followups = uniq([
+    ...(finalMemo?.required_confirmations || []),
+    ...survivingClaims.excludedCriticalClaims.map(
+      (x) => `Resolve excluded controlling issue before relying on precise treatment: ${x}`
+    ),
+  ]);
 
   let confidence: "low" | "medium" | "high" =
     finalMemo?.confidence || (selectedRound1.length >= 2 ? "medium" : "low");
 
-  const claimStability = evaluateClaimStability(reasoningConflictMatrix);
   const unresolvedControllingCount = claimStability.filter(
     (x) => x.critical && x.unstable
   ).length;
