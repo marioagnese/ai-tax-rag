@@ -14,6 +14,7 @@ export type Tier = "0" | "1" | "2";
 const BETA_UNLIMITED_EMAILS = [
   "ma_mesquita@yahoo.com",
   "contact@taxaipro.com",
+  "xcordova@msn.com",
 ];
 
 export async function getTierForEmail(email: string | undefined): Promise<Tier> {
