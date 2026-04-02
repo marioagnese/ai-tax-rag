@@ -51,6 +51,40 @@ function sanitizeBody(raw: unknown): CrosscheckUiBody {
   };
 }
 
+async function parseRequestBody(req: NextRequest): Promise<CrosscheckUiBody> {
+  const contentType = req.headers.get("content-type") || "";
+
+  if (contentType.includes("multipart/form-data")) {
+    const form = await req.formData();
+
+    const questionValue = form.get("question");
+    const factsValue = form.get("facts");
+    const constraintsValue = form.get("constraints");
+    const jurisdictionValue = form.get("jurisdiction");
+    const timeoutMsValue = form.get("timeoutMs");
+    const maxTokensValue = form.get("maxTokens");
+
+    return sanitizeBody({
+      question: typeof questionValue === "string" ? questionValue : undefined,
+      facts: typeof factsValue === "string" ? factsValue : undefined,
+      constraints: typeof constraintsValue === "string" ? constraintsValue : undefined,
+      jurisdiction:
+        typeof jurisdictionValue === "string" ? jurisdictionValue : undefined,
+      timeoutMs:
+        typeof timeoutMsValue === "string" && timeoutMsValue.trim()
+          ? Number(timeoutMsValue)
+          : undefined,
+      maxTokens:
+        typeof maxTokensValue === "string" && maxTokensValue.trim()
+          ? Number(maxTokensValue)
+          : undefined,
+    });
+  }
+
+  const raw = await req.json().catch(() => ({}));
+  return sanitizeBody(raw);
+}
+
 function applyRateLimitHeaders(h: Headers, meta?: RateLimitMeta) {
   if (!meta) return;
 
@@ -76,8 +110,7 @@ export async function POST(req: NextRequest) {
       clientId,
     });
 
-    const raw = await req.json().catch(() => ({}));
-    const body = sanitizeBody(raw);
+    const body = await parseRequestBody(req);
 
     if (!body.question) {
       const res = NextResponse.json(
