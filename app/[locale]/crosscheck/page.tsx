@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   ArrowUp,
@@ -29,6 +29,7 @@ import {
   ShieldAlert,
   Sparkles,
   User2,
+  Wrench,
   X,
 } from "lucide-react";
 
@@ -66,6 +67,14 @@ type SavedAnalysis = {
   confidence?: "low" | "medium" | "high";
   createdAt: number;
 };
+
+type AnalysisTurn = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+};
+
+type ProviderOutput = NonNullable<CrosscheckResponse["providers"]>[number];
 
 const LS_HISTORY_KEY = "taxaipro_v2_history";
 const MAX_DOCS = 3;
@@ -310,9 +319,45 @@ function DetailSection({
   );
 }
 
+function ProviderCard({ provider }: { provider: ProviderOutput }) {
+  const statusTone =
+    provider.status === "ok"
+      ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-200"
+      : provider.status === "timeout"
+      ? "border-amber-400/20 bg-amber-400/10 text-amber-200"
+      : "border-red-400/20 bg-red-400/10 text-red-200";
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[#111827] p-4">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium text-white/88">
+            {provider.provider} · {provider.model}
+          </div>
+          <div className="mt-1 text-xs text-white/40">{provider.ms} ms</div>
+        </div>
+        <span className={cn("rounded-full border px-2.5 py-1 text-xs", statusTone)}>
+          {provider.status}
+        </span>
+      </div>
+
+      {provider.error ? (
+        <div className="text-sm leading-6 text-red-200/85">{provider.error}</div>
+      ) : provider.text ? (
+        <div className="max-h-48 overflow-auto whitespace-pre-wrap text-sm leading-6 text-white/72">
+          {provider.text}
+        </div>
+      ) : (
+        <div className="text-sm text-white/45">No provider output returned.</div>
+      )}
+    </div>
+  );
+}
+
 export default function CrosscheckV2Page() {
   const params = useParams();
   const locale = typeof params?.locale === "string" ? params.locale : "en";
+  const diagnosticsRef = useRef<HTMLDivElement | null>(null);
 
   const [question, setQuestion] = useState("");
   const [details, setDetails] = useState("");
@@ -329,6 +374,7 @@ export default function CrosscheckV2Page() {
   const [caveats, setCaveats] = useState<string[]>([]);
   const [followups, setFollowups] = useState<string[]>([]);
   const [disagreements, setDisagreements] = useState<string[]>([]);
+  const [providers, setProviders] = useState<ProviderOutput[]>([]);
   const [runtimeMs, setRuntimeMs] = useState<number | null>(null);
   const [attemptedCount, setAttemptedCount] = useState<number>(0);
   const [successCount, setSuccessCount] = useState<number>(0);
@@ -339,6 +385,10 @@ export default function CrosscheckV2Page() {
   const [showPrompts, setShowPrompts] = useState(true);
 
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+
+  const [baseQuestion, setBaseQuestion] = useState("");
+  const [followupDraft, setFollowupDraft] = useState("");
+  const [conversationTurns, setConversationTurns] = useState<AnalysisTurn[]>([]);
 
   useEffect(() => {
     try {
@@ -361,6 +411,10 @@ export default function CrosscheckV2Page() {
     return question.trim().length > 0 && !loading;
   }, [question, loading]);
 
+  const canSubmitFollowup = useMemo(() => {
+    return baseQuestion.trim().length > 0 && followupDraft.trim().length > 0 && !loading;
+  }, [baseQuestion, followupDraft, loading]);
+
   function resetCurrentAnalysis() {
     setQuestion("");
     setDetails("");
@@ -373,11 +427,15 @@ export default function CrosscheckV2Page() {
     setCaveats([]);
     setFollowups([]);
     setDisagreements([]);
+    setProviders([]);
     setRuntimeMs(null);
     setAttemptedCount(0);
     setSuccessCount(0);
     setSelectedHistoryId(null);
     setAttachedFiles([]);
+    setBaseQuestion("");
+    setFollowupDraft("");
+    setConversationTurns([]);
   }
 
   function handleFilesSelected(event: React.ChangeEvent<HTMLInputElement>) {
@@ -412,14 +470,36 @@ export default function CrosscheckV2Page() {
     setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
-  async function runAnalysis(overrides?: {
-    question?: string;
-    details?: string;
-  }) {
-    const nextQuestion = (overrides?.question ?? question).trim();
-    const nextDetails = (overrides?.details ?? details).trim();
+  function buildConversationPrompt(
+    originalQuestion: string,
+    turns: AnalysisTurn[],
+    nextUserTurn: string
+  ) {
+    const priorTurns = turns
+      .map((turn) =>
+        turn.role === "user"
+          ? `User follow-up: ${turn.text}`
+          : `Assistant answer: ${turn.text}`
+      )
+      .join("\n\n");
 
-    if (!nextQuestion || loading) return;
+    return [
+      `Original question:\n${originalQuestion}`,
+      priorTurns ? `Prior conversation:\n${priorTurns}` : "",
+      `New follow-up:\n${nextUserTurn}`,
+      "Answer this as a continuation of the same tax analysis, preserving context from the original question and prior answers.",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  async function executeAnalysis(args: {
+    payloadQuestion: string;
+    payloadDetails?: string;
+    historyTitle: string;
+    onSuccess?: (response: CrosscheckResponse) => void;
+  }) {
+    if (!args.payloadQuestion.trim() || loading) return;
 
     setLoading(true);
     setRequestError("");
@@ -428,6 +508,7 @@ export default function CrosscheckV2Page() {
     setCaveats([]);
     setFollowups([]);
     setDisagreements([]);
+    setProviders([]);
     setRuntimeMs(null);
     setAttemptedCount(0);
     setSuccessCount(0);
@@ -437,8 +518,8 @@ export default function CrosscheckV2Page() {
 
       if (attachedFiles.length > 0) {
         const form = new FormData();
-        form.append("question", nextQuestion);
-        if (nextDetails) form.append("facts", nextDetails);
+        form.append("question", args.payloadQuestion);
+        if (args.payloadDetails?.trim()) form.append("facts", args.payloadDetails.trim());
         attachedFiles.forEach((file) => form.append("files", file));
 
         res = await fetch("/api/ui/crosscheck", {
@@ -452,8 +533,8 @@ export default function CrosscheckV2Page() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            question: nextQuestion,
-            facts: nextDetails || undefined,
+            question: args.payloadQuestion,
+            facts: args.payloadDetails?.trim() || undefined,
           }),
         });
       }
@@ -471,6 +552,7 @@ export default function CrosscheckV2Page() {
       setCaveats(data?.consensus?.caveats || []);
       setFollowups(data?.consensus?.followups || []);
       setDisagreements(data?.consensus?.disagreements || []);
+      setProviders(data?.providers || []);
       setRuntimeMs(
         typeof data?.meta?.runtime_ms === "number" ? data.meta.runtime_ms : null
       );
@@ -479,8 +561,8 @@ export default function CrosscheckV2Page() {
 
       const item: SavedAnalysis = {
         id: crypto.randomUUID(),
-        title: smartTitle(nextQuestion),
-        question: nextQuestion,
+        title: smartTitle(args.historyTitle),
+        question: args.historyTitle,
         answer: nextAnswer,
         confidence: data?.consensus?.confidence,
         createdAt: Date.now(),
@@ -488,6 +570,8 @@ export default function CrosscheckV2Page() {
 
       setHistory((prev) => [item, ...prev].slice(0, 20));
       setSelectedHistoryId(item.id);
+
+      args.onSuccess?.(data);
     } catch (err) {
       setRequestError(
         err instanceof Error ? err.message : "Error running analysis."
@@ -498,22 +582,52 @@ export default function CrosscheckV2Page() {
   }
 
   async function handleSubmit() {
-    await runAnalysis();
+    const trimmed = question.trim();
+    if (!trimmed) return;
+
+    setBaseQuestion(trimmed);
+    setConversationTurns([]);
+
+    await executeAnalysis({
+      payloadQuestion: trimmed,
+      payloadDetails: details,
+      historyTitle: trimmed,
+      onSuccess: (data) => {
+        const nextAnswer = data?.consensus?.answer || "No answer returned.";
+        setConversationTurns([
+          { id: crypto.randomUUID(), role: "user", text: trimmed },
+          { id: crypto.randomUUID(), role: "assistant", text: nextAnswer },
+        ]);
+      },
+    });
   }
 
   async function handleRefineAnswer() {
-    if (!question.trim() || !answer.trim() || loading) return;
+    if (!baseQuestion.trim() || !answer.trim() || loading) return;
 
-    const refinedQuestion = [
-      question.trim(),
-      "",
-      "Please refine the prior answer into a tighter, more conservative tax analysis. Resolve ambiguity where possible, state the conclusion clearly, and highlight any conditions that could change the result.",
-      "",
-      `Prior draft answer:\n${answer.trim()}`,
-    ].join("\n");
+    const refinePrompt = buildConversationPrompt(
+      baseQuestion,
+      conversationTurns,
+      "Please refine the prior answer into a tighter, more conservative tax analysis. Resolve ambiguity where possible, state the conclusion clearly, and highlight conditions that could change the result."
+    );
 
-    setQuestion(refinedQuestion);
-    await runAnalysis({ question: refinedQuestion });
+    await executeAnalysis({
+      payloadQuestion: refinePrompt,
+      payloadDetails: details,
+      historyTitle: `${baseQuestion} — refine answer`,
+      onSuccess: (data) => {
+        const nextAnswer = data?.consensus?.answer || "No answer returned.";
+        setConversationTurns((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "user",
+            text: "Please refine the prior answer into a tighter, more conservative tax analysis.",
+          },
+          { id: crypto.randomUUID(), role: "assistant", text: nextAnswer },
+        ]);
+      },
+    });
   }
 
   function handleAddMissingFacts() {
@@ -529,9 +643,34 @@ export default function CrosscheckV2Page() {
     }
   }
 
-  async function handleUseFollowup(followup: string) {
-    setQuestion(followup);
-    await runAnalysis({ question: followup });
+  function handleUseFollowup(followup: string) {
+    setFollowupDraft(followup);
+  }
+
+  async function handleSubmitFollowup() {
+    const nextFollowup = followupDraft.trim();
+    if (!baseQuestion.trim() || !nextFollowup || loading) return;
+
+    const payloadQuestion = buildConversationPrompt(
+      baseQuestion,
+      conversationTurns,
+      nextFollowup
+    );
+
+    await executeAnalysis({
+      payloadQuestion,
+      payloadDetails: details,
+      historyTitle: `${baseQuestion} — ${smartTitle(nextFollowup)}`,
+      onSuccess: (data) => {
+        const nextAnswer = data?.consensus?.answer || "No answer returned.";
+        setConversationTurns((prev) => [
+          ...prev,
+          { id: crypto.randomUUID(), role: "user", text: nextFollowup },
+          { id: crypto.randomUUID(), role: "assistant", text: nextAnswer },
+        ]);
+        setFollowupDraft("");
+      },
+    });
   }
 
   function loadHistoryItem(item: SavedAnalysis) {
@@ -546,9 +685,16 @@ export default function CrosscheckV2Page() {
     setCaveats([]);
     setFollowups([]);
     setDisagreements([]);
+    setProviders([]);
     setRuntimeMs(null);
     setAttemptedCount(0);
     setSuccessCount(0);
+    setBaseQuestion(item.question);
+    setFollowupDraft("");
+    setConversationTurns([
+      { id: crypto.randomUUID(), role: "user", text: item.question },
+      { id: crypto.randomUUID(), role: "assistant", text: item.answer || "" },
+    ]);
   }
 
   function handleLogout() {
@@ -598,7 +744,7 @@ export default function CrosscheckV2Page() {
 
           <SidebarSection title="Workspace">
             <NavLinkItem
-              href={`/${locale}/crosscheck-v2`}
+              href={`/${locale}/crosscheck`}
               icon={<Home size={16} />}
               label="Home"
               active
@@ -688,6 +834,16 @@ export default function CrosscheckV2Page() {
               href={`/${locale}/contact`}
               icon={<Mail size={16} />}
               label="Contact us"
+            />
+            <NavButton
+              icon={<Wrench size={16} />}
+              label="Diagnostics"
+              onClick={() =>
+                diagnosticsRef.current?.scrollIntoView({
+                  behavior: "smooth",
+                  block: "start",
+                })
+              }
             />
           </SidebarSection>
         </div>
@@ -885,6 +1041,43 @@ export default function CrosscheckV2Page() {
                         </div>
                       ) : (
                         <>
+                          {baseQuestion ? (
+                            <div className="mb-4 rounded-2xl border border-white/10 bg-[#0F172A] px-4 py-3">
+                              <div className="mb-1 text-xs font-medium uppercase tracking-[0.16em] text-white/40">
+                                Original question
+                              </div>
+                              <div className="text-sm leading-6 text-white/82">
+                                {baseQuestion}
+                              </div>
+                            </div>
+                          ) : null}
+
+                          {conversationTurns.length > 2 ? (
+                            <div className="mb-4 rounded-2xl border border-white/10 bg-[#0F172A] px-4 py-3">
+                              <div className="mb-3 text-xs font-medium uppercase tracking-[0.16em] text-white/40">
+                                Conversation
+                              </div>
+                              <div className="space-y-3">
+                                {conversationTurns.slice(2).map((turn) => (
+                                  <div
+                                    key={turn.id}
+                                    className={cn(
+                                      "rounded-xl px-3 py-2 text-sm leading-6",
+                                      turn.role === "user"
+                                        ? "border border-white/10 bg-white/[0.04] text-white/84"
+                                        : "bg-transparent text-white/70"
+                                    )}
+                                  >
+                                    <div className="mb-1 text-[11px] uppercase tracking-[0.16em] text-white/38">
+                                      {turn.role === "user" ? "Follow-up" : "Answer"}
+                                    </div>
+                                    <div className="whitespace-pre-wrap">{turn.text}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
+
                           <div className="whitespace-pre-wrap text-[15px] leading-7 text-white/82">
                             {answer}
                           </div>
@@ -939,6 +1132,38 @@ export default function CrosscheckV2Page() {
                       )}
                     </div>
 
+                    <div className="rounded-2xl border border-white/10 bg-[#111827] p-4">
+                      <div className="mb-3 text-sm font-medium text-white/86">
+                        Continue this analysis
+                      </div>
+                      <textarea
+                        value={followupDraft}
+                        onChange={(e) => setFollowupDraft(e.target.value)}
+                        placeholder="Add a follow-up question or refine the facts without losing the original context."
+                        className="min-h-[90px] w-full resize-none rounded-xl border border-white/10 bg-[#0F172A] px-3 py-3 text-sm leading-6 text-white/82 outline-none placeholder:text-white/28"
+                      />
+                      <div className="mt-3 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={handleSubmitFollowup}
+                          disabled={!canSubmitFollowup}
+                          className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-medium text-[#0B1220] transition-colors hover:bg-white/92 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {loading ? (
+                            <>
+                              <Clock3 size={16} />
+                              <span>Running...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>Send follow-up</span>
+                              <ArrowUp size={16} />
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
                     <DetailSection
                       title="Key caveats"
                       subtitle="What could change the conclusion."
@@ -952,7 +1177,7 @@ export default function CrosscheckV2Page() {
                           Follow-up questions
                         </div>
                         <div className="mt-1 text-xs text-white/42">
-                          Useful next questions to tighten the analysis.
+                          Click one to prefill it, then edit or send it as the next turn.
                         </div>
                       </div>
 
@@ -988,6 +1213,56 @@ export default function CrosscheckV2Page() {
                       items={disagreements}
                       empty="No explicit disagreements were surfaced in this run."
                     />
+
+                    <div
+                      ref={diagnosticsRef}
+                      className="rounded-2xl border border-white/10 bg-[#111827]"
+                    >
+                      <div className="border-b border-white/10 px-4 py-3.5">
+                        <div className="flex items-center gap-2 text-sm font-medium text-white/86">
+                          <Wrench size={15} />
+                          <span>Diagnostics</span>
+                        </div>
+                        <div className="mt-1 text-xs text-white/42">
+                          Provider outputs, runtime, and response transparency.
+                        </div>
+                      </div>
+
+                      <div className="space-y-4 px-4 py-4">
+                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                          <Metric
+                            icon={<Clock3 size={14} />}
+                            label="Runtime"
+                            value={runtimeMs !== null ? `${runtimeMs} ms` : "—"}
+                          />
+                          <Metric
+                            icon={<Bot size={14} />}
+                            label="Models attempted"
+                            value={`${attemptedCount}`}
+                          />
+                          <Metric
+                            icon={<CheckCircle2 size={14} />}
+                            label="Models succeeded"
+                            value={`${successCount}`}
+                          />
+                        </div>
+
+                        {providers.length ? (
+                          <div className="grid gap-4">
+                            {providers.map((provider, index) => (
+                              <ProviderCard
+                                key={`${provider.provider}-${provider.model}-${index}`}
+                                provider={provider}
+                              />
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-sm leading-6 text-white/50">
+                            No provider diagnostics are available for this run.
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
