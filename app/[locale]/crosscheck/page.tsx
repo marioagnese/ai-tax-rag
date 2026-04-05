@@ -22,7 +22,9 @@ import {
   Home,
   LogOut,
   Mail,
+  Menu,
   Paperclip,
+  PanelLeft,
   Plus,
   PlusCircle,
   SearchCheck,
@@ -354,6 +356,213 @@ function ProviderCard({ provider }: { provider: ProviderOutput }) {
   );
 }
 
+function LanguageSwitcher() {
+  return (
+    <div className="inline-flex items-center rounded-full border border-white/10 bg-black/20 p-1 backdrop-blur">
+      {["EN", "ES", "BR"].map((lang, i) => (
+        <button
+          key={lang}
+          type="button"
+          className={cn(
+            "rounded-full px-3 py-2 text-sm font-medium transition sm:px-4",
+            i === 0
+              ? "bg-white/14 text-white ring-1 ring-white/20"
+              : "text-white/72 hover:bg-white/[0.06] hover:text-white"
+          )}
+        >
+          {lang}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SidebarContent({
+  locale,
+  showHistory,
+  setShowHistory,
+  showPrompts,
+  setShowPrompts,
+  history,
+  selectedHistoryId,
+  loadHistoryItem,
+  sidebarPrompts,
+  setQuestion,
+  resetCurrentAnalysis,
+  handleLogout,
+  diagnosticsRef,
+}: {
+  locale: string;
+  showHistory: boolean;
+  setShowHistory: React.Dispatch<React.SetStateAction<boolean>>;
+  showPrompts: boolean;
+  setShowPrompts: React.Dispatch<React.SetStateAction<boolean>>;
+  history: SavedAnalysis[];
+  selectedHistoryId: string | null;
+  loadHistoryItem: (item: SavedAnalysis) => void;
+  sidebarPrompts: string[];
+  setQuestion: React.Dispatch<React.SetStateAction<string>>;
+  resetCurrentAnalysis: () => void;
+  handleLogout: () => void;
+  diagnosticsRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  return (
+    <div className="flex h-full flex-col justify-between">
+      <div className="min-h-0 overflow-y-auto pr-1">
+        <div className="mb-6 flex items-center gap-3">
+          <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#111827] shadow-sm">
+            <Image
+              src="/taxaipro-logo.png"
+              alt="TaxAiPro logo"
+              width={44}
+              height={44}
+              className="h-11 w-11 object-cover"
+              priority
+            />
+          </div>
+          <div>
+            <div className="text-lg font-semibold text-white/92">TaxAiPro™</div>
+            <div className="text-xs text-white/42">
+              Multi-model tax analysis
+            </div>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={resetCurrentAnalysis}
+          className="mb-5 flex w-full items-center gap-2 rounded-2xl border border-white/10 bg-[#162033] px-3.5 py-3 text-left text-sm text-white transition-colors hover:bg-[#1A2740]"
+        >
+          <Plus size={16} className="text-white/76" />
+          <span>New analysis</span>
+        </button>
+
+        <SidebarSection title="Workspace">
+          <NavLinkItem
+            href={`/${locale}/crosscheck`}
+            icon={<Home size={16} />}
+            label="Home"
+            active
+          />
+
+          <NavButton
+            icon={<History size={16} />}
+            label="History"
+            trailing={
+              <ChevronDown
+                size={14}
+                className={cn("transition", showHistory ? "rotate-180" : "")}
+              />
+            }
+            onClick={() => setShowHistory((v) => !v)}
+          />
+
+          {showHistory ? (
+            <div className="mt-2 space-y-1 pl-2">
+              {history.length ? (
+                history.map((item) => (
+                  <HistoryItem
+                    key={item.id}
+                    item={item}
+                    selected={selectedHistoryId === item.id}
+                    onClick={() => loadHistoryItem(item)}
+                  />
+                ))
+              ) : (
+                <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-3 py-4 text-sm leading-6 text-white/46">
+                  Your recent analyses will appear here.
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          <NavButton
+            icon={<Sparkles size={16} />}
+            label="Suggested prompts"
+            trailing={
+              <ChevronDown
+                size={14}
+                className={cn("transition", showPrompts ? "rotate-180" : "")}
+              />
+            }
+            onClick={() => setShowPrompts((v) => !v)}
+          />
+
+          {showPrompts ? (
+            <div className="mt-2 space-y-2 pl-2">
+              {sidebarPrompts.map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  onClick={() => setQuestion(prompt)}
+                  className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-[#111827] px-3 py-3 text-left text-sm text-white/72 transition hover:bg-white/[0.05] hover:text-white"
+                >
+                  <span className="pr-3">{prompt}</span>
+                  <ArrowRight size={15} className="shrink-0 text-white/34" />
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </SidebarSection>
+
+        <SidebarSection title="Platform">
+          <NavLinkItem
+            href={`/${locale}/how-it-works`}
+            icon={<BadgeHelp size={16} />}
+            label="How it works"
+          />
+          <NavLinkItem
+            href={`/${locale}/plans`}
+            icon={<CreditCard size={16} />}
+            label="Billing & Plans"
+          />
+          <NavLinkItem
+            href={`/${locale}/corporate`}
+            icon={<Building2 size={16} />}
+            label="Corporate"
+          />
+          <NavLinkItem
+            href={`/${locale}/formal-opinion-quote`}
+            icon={<FileSearch size={16} />}
+            label="Request formal opinion"
+          />
+          <NavLinkItem
+            href={`/${locale}/contact`}
+            icon={<Mail size={16} />}
+            label="Contact us"
+          />
+          <NavButton
+            icon={<Wrench size={16} />}
+            label="Diagnostics"
+            onClick={() =>
+              diagnosticsRef.current?.scrollIntoView({
+                behavior: "smooth",
+                block: "start",
+              })
+            }
+          />
+        </SidebarSection>
+      </div>
+
+      <div className="mt-4 border-t border-white/10 pt-4">
+        <div className="mb-2 text-xs text-white/35">Logged in as</div>
+        <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white/84">
+          <User2 size={15} className="text-white/45" />
+          <span>Mario</span>
+        </div>
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="flex items-center gap-2 rounded-xl px-2 py-2 text-sm text-white/55 transition-colors hover:bg-white/[0.05] hover:text-white/82"
+        >
+          <LogOut size={16} />
+          <span>Logout</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function CrosscheckV2Page() {
   const params = useParams();
   const locale = typeof params?.locale === "string" ? params.locale : "en";
@@ -389,6 +598,8 @@ export default function CrosscheckV2Page() {
   const [baseQuestion, setBaseQuestion] = useState("");
   const [followupDraft, setFollowupDraft] = useState("");
   const [conversationTurns, setConversationTurns] = useState<AnalysisTurn[]>([]);
+
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     try {
@@ -436,6 +647,7 @@ export default function CrosscheckV2Page() {
     setBaseQuestion("");
     setFollowupDraft("");
     setConversationTurns([]);
+    setSidebarOpen(false);
   }
 
   function handleFilesSelected(event: React.ChangeEvent<HTMLInputElement>) {
@@ -695,6 +907,7 @@ export default function CrosscheckV2Page() {
       { id: crypto.randomUUID(), role: "user", text: item.question },
       { id: crypto.randomUUID(), role: "assistant", text: item.answer || "" },
     ]);
+    setSidebarOpen(false);
   }
 
   function handleLogout() {
@@ -711,560 +924,473 @@ export default function CrosscheckV2Page() {
   ];
 
   return (
-    <main className="flex min-h-screen bg-[#0B1220] text-white">
-      <aside className="flex w-72 shrink-0 flex-col justify-between border-r border-white/10 bg-[#0F172A] p-4">
-        <div className="min-h-0">
-          <div className="mb-6 flex items-center gap-3">
-            <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#111827] shadow-sm">
-              <Image
-                src="/taxaipro-logo.png"
-                alt="TaxAiPro logo"
-                width={44}
-                height={44}
-                className="h-11 w-11 object-cover"
-                priority
-              />
-            </div>
-            <div>
-              <div className="text-lg font-semibold text-white/92">TaxAiPro™</div>
-              <div className="text-xs text-white/42">
-                Multi-model tax analysis
-              </div>
-            </div>
-          </div>
-
+    <main className="min-h-screen bg-[#0B1220] text-white">
+      <div className="flex min-h-screen">
+        {sidebarOpen ? (
           <button
             type="button"
-            onClick={resetCurrentAnalysis}
-            className="mb-5 flex w-full items-center gap-2 rounded-2xl border border-white/10 bg-[#162033] px-3.5 py-3 text-left text-sm text-white transition-colors hover:bg-[#1A2740]"
-          >
-            <Plus size={16} className="text-white/76" />
-            <span>New analysis</span>
-          </button>
+            aria-label="Close sidebar overlay"
+            onClick={() => setSidebarOpen(false)}
+            className="fixed inset-0 z-30 bg-black/50 backdrop-blur-[1px] lg:bg-black/35"
+          />
+        ) : null}
 
-          <SidebarSection title="Workspace">
-            <NavLinkItem
-              href={`/${locale}/crosscheck`}
-              icon={<Home size={16} />}
-              label="Home"
-              active
-            />
-            <NavButton
-              icon={<History size={16} />}
-              label="History"
-              trailing={
-                <ChevronDown
-                  size={14}
-                  className={cn("transition", showHistory ? "rotate-180" : "")}
-                />
-              }
-              onClick={() => setShowHistory((v) => !v)}
-            />
+        <aside
+          className={cn(
+            "fixed inset-y-0 left-0 z-40 flex w-[88vw] max-w-80 flex-col border-r border-white/10 bg-[#0F172A] p-4 shadow-[0_20px_60px_rgba(0,0,0,0.45)] transition-transform duration-300 ease-out lg:w-80",
+            sidebarOpen ? "translate-x-0" : "-translate-x-full"
+          )}
+        >
+          <div className="mb-3 flex items-center justify-between lg:hidden">
+            <div className="text-sm font-medium text-white/75">Workspace</div>
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(false)}
+              className="rounded-xl border border-white/10 bg-white/[0.04] p-2 text-white/75 hover:bg-white/[0.08] hover:text-white"
+            >
+              <X size={18} />
+            </button>
+          </div>
 
-            {showHistory ? (
-              <div className="mt-2 space-y-1 pl-2">
-                {history.length ? (
-                  history.map((item) => (
-                    <HistoryItem
-                      key={item.id}
-                      item={item}
-                      selected={selectedHistoryId === item.id}
-                      onClick={() => loadHistoryItem(item)}
-                    />
-                  ))
-                ) : (
-                  <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-3 py-4 text-sm leading-6 text-white/46">
-                    Your recent analyses will appear here.
-                  </div>
-                )}
-              </div>
-            ) : null}
+          <SidebarContent
+            locale={locale}
+            showHistory={showHistory}
+            setShowHistory={setShowHistory}
+            showPrompts={showPrompts}
+            setShowPrompts={setShowPrompts}
+            history={history}
+            selectedHistoryId={selectedHistoryId}
+            loadHistoryItem={loadHistoryItem}
+            sidebarPrompts={sidebarPrompts}
+            setQuestion={setQuestion}
+            resetCurrentAnalysis={resetCurrentAnalysis}
+            handleLogout={handleLogout}
+            diagnosticsRef={diagnosticsRef}
+          />
+        </aside>
 
-            <NavButton
-              icon={<Sparkles size={16} />}
-              label="Suggested prompts"
-              trailing={
-                <ChevronDown
-                  size={14}
-                  className={cn("transition", showPrompts ? "rotate-180" : "")}
-                />
-              }
-              onClick={() => setShowPrompts((v) => !v)}
-            />
-
-            {showPrompts ? (
-              <div className="mt-2 space-y-2 pl-2">
-                {sidebarPrompts.map((prompt) => (
+        <div className="flex min-w-0 flex-1 flex-col">
+          <header className="border-b border-white/8 px-4 py-4 sm:px-6 lg:px-8 lg:py-6">
+            <div className="flex flex-col gap-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
                   <button
-                    key={prompt}
                     type="button"
-                    onClick={() => setQuestion(prompt)}
-                    className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-[#111827] px-3 py-3 text-left text-sm text-white/72 transition hover:bg-white/[0.05] hover:text-white"
+                    onClick={() => setSidebarOpen((v) => !v)}
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-[#111827] text-white/78 transition hover:bg-white/[0.06] hover:text-white"
                   >
-                    <span className="pr-3">{prompt}</span>
-                    <ArrowRight size={15} className="shrink-0 text-white/34" />
+                    {sidebarOpen ? <X size={18} /> : <PanelLeft size={18} />}
                   </button>
-                ))}
-              </div>
-            ) : null}
-          </SidebarSection>
 
-          <SidebarSection title="Platform">
-            <NavLinkItem
-              href={`/${locale}/how-it-works`}
-              icon={<BadgeHelp size={16} />}
-              label="How it works"
-            />
-            <NavLinkItem
-              href={`/${locale}/plans`}
-              icon={<CreditCard size={16} />}
-              label="Billing & Plans"
-            />
-            <NavLinkItem
-              href={`/${locale}/corporate`}
-              icon={<Building2 size={16} />}
-              label="Corporate"
-            />
-            <NavLinkItem
-              href={`/${locale}/formal-opinion-quote`}
-              icon={<FileSearch size={16} />}
-              label="Request formal opinion"
-            />
-            <NavLinkItem
-              href={`/${locale}/contact`}
-              icon={<Mail size={16} />}
-              label="Contact us"
-            />
-            <NavButton
-              icon={<Wrench size={16} />}
-              label="Diagnostics"
-              onClick={() =>
-                diagnosticsRef.current?.scrollIntoView({
-                  behavior: "smooth",
-                  block: "start",
-                })
-              }
-            />
-          </SidebarSection>
-        </div>
-
-        <div className="border-t border-white/10 pt-4">
-          <div className="mb-2 text-xs text-white/35">Logged in as</div>
-          <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white/84">
-            <User2 size={15} className="text-white/45" />
-            <span>Mario</span>
-          </div>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="flex items-center gap-2 rounded-xl px-2 py-2 text-sm text-white/55 transition-colors hover:bg-white/[0.05] hover:text-white/82"
-          >
-            <LogOut size={16} />
-            <span>Logout</span>
-          </button>
-        </div>
-      </aside>
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="border-b border-white/8 px-8 py-6">
-          <div>
-            <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-white/50">
-              <Bot size={14} />
-              <span>V2 redesign sandbox</span>
-            </div>
-            <h1 className="text-3xl font-semibold tracking-tight text-white/95">
-              Good morning, Mario
-            </h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-white/56">
-              Ask the question naturally. Add facts only when they matter.
-              TaxAiPro will cross-check multiple models and return one
-              conservative draft.
-            </p>
-          </div>
-        </header>
-
-        <div className="flex-1 px-6 py-8">
-          <div className="mx-auto w-full max-w-5xl">
-            <div className="grid gap-6">
-              <div className="min-w-0">
-                <div className="rounded-[30px] border border-white/12 bg-[#111827] p-4 shadow-[0_20px_60px_rgba(0,0,0,0.28)]">
-                  <div className="mb-3 flex items-center gap-2 text-xs text-white/42">
-                    <SearchCheck size={14} />
-                    <span>Start with the question</span>
-                  </div>
-
-                  <textarea
-                    value={question}
-                    onChange={(e) => setQuestion(e.target.value)}
-                    placeholder="Example: Does a US buyer purchasing goods FOB from Colombia create PE risk or withholding exposure if support services are also performed locally?"
-                    className="min-h-[180px] w-full resize-none bg-transparent text-[15px] leading-7 text-white/88 outline-none placeholder:text-white/28"
-                  />
-
-                  {showDetails ? (
-                    <div className="mt-4 rounded-2xl border border-white/10 bg-[#0F172A] p-3">
-                      <div className="mb-2 flex items-center gap-2 text-xs text-white/44">
-                        <BookOpenText size={14} />
-                        <span>Optional details</span>
-                      </div>
-                      <textarea
-                        value={details}
-                        onChange={(e) => setDetails(e.target.value)}
-                        placeholder="Entity type, residency, treaty position, who performs services, where title passes, who bears risk, contract terms, value, related-party facts, etc."
-                        className="min-h-[110px] w-full resize-none bg-transparent text-sm leading-6 text-white/82 outline-none placeholder:text-white/28"
-                      />
+                  <div className="min-w-0">
+                    <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-white/50">
+                      <Bot size={14} />
+                      <span>V2 redesign sandbox</span>
                     </div>
-                  ) : null}
-
-                  <div className="mt-4 rounded-2xl border border-dashed border-white/10 bg-[#0F172A] p-3">
-                    <div className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-white/42">
-                      <Paperclip size={14} />
-                      <span>Attach documents</span>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-3">
-                      <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/78 transition hover:bg-white/[0.08] hover:text-white">
-                        <Paperclip size={14} />
-                        <span>Add files</span>
-                        <input
-                          type="file"
-                          multiple
-                          accept=".txt,.docx,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                          className="hidden"
-                          onChange={handleFilesSelected}
-                        />
-                      </label>
-
-                      <div className="text-xs text-white/40">
-                        Up to {MAX_DOCS} files. TXT and DOCX only.
-                      </div>
-                    </div>
-
-                    {uploadError ? (
-                      <div className="mt-3 rounded-xl border border-red-400/20 bg-red-400/10 px-3 py-2 text-sm text-red-200">
-                        {uploadError}
-                      </div>
-                    ) : null}
-
-                    {attachedFiles.length > 0 ? (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {attachedFiles.map((file, index) => (
-                          <div
-                            key={`${file.name}-${index}`}
-                            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-white/78"
-                          >
-                            <Paperclip size={12} />
-                            <span className="max-w-[220px] truncate">{file.name}</span>
-                            <button
-                              type="button"
-                              onClick={() => removeAttachedFile(index)}
-                              className="rounded-full p-0.5 text-white/45 transition hover:bg-white/[0.08] hover:text-white"
-                            >
-                              <X size={12} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowDetails((v) => !v)}
-                        className="rounded-xl border border-white/10 bg-[#0F172A] px-3 py-2 text-sm text-white/72 transition hover:bg-white/[0.05]"
-                      >
-                        {showDetails ? "Hide details" : "Add details"}
-                      </button>
-                      <div className="text-xs text-white/40">
-                        Cleaner input. Better output.
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={handleSubmit}
-                      disabled={!canSubmit}
-                      className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-medium text-[#0B1220] transition-colors hover:bg-white/92 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {loading ? (
-                        <>
-                          <Clock3 size={16} />
-                          <span>Cross-checking...</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>Ask TaxAiPro</span>
-                          <ArrowUp size={16} />
-                        </>
-                      )}
-                    </button>
+                    <h1 className="text-2xl font-semibold tracking-tight text-white/95 sm:text-3xl">
+                      Good morning, Mario
+                    </h1>
                   </div>
                 </div>
 
-                {requestError ? (
-                  <div className="mt-5 rounded-2xl border border-red-400/20 bg-red-400/10 p-4">
-                    <div className="flex items-start gap-3">
-                      <ShieldAlert className="mt-0.5 shrink-0 text-red-300" size={18} />
-                      <div>
-                        <div className="text-sm font-medium text-red-200">
-                          Analysis could not be completed
-                        </div>
-                        <div className="mt-1 text-sm leading-6 text-red-200/85">
-                          {requestError}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
+                <div className="shrink-0">
+                  <LanguageSwitcher />
+                </div>
+              </div>
 
-                {(answer || loading) && (
-                  <div className="mt-6 space-y-4">
-                    <div className="rounded-3xl border border-white/12 bg-[#111827] p-5 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
-                      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle2 size={18} className="text-white/72" />
-                          <h2 className="text-base font-semibold text-white/90">
-                            Preliminary answer
-                          </h2>
-                        </div>
+              <p className="max-w-3xl text-sm leading-6 text-white/56 sm:text-[15px]">
+                Ask the question naturally. Add facts only when they matter.
+                TaxAiPro will cross-check multiple models and return one
+                conservative draft.
+              </p>
+            </div>
+          </header>
 
-                        {confidence ? <ConfidencePill value={confidence} /> : null}
-                      </div>
-
-                      {loading ? (
-                        <div className="space-y-3">
-                          <div className="h-4 w-full animate-pulse rounded bg-white/10" />
-                          <div className="h-4 w-[94%] animate-pulse rounded bg-white/10" />
-                          <div className="h-4 w-[86%] animate-pulse rounded bg-white/10" />
-                          <div className="h-4 w-[70%] animate-pulse rounded bg-white/10" />
-                        </div>
-                      ) : (
-                        <>
-                          {baseQuestion ? (
-                            <div className="mb-4 rounded-2xl border border-white/10 bg-[#0F172A] px-4 py-3">
-                              <div className="mb-1 text-xs font-medium uppercase tracking-[0.16em] text-white/40">
-                                Original question
-                              </div>
-                              <div className="text-sm leading-6 text-white/82">
-                                {baseQuestion}
-                              </div>
-                            </div>
-                          ) : null}
-
-                          {conversationTurns.length > 2 ? (
-                            <div className="mb-4 rounded-2xl border border-white/10 bg-[#0F172A] px-4 py-3">
-                              <div className="mb-3 text-xs font-medium uppercase tracking-[0.16em] text-white/40">
-                                Conversation
-                              </div>
-                              <div className="space-y-3">
-                                {conversationTurns.slice(2).map((turn) => (
-                                  <div
-                                    key={turn.id}
-                                    className={cn(
-                                      "rounded-xl px-3 py-2 text-sm leading-6",
-                                      turn.role === "user"
-                                        ? "border border-white/10 bg-white/[0.04] text-white/84"
-                                        : "bg-transparent text-white/70"
-                                    )}
-                                  >
-                                    <div className="mb-1 text-[11px] uppercase tracking-[0.16em] text-white/38">
-                                      {turn.role === "user" ? "Follow-up" : "Answer"}
-                                    </div>
-                                    <div className="whitespace-pre-wrap">{turn.text}</div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          ) : null}
-
-                          <div className="whitespace-pre-wrap text-[15px] leading-7 text-white/82">
-                            {answer}
-                          </div>
-
-                          <div className="mt-4 flex flex-wrap gap-2 border-t border-white/10 pt-4">
-                            <button
-                              type="button"
-                              onClick={handleRefineAnswer}
-                              disabled={loading || !answer.trim()}
-                              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/78 transition hover:bg-white/[0.08] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              <Sparkles size={14} />
-                              <span>Refine answer</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={handleAddMissingFacts}
-                              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/78 transition hover:bg-white/[0.08] hover:text-white"
-                            >
-                              <PlusCircle size={14} />
-                              <span>Add missing facts</span>
-                            </button>
-                          </div>
-
-                          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                            {runtimeMs !== null ? (
-                              <Metric
-                                icon={<Clock3 size={14} />}
-                                label="Runtime"
-                                value={`${runtimeMs} ms`}
-                              />
-                            ) : null}
-
-                            {attemptedCount > 0 ? (
-                              <Metric
-                                icon={<Bot size={14} />}
-                                label="Models attempted"
-                                value={`${attemptedCount}`}
-                              />
-                            ) : null}
-
-                            {successCount > 0 ? (
-                              <Metric
-                                icon={<CheckCircle2 size={14} />}
-                                label="Models succeeded"
-                                value={`${successCount}`}
-                              />
-                            ) : null}
-                          </div>
-                        </>
-                      )}
+          <div className="flex-1 px-3 py-4 sm:px-5 sm:py-6 lg:px-6 lg:py-8">
+            <div className="mx-auto w-full max-w-5xl">
+              <div className="grid gap-6">
+                <div className="min-w-0">
+                  <div className="rounded-[24px] border border-white/12 bg-[#111827] p-3 shadow-[0_20px_60px_rgba(0,0,0,0.28)] sm:rounded-[30px] sm:p-4">
+                    <div className="mb-3 flex items-center gap-2 text-xs text-white/42">
+                      <SearchCheck size={14} />
+                      <span>Start with the question</span>
                     </div>
 
-                    <div className="rounded-2xl border border-white/10 bg-[#111827] p-4">
-                      <div className="mb-3 text-sm font-medium text-white/86">
-                        Continue this analysis
+                    <textarea
+                      value={question}
+                      onChange={(e) => setQuestion(e.target.value)}
+                      placeholder="Example: Does a US buyer purchasing goods FOB from Colombia create PE risk or withholding exposure if support services are also performed locally?"
+                      className="min-h-[140px] w-full resize-none bg-transparent text-sm leading-7 text-white/88 outline-none placeholder:text-white/28 sm:min-h-[180px] sm:text-[15px]"
+                    />
+
+                    {showDetails ? (
+                      <div className="mt-4 rounded-2xl border border-white/10 bg-[#0F172A] p-3">
+                        <div className="mb-2 flex items-center gap-2 text-xs text-white/44">
+                          <BookOpenText size={14} />
+                          <span>Optional details</span>
+                        </div>
+                        <textarea
+                          value={details}
+                          onChange={(e) => setDetails(e.target.value)}
+                          placeholder="Entity type, residency, treaty position, who performs services, where title passes, who bears risk, contract terms, value, related-party facts, etc."
+                          className="min-h-[110px] w-full resize-none bg-transparent text-sm leading-6 text-white/82 outline-none placeholder:text-white/28"
+                        />
                       </div>
-                      <textarea
-                        value={followupDraft}
-                        onChange={(e) => setFollowupDraft(e.target.value)}
-                        placeholder="Add a follow-up question or refine the facts without losing the original context."
-                        className="min-h-[90px] w-full resize-none rounded-xl border border-white/10 bg-[#0F172A] px-3 py-3 text-sm leading-6 text-white/82 outline-none placeholder:text-white/28"
-                      />
-                      <div className="mt-3 flex justify-end">
+                    ) : null}
+
+                    <div className="mt-4 rounded-2xl border border-dashed border-white/10 bg-[#0F172A] p-3">
+                      <div className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-white/42">
+                        <Paperclip size={14} />
+                        <span>Attach documents</span>
+                      </div>
+
+                      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                        <label className="inline-flex w-fit cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/78 transition hover:bg-white/[0.08] hover:text-white">
+                          <Paperclip size={14} />
+                          <span>Add files</span>
+                          <input
+                            type="file"
+                            multiple
+                            accept=".txt,.docx,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            className="hidden"
+                            onChange={handleFilesSelected}
+                          />
+                        </label>
+
+                        <div className="text-xs text-white/40">
+                          Up to {MAX_DOCS} files. TXT and DOCX only.
+                        </div>
+                      </div>
+
+                      {uploadError ? (
+                        <div className="mt-3 rounded-xl border border-red-400/20 bg-red-400/10 px-3 py-2 text-sm text-red-200">
+                          {uploadError}
+                        </div>
+                      ) : null}
+
+                      {attachedFiles.length > 0 ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {attachedFiles.map((file, index) => (
+                            <div
+                              key={`${file.name}-${index}`}
+                              className="inline-flex max-w-full items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-white/78"
+                            >
+                              <Paperclip size={12} />
+                              <span className="max-w-[180px] truncate sm:max-w-[220px]">
+                                {file.name}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => removeAttachedFile(index)}
+                                className="rounded-full p-0.5 text-white/45 transition hover:bg-white/[0.08] hover:text-white"
+                              >
+                                <X size={12} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                      <div className="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
-                          onClick={handleSubmitFollowup}
-                          disabled={!canSubmitFollowup}
-                          className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-medium text-[#0B1220] transition-colors hover:bg-white/92 disabled:cursor-not-allowed disabled:opacity-50"
+                          onClick={() => setShowDetails((v) => !v)}
+                          className="rounded-xl border border-white/10 bg-[#0F172A] px-3 py-2 text-sm text-white/72 transition hover:bg-white/[0.05]"
                         >
-                          {loading ? (
-                            <>
-                              <Clock3 size={16} />
-                              <span>Running...</span>
-                            </>
-                          ) : (
-                            <>
-                              <span>Send follow-up</span>
-                              <ArrowUp size={16} />
-                            </>
-                          )}
+                          {showDetails ? "Hide details" : "Add details"}
                         </button>
-                      </div>
-                    </div>
-
-                    <DetailSection
-                      title="Key caveats"
-                      subtitle="What could change the conclusion."
-                      items={caveats}
-                      empty="No explicit caveats were returned in this run."
-                    />
-
-                    <div className="rounded-2xl border border-white/10 bg-[#111827]">
-                      <div className="border-b border-white/10 px-4 py-3.5">
-                        <div className="text-sm font-medium text-white/86">
-                          Follow-up questions
-                        </div>
-                        <div className="mt-1 text-xs text-white/42">
-                          Click one to prefill it, then edit or send it as the next turn.
+                        <div className="text-xs text-white/40">
+                          Cleaner input. Better output.
                         </div>
                       </div>
 
-                      <div className="px-4 py-4">
-                        {followups.length ? (
-                          <div className="space-y-2">
-                            {followups.map((followup, i) => (
-                              <button
-                                key={`${followup}-${i}`}
-                                type="button"
-                                onClick={() => handleUseFollowup(followup)}
-                                className="flex w-full items-start justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-left text-sm text-white/72 transition hover:bg-white/[0.08] hover:text-white"
-                              >
-                                <span>{followup}</span>
-                                <CornerDownRight
-                                  size={14}
-                                  className="mt-0.5 shrink-0 text-white/35"
-                                />
-                              </button>
-                            ))}
-                          </div>
+                      <button
+                        type="button"
+                        onClick={handleSubmit}
+                        disabled={!canSubmit}
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-medium text-[#0B1220] transition-colors hover:bg-white/92 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                      >
+                        {loading ? (
+                          <>
+                            <Clock3 size={16} />
+                            <span>Cross-checking...</span>
+                          </>
                         ) : (
-                          <div className="text-sm leading-6 text-white/50">
-                            No follow-up questions were suggested in this run.
-                          </div>
+                          <>
+                            <span>Ask TaxAiPro</span>
+                            <ArrowUp size={16} />
+                          </>
                         )}
-                      </div>
-                    </div>
-
-                    <DetailSection
-                      title="Model disagreements"
-                      subtitle="Where provider outputs likely diverged."
-                      items={disagreements}
-                      empty="No explicit disagreements were surfaced in this run."
-                    />
-
-                    <div
-                      ref={diagnosticsRef}
-                      className="rounded-2xl border border-white/10 bg-[#111827]"
-                    >
-                      <div className="border-b border-white/10 px-4 py-3.5">
-                        <div className="flex items-center gap-2 text-sm font-medium text-white/86">
-                          <Wrench size={15} />
-                          <span>Diagnostics</span>
-                        </div>
-                        <div className="mt-1 text-xs text-white/42">
-                          Provider outputs, runtime, and response transparency.
-                        </div>
-                      </div>
-
-                      <div className="space-y-4 px-4 py-4">
-                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                          <Metric
-                            icon={<Clock3 size={14} />}
-                            label="Runtime"
-                            value={runtimeMs !== null ? `${runtimeMs} ms` : "—"}
-                          />
-                          <Metric
-                            icon={<Bot size={14} />}
-                            label="Models attempted"
-                            value={`${attemptedCount}`}
-                          />
-                          <Metric
-                            icon={<CheckCircle2 size={14} />}
-                            label="Models succeeded"
-                            value={`${successCount}`}
-                          />
-                        </div>
-
-                        {providers.length ? (
-                          <div className="grid gap-4">
-                            {providers.map((provider, index) => (
-                              <ProviderCard
-                                key={`${provider.provider}-${provider.model}-${index}`}
-                                provider={provider}
-                              />
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-sm leading-6 text-white/50">
-                            No provider diagnostics are available for this run.
-                          </div>
-                        )}
-                      </div>
+                      </button>
                     </div>
                   </div>
-                )}
+
+                  {requestError ? (
+                    <div className="mt-5 rounded-2xl border border-red-400/20 bg-red-400/10 p-4">
+                      <div className="flex items-start gap-3">
+                        <ShieldAlert className="mt-0.5 shrink-0 text-red-300" size={18} />
+                        <div>
+                          <div className="text-sm font-medium text-red-200">
+                            Analysis could not be completed
+                          </div>
+                          <div className="mt-1 text-sm leading-6 text-red-200/85">
+                            {requestError}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {(answer || loading) && (
+                    <div className="mt-6 space-y-4">
+                      <div className="rounded-3xl border border-white/12 bg-[#111827] p-4 shadow-[0_18px_50px_rgba(0,0,0,0.22)] sm:p-5">
+                        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle2 size={18} className="text-white/72" />
+                            <h2 className="text-base font-semibold text-white/90">
+                              Preliminary answer
+                            </h2>
+                          </div>
+
+                          {confidence ? <ConfidencePill value={confidence} /> : null}
+                        </div>
+
+                        {loading ? (
+                          <div className="space-y-3">
+                            <div className="h-4 w-full animate-pulse rounded bg-white/10" />
+                            <div className="h-4 w-[94%] animate-pulse rounded bg-white/10" />
+                            <div className="h-4 w-[86%] animate-pulse rounded bg-white/10" />
+                            <div className="h-4 w-[70%] animate-pulse rounded bg-white/10" />
+                          </div>
+                        ) : (
+                          <>
+                            {baseQuestion ? (
+                              <div className="mb-4 rounded-2xl border border-white/10 bg-[#0F172A] px-4 py-3">
+                                <div className="mb-1 text-xs font-medium uppercase tracking-[0.16em] text-white/40">
+                                  Original question
+                                </div>
+                                <div className="text-sm leading-6 text-white/82">
+                                  {baseQuestion}
+                                </div>
+                              </div>
+                            ) : null}
+
+                            {conversationTurns.length > 2 ? (
+                              <div className="mb-4 rounded-2xl border border-white/10 bg-[#0F172A] px-4 py-3">
+                                <div className="mb-3 text-xs font-medium uppercase tracking-[0.16em] text-white/40">
+                                  Conversation
+                                </div>
+                                <div className="space-y-3">
+                                  {conversationTurns.slice(2).map((turn) => (
+                                    <div
+                                      key={turn.id}
+                                      className={cn(
+                                        "rounded-xl px-3 py-2 text-sm leading-6",
+                                        turn.role === "user"
+                                          ? "border border-white/10 bg-white/[0.04] text-white/84"
+                                          : "bg-transparent text-white/70"
+                                      )}
+                                    >
+                                      <div className="mb-1 text-[11px] uppercase tracking-[0.16em] text-white/38">
+                                        {turn.role === "user" ? "Follow-up" : "Answer"}
+                                      </div>
+                                      <div className="whitespace-pre-wrap">{turn.text}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+
+                            <div className="whitespace-pre-wrap text-[15px] leading-7 text-white/82">
+                              {answer}
+                            </div>
+
+                            <div className="mt-4 flex flex-wrap gap-2 border-t border-white/10 pt-4">
+                              <button
+                                type="button"
+                                onClick={handleRefineAnswer}
+                                disabled={loading || !answer.trim()}
+                                className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/78 transition hover:bg-white/[0.08] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                <Sparkles size={14} />
+                                <span>Refine answer</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={handleAddMissingFacts}
+                                className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/78 transition hover:bg-white/[0.08] hover:text-white"
+                              >
+                                <PlusCircle size={14} />
+                                <span>Add missing facts</span>
+                              </button>
+                            </div>
+
+                            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                              {runtimeMs !== null ? (
+                                <Metric
+                                  icon={<Clock3 size={14} />}
+                                  label="Runtime"
+                                  value={`${runtimeMs} ms`}
+                                />
+                              ) : null}
+
+                              {attemptedCount > 0 ? (
+                                <Metric
+                                  icon={<Bot size={14} />}
+                                  label="Models attempted"
+                                  value={`${attemptedCount}`}
+                                />
+                              ) : null}
+
+                              {successCount > 0 ? (
+                                <Metric
+                                  icon={<CheckCircle2 size={14} />}
+                                  label="Models succeeded"
+                                  value={`${successCount}`}
+                                />
+                              ) : null}
+                            </div>
+                          </>
+                        )}
+                      </div>
+
+                      <div className="rounded-2xl border border-white/10 bg-[#111827] p-4">
+                        <div className="mb-3 text-sm font-medium text-white/86">
+                          Continue this analysis
+                        </div>
+                        <textarea
+                          value={followupDraft}
+                          onChange={(e) => setFollowupDraft(e.target.value)}
+                          placeholder="Add a follow-up question or refine the facts without losing the original context."
+                          className="min-h-[90px] w-full resize-none rounded-xl border border-white/10 bg-[#0F172A] px-3 py-3 text-sm leading-6 text-white/82 outline-none placeholder:text-white/28"
+                        />
+                        <div className="mt-3 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={handleSubmitFollowup}
+                            disabled={!canSubmitFollowup}
+                            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-medium text-[#0B1220] transition-colors hover:bg-white/92 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                          >
+                            {loading ? (
+                              <>
+                                <Clock3 size={16} />
+                                <span>Running...</span>
+                              </>
+                            ) : (
+                              <>
+                                <span>Send follow-up</span>
+                                <ArrowUp size={16} />
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      <DetailSection
+                        title="Key caveats"
+                        subtitle="What could change the conclusion."
+                        items={caveats}
+                        empty="No explicit caveats were returned in this run."
+                      />
+
+                      <div className="rounded-2xl border border-white/10 bg-[#111827]">
+                        <div className="border-b border-white/10 px-4 py-3.5">
+                          <div className="text-sm font-medium text-white/86">
+                            Follow-up questions
+                          </div>
+                          <div className="mt-1 text-xs text-white/42">
+                            Click one to prefill it, then edit or send it as the next turn.
+                          </div>
+                        </div>
+
+                        <div className="px-4 py-4">
+                          {followups.length ? (
+                            <div className="space-y-2">
+                              {followups.map((followup, i) => (
+                                <button
+                                  key={`${followup}-${i}`}
+                                  type="button"
+                                  onClick={() => handleUseFollowup(followup)}
+                                  className="flex w-full items-start justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-left text-sm text-white/72 transition hover:bg-white/[0.08] hover:text-white"
+                                >
+                                  <span>{followup}</span>
+                                  <CornerDownRight
+                                    size={14}
+                                    className="mt-0.5 shrink-0 text-white/35"
+                                  />
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-sm leading-6 text-white/50">
+                              No follow-up questions were suggested in this run.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <DetailSection
+                        title="Model disagreements"
+                        subtitle="Where provider outputs likely diverged."
+                        items={disagreements}
+                        empty="No explicit disagreements were surfaced in this run."
+                      />
+
+                      <div
+                        ref={diagnosticsRef}
+                        className="rounded-2xl border border-white/10 bg-[#111827]"
+                      >
+                        <div className="border-b border-white/10 px-4 py-3.5">
+                          <div className="flex items-center gap-2 text-sm font-medium text-white/86">
+                            <Wrench size={15} />
+                            <span>Diagnostics</span>
+                          </div>
+                          <div className="mt-1 text-xs text-white/42">
+                            Provider outputs, runtime, and response transparency.
+                          </div>
+                        </div>
+
+                        <div className="space-y-4 px-4 py-4">
+                          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                            <Metric
+                              icon={<Clock3 size={14} />}
+                              label="Runtime"
+                              value={runtimeMs !== null ? `${runtimeMs} ms` : "—"}
+                            />
+                            <Metric
+                              icon={<Bot size={14} />}
+                              label="Models attempted"
+                              value={`${attemptedCount}`}
+                            />
+                            <Metric
+                              icon={<CheckCircle2 size={14} />}
+                              label="Models succeeded"
+                              value={`${successCount}`}
+                            />
+                          </div>
+
+                          {providers.length ? (
+                            <div className="grid gap-4">
+                              {providers.map((provider, index) => (
+                                <ProviderCard
+                                  key={`${provider.provider}-${provider.model}-${index}`}
+                                  provider={provider}
+                                />
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-sm leading-6 text-white/50">
+                              No provider diagnostics are available for this run.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
