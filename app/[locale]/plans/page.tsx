@@ -131,7 +131,7 @@ export default function PlansPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ tier }),
+        body: JSON.stringify({ tier: String(tier) }),
       });
 
       const data = (await res.json()) as StripeCheckoutResponse;
