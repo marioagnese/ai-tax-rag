@@ -590,8 +590,8 @@ export default function CrosscheckV2Page() {
 
   const [history, setHistory] = useState<SavedAnalysis[]>([]);
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
-  const [showHistory, setShowHistory] = useState(true);
-  const [showPrompts, setShowPrompts] = useState(true);
+  const [showHistory, setShowHistory] = useState(false);
+  const [showPrompts, setShowPrompts] = useState(false);
 
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
 
