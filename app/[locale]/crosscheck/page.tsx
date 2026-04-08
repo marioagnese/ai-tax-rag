@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   ArrowRight,
   ArrowUp,
@@ -22,7 +23,6 @@ import {
   Home,
   LogOut,
   Mail,
-  Menu,
   Paperclip,
   PanelLeft,
   Plus,
@@ -89,7 +89,7 @@ function cn(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(" ");
 }
 
-function formatTimeAgo(ts: number) {
+function formatTimeAgo(ts: number, locale?: string) {
   const diff = Date.now() - ts;
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return "just now";
@@ -98,7 +98,7 @@ function formatTimeAgo(ts: number) {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d ago`;
-  return new Date(ts).toLocaleDateString();
+  return new Date(ts).toLocaleDateString(locale);
 }
 
 function smartTitle(text: string) {
@@ -109,8 +109,10 @@ function smartTitle(text: string) {
 
 function ConfidencePill({
   value,
+  label,
 }: {
   value?: "low" | "medium" | "high";
+  label: string;
 }) {
   const tone =
     value === "high"
@@ -119,8 +121,6 @@ function ConfidencePill({
       ? "border-amber-400/25 bg-amber-400/10 text-amber-200"
       : "border-red-400/25 bg-red-400/10 text-red-200";
 
-  const label = value ? value[0].toUpperCase() + value.slice(1) : "Low";
-
   return (
     <span
       className={cn(
@@ -128,7 +128,7 @@ function ConfidencePill({
         tone
       )}
     >
-      {label} confidence
+      {label}
     </span>
   );
 }
@@ -228,10 +228,16 @@ function HistoryItem({
   item,
   selected,
   onClick,
+  confidenceLabel,
+  draftLabel,
+  locale,
 }: {
   item: SavedAnalysis;
   selected: boolean;
   onClick: () => void;
+  confidenceLabel: string;
+  draftLabel: string;
+  locale: string;
 }) {
   return (
     <button
@@ -247,10 +253,10 @@ function HistoryItem({
       <div className="truncate text-sm text-white/82">{item.title}</div>
       <div className="mt-1 flex items-center justify-between gap-2">
         <div className="truncate text-xs text-white/36">
-          {item.confidence ? `${item.confidence} confidence` : "draft"}
+          {item.confidence ? `${item.confidence} ${confidenceLabel}` : draftLabel}
         </div>
         <div className="shrink-0 text-[11px] text-white/30">
-          {formatTimeAgo(item.createdAt)}
+          {formatTimeAgo(item.createdAt, locale)}
         </div>
       </div>
     </button>
@@ -321,7 +327,13 @@ function DetailSection({
   );
 }
 
-function ProviderCard({ provider }: { provider: ProviderOutput }) {
+function ProviderCard({
+  provider,
+  emptyText,
+}: {
+  provider: ProviderOutput;
+  emptyText: string;
+}) {
   const statusTone =
     provider.status === "ok"
       ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-200"
@@ -350,29 +362,8 @@ function ProviderCard({ provider }: { provider: ProviderOutput }) {
           {provider.text}
         </div>
       ) : (
-        <div className="text-sm text-white/45">No provider output returned.</div>
+        <div className="text-sm text-white/45">{emptyText}</div>
       )}
-    </div>
-  );
-}
-
-function LanguageSwitcher() {
-  return (
-    <div className="inline-flex items-center rounded-full border border-white/10 bg-black/20 p-1 backdrop-blur">
-      {["EN", "ES", "BR"].map((lang, i) => (
-        <button
-          key={lang}
-          type="button"
-          className={cn(
-            "rounded-full px-3 py-2 text-sm font-medium transition sm:px-4",
-            i === 0
-              ? "bg-white/14 text-white ring-1 ring-white/20"
-              : "text-white/72 hover:bg-white/[0.06] hover:text-white"
-          )}
-        >
-          {lang}
-        </button>
-      ))}
     </div>
   );
 }
@@ -391,6 +382,7 @@ function SidebarContent({
   resetCurrentAnalysis,
   handleLogout,
   diagnosticsRef,
+  labels,
 }: {
   locale: string;
   showHistory: boolean;
@@ -405,6 +397,26 @@ function SidebarContent({
   resetCurrentAnalysis: () => void;
   handleLogout: () => void;
   diagnosticsRef: React.RefObject<HTMLDivElement | null>;
+  labels: {
+    logoTagline: string;
+    newAnalysis: string;
+    workspace: string;
+    home: string;
+    history: string;
+    suggestedPrompts: string;
+    emptyHistory: string;
+    platform: string;
+    howItWorks: string;
+    billingPlans: string;
+    corporate: string;
+    requestFormalOpinion: string;
+    contactUs: string;
+    diagnostics: string;
+    loggedInAs: string;
+    logout: string;
+    confidenceWord: string;
+    draft: string;
+  };
 }) {
   return (
     <div className="flex h-full flex-col justify-between">
@@ -422,9 +434,7 @@ function SidebarContent({
           </div>
           <div>
             <div className="text-lg font-semibold text-white/92">TaxAiPro™</div>
-            <div className="text-xs text-white/42">
-              Multi-model tax analysis
-            </div>
+            <div className="text-xs text-white/42">{labels.logoTagline}</div>
           </div>
         </div>
 
@@ -434,20 +444,20 @@ function SidebarContent({
           className="mb-5 flex w-full items-center gap-2 rounded-2xl border border-white/10 bg-[#162033] px-3.5 py-3 text-left text-sm text-white transition-colors hover:bg-[#1A2740]"
         >
           <Plus size={16} className="text-white/76" />
-          <span>New analysis</span>
+          <span>{labels.newAnalysis}</span>
         </button>
 
-        <SidebarSection title="Workspace">
+        <SidebarSection title={labels.workspace}>
           <NavLinkItem
             href={`/${locale}/crosscheck`}
             icon={<Home size={16} />}
-            label="Home"
+            label={labels.home}
             active
           />
 
           <NavButton
             icon={<History size={16} />}
-            label="History"
+            label={labels.history}
             trailing={
               <ChevronDown
                 size={14}
@@ -466,11 +476,14 @@ function SidebarContent({
                     item={item}
                     selected={selectedHistoryId === item.id}
                     onClick={() => loadHistoryItem(item)}
+                    confidenceLabel={labels.confidenceWord}
+                    draftLabel={labels.draft}
+                    locale={locale}
                   />
                 ))
               ) : (
                 <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-3 py-4 text-sm leading-6 text-white/46">
-                  Your recent analyses will appear here.
+                  {labels.emptyHistory}
                 </div>
               )}
             </div>
@@ -478,7 +491,7 @@ function SidebarContent({
 
           <NavButton
             icon={<Sparkles size={16} />}
-            label="Suggested prompts"
+            label={labels.suggestedPrompts}
             trailing={
               <ChevronDown
                 size={14}
@@ -505,35 +518,35 @@ function SidebarContent({
           ) : null}
         </SidebarSection>
 
-        <SidebarSection title="Platform">
+        <SidebarSection title={labels.platform}>
           <NavLinkItem
             href={`/${locale}/how-it-works`}
             icon={<BadgeHelp size={16} />}
-            label="How it works"
+            label={labels.howItWorks}
           />
           <NavLinkItem
             href={`/${locale}/plans`}
             icon={<CreditCard size={16} />}
-            label="Billing & Plans"
+            label={labels.billingPlans}
           />
           <NavLinkItem
             href={`/${locale}/corporate`}
             icon={<Building2 size={16} />}
-            label="Corporate"
+            label={labels.corporate}
           />
           <NavLinkItem
             href={`/${locale}/formal-opinion-quote`}
             icon={<FileSearch size={16} />}
-            label="Request formal opinion"
+            label={labels.requestFormalOpinion}
           />
           <NavLinkItem
             href={`/${locale}/contact`}
             icon={<Mail size={16} />}
-            label="Contact us"
+            label={labels.contactUs}
           />
           <NavButton
             icon={<Wrench size={16} />}
-            label="Diagnostics"
+            label={labels.diagnostics}
             onClick={() =>
               diagnosticsRef.current?.scrollIntoView({
                 behavior: "smooth",
@@ -545,7 +558,7 @@ function SidebarContent({
       </div>
 
       <div className="mt-4 border-t border-white/10 pt-4">
-        <div className="mb-2 text-xs text-white/35">Logged in as</div>
+        <div className="mb-2 text-xs text-white/35">{labels.loggedInAs}</div>
         <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white/84">
           <User2 size={15} className="text-white/45" />
           <span>Mario</span>
@@ -556,7 +569,7 @@ function SidebarContent({
           className="flex items-center gap-2 rounded-xl px-2 py-2 text-sm text-white/55 transition-colors hover:bg-white/[0.05] hover:text-white/82"
         >
           <LogOut size={16} />
-          <span>Logout</span>
+          <span>{labels.logout}</span>
         </button>
       </div>
     </div>
@@ -567,6 +580,8 @@ export default function CrosscheckV2Page() {
   const params = useParams();
   const locale = typeof params?.locale === "string" ? params.locale : "en";
   const diagnosticsRef = useRef<HTMLDivElement | null>(null);
+  const t = useTranslations("crosscheck");
+  const tv2 = useTranslations("crosscheck.v2");
 
   const [question, setQuestion] = useState("");
   const [details, setDetails] = useState("");
@@ -659,7 +674,7 @@ export default function CrosscheckV2Page() {
     const merged = [...attachedFiles, ...incoming];
 
     if (merged.length > MAX_DOCS) {
-      setUploadError(`You can attach up to ${MAX_DOCS} files.`);
+      setUploadError(tv2("uploadLimit", { count: MAX_DOCS }));
       event.target.value = "";
       return;
     }
@@ -669,7 +684,7 @@ export default function CrosscheckV2Page() {
     );
 
     if (invalid) {
-      setUploadError("Only TXT and DOCX files are supported right now.");
+      setUploadError(tv2("uploadInvalidType"));
       event.target.value = "";
       return;
     }
@@ -754,10 +769,10 @@ export default function CrosscheckV2Page() {
       const data = (await res.json()) as CrosscheckResponse;
 
       if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || "Crosscheck request failed.");
+        throw new Error(data?.error || tv2("analysisFailedFallback"));
       }
 
-      const nextAnswer = data?.consensus?.answer || "No answer returned.";
+      const nextAnswer = data?.consensus?.answer || tv2("noAnswerReturned");
 
       setAnswer(nextAnswer);
       setConfidence(data?.consensus?.confidence || "");
@@ -786,7 +801,7 @@ export default function CrosscheckV2Page() {
       args.onSuccess?.(data);
     } catch (err) {
       setRequestError(
-        err instanceof Error ? err.message : "Error running analysis."
+        err instanceof Error ? err.message : tv2("analysisErrorGeneric")
       );
     } finally {
       setLoading(false);
@@ -805,7 +820,7 @@ export default function CrosscheckV2Page() {
       payloadDetails: details,
       historyTitle: trimmed,
       onSuccess: (data) => {
-        const nextAnswer = data?.consensus?.answer || "No answer returned.";
+        const nextAnswer = data?.consensus?.answer || tv2("noAnswerReturned");
         setConversationTurns([
           { id: crypto.randomUUID(), role: "user", text: trimmed },
           { id: crypto.randomUUID(), role: "assistant", text: nextAnswer },
@@ -817,24 +832,26 @@ export default function CrosscheckV2Page() {
   async function handleRefineAnswer() {
     if (!baseQuestion.trim() || !answer.trim() || loading) return;
 
+    const refineInstruction = tv2("refinePromptInstruction");
+
     const refinePrompt = buildConversationPrompt(
       baseQuestion,
       conversationTurns,
-      "Please refine the prior answer into a tighter, more conservative tax analysis. Resolve ambiguity where possible, state the conclusion clearly, and highlight conditions that could change the result."
+      refineInstruction
     );
 
     await executeAnalysis({
       payloadQuestion: refinePrompt,
       payloadDetails: details,
-      historyTitle: `${baseQuestion} — refine answer`,
+      historyTitle: `${baseQuestion} — ${tv2("refineAnswer")}`,
       onSuccess: (data) => {
-        const nextAnswer = data?.consensus?.answer || "No answer returned.";
+        const nextAnswer = data?.consensus?.answer || tv2("noAnswerReturned");
         setConversationTurns((prev) => [
           ...prev,
           {
             id: crypto.randomUUID(),
             role: "user",
-            text: "Please refine the prior answer into a tighter, more conservative tax analysis.",
+            text: refineInstruction,
           },
           { id: crypto.randomUUID(), role: "assistant", text: nextAnswer },
         ]);
@@ -849,7 +866,7 @@ export default function CrosscheckV2Page() {
       const seed =
         followups.length > 0
           ? followups.map((f) => `- ${f}`).join("\n")
-          : "- Add the facts most likely to change the conclusion.";
+          : tv2("missingFactsSeed");
 
       setDetails(seed);
     }
@@ -874,7 +891,7 @@ export default function CrosscheckV2Page() {
       payloadDetails: details,
       historyTitle: `${baseQuestion} — ${smartTitle(nextFollowup)}`,
       onSuccess: (data) => {
-        const nextAnswer = data?.consensus?.answer || "No answer returned.";
+        const nextAnswer = data?.consensus?.answer || tv2("noAnswerReturned");
         setConversationTurns((prev) => [
           ...prev,
           { id: crypto.randomUUID(), role: "user", text: nextFollowup },
@@ -918,10 +935,17 @@ export default function CrosscheckV2Page() {
   }
 
   const sidebarPrompts = [
-    "Does this create permanent establishment risk?",
-    "What changes if services are performed locally?",
-    "Is withholding tax exposure likely under these facts?",
+    tv2("suggestedPrompt1"),
+    tv2("suggestedPrompt2"),
+    tv2("suggestedPrompt3"),
   ];
+
+  const confidenceLabel =
+    confidence === "high"
+      ? tv2("confidenceHigh")
+      : confidence === "medium"
+      ? tv2("confidenceMedium")
+      : tv2("confidenceLow");
 
   return (
     <main className="min-h-screen bg-[#0B1220] text-white">
@@ -929,7 +953,7 @@ export default function CrosscheckV2Page() {
         {sidebarOpen ? (
           <button
             type="button"
-            aria-label="Close sidebar overlay"
+            aria-label={tv2("closeSidebarOverlay")}
             onClick={() => setSidebarOpen(false)}
             className="fixed inset-0 z-30 bg-black/50 backdrop-blur-[1px] lg:bg-black/35"
           />
@@ -942,7 +966,7 @@ export default function CrosscheckV2Page() {
           )}
         >
           <div className="mb-3 flex items-center justify-between lg:hidden">
-            <div className="text-sm font-medium text-white/75">Workspace</div>
+            <div className="text-sm font-medium text-white/75">{tv2("workspace")}</div>
             <button
               type="button"
               onClick={() => setSidebarOpen(false)}
@@ -966,6 +990,26 @@ export default function CrosscheckV2Page() {
             resetCurrentAnalysis={resetCurrentAnalysis}
             handleLogout={handleLogout}
             diagnosticsRef={diagnosticsRef}
+            labels={{
+              logoTagline: tv2("logoTagline"),
+              newAnalysis: tv2("newAnalysis"),
+              workspace: tv2("workspace"),
+              home: tv2("home"),
+              history: t("nav.history"),
+              suggestedPrompts: tv2("suggestedPrompts"),
+              emptyHistory: tv2("emptyHistory"),
+              platform: tv2("platform"),
+              howItWorks: t("nav.howItWorks"),
+              billingPlans: tv2("billingPlans"),
+              corporate: t("nav.corporate"),
+              requestFormalOpinion: t("nav.formalOpinion"),
+              contactUs: tv2("contactUs"),
+              diagnostics: t("nav.diagnostics"),
+              loggedInAs: tv2("loggedInAs"),
+              logout: t("nav.logout"),
+              confidenceWord: t("common.confidence").toLowerCase(),
+              draft: tv2("draft"),
+            }}
           />
         </aside>
 
@@ -985,23 +1029,17 @@ export default function CrosscheckV2Page() {
                   <div className="min-w-0">
                     <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-white/50">
                       <Bot size={14} />
-                      <span>V2 redesign sandbox</span>
+                      <span>{tv2("sandbox")}</span>
                     </div>
                     <h1 className="text-2xl font-semibold tracking-tight text-white/95 sm:text-3xl">
-                      Good morning, Mario
+                      {tv2("greeting", { name: "Mario" })}
                     </h1>
                   </div>
-                </div>
-
-                <div className="shrink-0">
-                  <LanguageSwitcher />
                 </div>
               </div>
 
               <p className="max-w-3xl text-sm leading-6 text-white/56 sm:text-[15px]">
-                Ask the question naturally. Add facts only when they matter.
-                TaxAiPro will cross-check multiple models and return one
-                conservative draft.
+                {tv2("subtitle")}
               </p>
             </div>
           </header>
@@ -1013,13 +1051,13 @@ export default function CrosscheckV2Page() {
                   <div className="rounded-[24px] border border-white/12 bg-[#111827] p-3 shadow-[0_20px_60px_rgba(0,0,0,0.28)] sm:rounded-[30px] sm:p-4">
                     <div className="mb-3 flex items-center gap-2 text-xs text-white/42">
                       <SearchCheck size={14} />
-                      <span>Start with the question</span>
+                      <span>{tv2("startWithQuestion")}</span>
                     </div>
 
                     <textarea
                       value={question}
                       onChange={(e) => setQuestion(e.target.value)}
-                      placeholder="Example: Does a US buyer purchasing goods FOB from Colombia create PE risk or withholding exposure if support services are also performed locally?"
+                      placeholder={tv2("questionPlaceholder")}
                       className="min-h-[140px] w-full resize-none bg-transparent text-sm leading-7 text-white/88 outline-none placeholder:text-white/28 sm:min-h-[180px] sm:text-[15px]"
                     />
 
@@ -1027,12 +1065,12 @@ export default function CrosscheckV2Page() {
                       <div className="mt-4 rounded-2xl border border-white/10 bg-[#0F172A] p-3">
                         <div className="mb-2 flex items-center gap-2 text-xs text-white/44">
                           <BookOpenText size={14} />
-                          <span>Optional details</span>
+                          <span>{tv2("optionalDetails")}</span>
                         </div>
                         <textarea
                           value={details}
                           onChange={(e) => setDetails(e.target.value)}
-                          placeholder="Entity type, residency, treaty position, who performs services, where title passes, who bears risk, contract terms, value, related-party facts, etc."
+                          placeholder={tv2("detailsPlaceholder")}
                           className="min-h-[110px] w-full resize-none bg-transparent text-sm leading-6 text-white/82 outline-none placeholder:text-white/28"
                         />
                       </div>
@@ -1041,13 +1079,13 @@ export default function CrosscheckV2Page() {
                     <div className="mt-4 rounded-2xl border border-dashed border-white/10 bg-[#0F172A] p-3">
                       <div className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-white/42">
                         <Paperclip size={14} />
-                        <span>Attach documents</span>
+                        <span>{tv2("attachDocuments")}</span>
                       </div>
 
                       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                         <label className="inline-flex w-fit cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/78 transition hover:bg-white/[0.08] hover:text-white">
                           <Paperclip size={14} />
-                          <span>Add files</span>
+                          <span>{tv2("addFiles")}</span>
                           <input
                             type="file"
                             multiple
@@ -1058,7 +1096,7 @@ export default function CrosscheckV2Page() {
                         </label>
 
                         <div className="text-xs text-white/40">
-                          Up to {MAX_DOCS} files. TXT and DOCX only.
+                          {tv2("fileRules", { count: MAX_DOCS })}
                         </div>
                       </div>
 
@@ -1099,10 +1137,10 @@ export default function CrosscheckV2Page() {
                           onClick={() => setShowDetails((v) => !v)}
                           className="rounded-xl border border-white/10 bg-[#0F172A] px-3 py-2 text-sm text-white/72 transition hover:bg-white/[0.05]"
                         >
-                          {showDetails ? "Hide details" : "Add details"}
+                          {showDetails ? tv2("hideDetails") : tv2("addDetails")}
                         </button>
                         <div className="text-xs text-white/40">
-                          Cleaner input. Better output.
+                          {tv2("cleanerInputBetterOutput")}
                         </div>
                       </div>
 
@@ -1115,11 +1153,11 @@ export default function CrosscheckV2Page() {
                         {loading ? (
                           <>
                             <Clock3 size={16} />
-                            <span>Cross-checking...</span>
+                            <span>{tv2("crossChecking")}</span>
                           </>
                         ) : (
                           <>
-                            <span>Ask TaxAiPro</span>
+                            <span>{tv2("askTaxAiPro")}</span>
                             <ArrowUp size={16} />
                           </>
                         )}
@@ -1133,7 +1171,7 @@ export default function CrosscheckV2Page() {
                         <ShieldAlert className="mt-0.5 shrink-0 text-red-300" size={18} />
                         <div>
                           <div className="text-sm font-medium text-red-200">
-                            Analysis could not be completed
+                            {tv2("analysisCouldNotBeCompleted")}
                           </div>
                           <div className="mt-1 text-sm leading-6 text-red-200/85">
                             {requestError}
@@ -1150,11 +1188,13 @@ export default function CrosscheckV2Page() {
                           <div className="flex items-center gap-2">
                             <CheckCircle2 size={18} className="text-white/72" />
                             <h2 className="text-base font-semibold text-white/90">
-                              Preliminary answer
+                              {tv2("preliminaryAnswer")}
                             </h2>
                           </div>
 
-                          {confidence ? <ConfidencePill value={confidence} /> : null}
+                          {confidence ? (
+                            <ConfidencePill value={confidence} label={confidenceLabel} />
+                          ) : null}
                         </div>
 
                         {loading ? (
@@ -1169,7 +1209,7 @@ export default function CrosscheckV2Page() {
                             {baseQuestion ? (
                               <div className="mb-4 rounded-2xl border border-white/10 bg-[#0F172A] px-4 py-3">
                                 <div className="mb-1 text-xs font-medium uppercase tracking-[0.16em] text-white/40">
-                                  Original question
+                                  {tv2("originalQuestion")}
                                 </div>
                                 <div className="text-sm leading-6 text-white/82">
                                   {baseQuestion}
@@ -1180,7 +1220,7 @@ export default function CrosscheckV2Page() {
                             {conversationTurns.length > 2 ? (
                               <div className="mb-4 rounded-2xl border border-white/10 bg-[#0F172A] px-4 py-3">
                                 <div className="mb-3 text-xs font-medium uppercase tracking-[0.16em] text-white/40">
-                                  Conversation
+                                  {tv2("conversation")}
                                 </div>
                                 <div className="space-y-3">
                                   {conversationTurns.slice(2).map((turn) => (
@@ -1194,7 +1234,9 @@ export default function CrosscheckV2Page() {
                                       )}
                                     >
                                       <div className="mb-1 text-[11px] uppercase tracking-[0.16em] text-white/38">
-                                        {turn.role === "user" ? "Follow-up" : "Answer"}
+                                        {turn.role === "user"
+                                          ? tv2("followUpLabel")
+                                          : tv2("answerLabel")}
                                       </div>
                                       <div className="whitespace-pre-wrap">{turn.text}</div>
                                     </div>
@@ -1215,7 +1257,7 @@ export default function CrosscheckV2Page() {
                                 className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/78 transition hover:bg-white/[0.08] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 <Sparkles size={14} />
-                                <span>Refine answer</span>
+                                <span>{tv2("refineAnswer")}</span>
                               </button>
 
                               <button
@@ -1224,7 +1266,7 @@ export default function CrosscheckV2Page() {
                                 className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/78 transition hover:bg-white/[0.08] hover:text-white"
                               >
                                 <PlusCircle size={14} />
-                                <span>Add missing facts</span>
+                                <span>{tv2("addMissingFacts")}</span>
                               </button>
                             </div>
 
@@ -1232,7 +1274,7 @@ export default function CrosscheckV2Page() {
                               {runtimeMs !== null ? (
                                 <Metric
                                   icon={<Clock3 size={14} />}
-                                  label="Runtime"
+                                  label={tv2("runtime")}
                                   value={`${runtimeMs} ms`}
                                 />
                               ) : null}
@@ -1240,7 +1282,7 @@ export default function CrosscheckV2Page() {
                               {attemptedCount > 0 ? (
                                 <Metric
                                   icon={<Bot size={14} />}
-                                  label="Models attempted"
+                                  label={tv2("modelsAttempted")}
                                   value={`${attemptedCount}`}
                                 />
                               ) : null}
@@ -1248,7 +1290,7 @@ export default function CrosscheckV2Page() {
                               {successCount > 0 ? (
                                 <Metric
                                   icon={<CheckCircle2 size={14} />}
-                                  label="Models succeeded"
+                                  label={tv2("modelsSucceeded")}
                                   value={`${successCount}`}
                                 />
                               ) : null}
@@ -1259,12 +1301,12 @@ export default function CrosscheckV2Page() {
 
                       <div className="rounded-2xl border border-white/10 bg-[#111827] p-4">
                         <div className="mb-3 text-sm font-medium text-white/86">
-                          Continue this analysis
+                          {tv2("continueThisAnalysis")}
                         </div>
                         <textarea
                           value={followupDraft}
                           onChange={(e) => setFollowupDraft(e.target.value)}
-                          placeholder="Add a follow-up question or refine the facts without losing the original context."
+                          placeholder={tv2("followupPlaceholder")}
                           className="min-h-[90px] w-full resize-none rounded-xl border border-white/10 bg-[#0F172A] px-3 py-3 text-sm leading-6 text-white/82 outline-none placeholder:text-white/28"
                         />
                         <div className="mt-3 flex justify-end">
@@ -1277,11 +1319,11 @@ export default function CrosscheckV2Page() {
                             {loading ? (
                               <>
                                 <Clock3 size={16} />
-                                <span>Running...</span>
+                                <span>{tv2("running")}</span>
                               </>
                             ) : (
                               <>
-                                <span>Send follow-up</span>
+                                <span>{tv2("sendFollowup")}</span>
                                 <ArrowUp size={16} />
                               </>
                             )}
@@ -1290,19 +1332,19 @@ export default function CrosscheckV2Page() {
                       </div>
 
                       <DetailSection
-                        title="Key caveats"
-                        subtitle="What could change the conclusion."
+                        title={tv2("keyCaveats")}
+                        subtitle={tv2("keyCaveatsSubtitle")}
                         items={caveats}
-                        empty="No explicit caveats were returned in this run."
+                        empty={tv2("noCaveats")}
                       />
 
                       <div className="rounded-2xl border border-white/10 bg-[#111827]">
                         <div className="border-b border-white/10 px-4 py-3.5">
                           <div className="text-sm font-medium text-white/86">
-                            Follow-up questions
+                            {tv2("followupQuestions")}
                           </div>
                           <div className="mt-1 text-xs text-white/42">
-                            Click one to prefill it, then edit or send it as the next turn.
+                            {tv2("followupQuestionsSubtitle")}
                           </div>
                         </div>
 
@@ -1326,17 +1368,17 @@ export default function CrosscheckV2Page() {
                             </div>
                           ) : (
                             <div className="text-sm leading-6 text-white/50">
-                              No follow-up questions were suggested in this run.
+                              {tv2("noFollowups")}
                             </div>
                           )}
                         </div>
                       </div>
 
                       <DetailSection
-                        title="Model disagreements"
-                        subtitle="Where provider outputs likely diverged."
+                        title={tv2("modelDisagreements")}
+                        subtitle={tv2("modelDisagreementsSubtitle")}
                         items={disagreements}
-                        empty="No explicit disagreements were surfaced in this run."
+                        empty={tv2("noDisagreements")}
                       />
 
                       <div
@@ -1346,10 +1388,10 @@ export default function CrosscheckV2Page() {
                         <div className="border-b border-white/10 px-4 py-3.5">
                           <div className="flex items-center gap-2 text-sm font-medium text-white/86">
                             <Wrench size={15} />
-                            <span>Diagnostics</span>
+                            <span>{t("nav.diagnostics")}</span>
                           </div>
                           <div className="mt-1 text-xs text-white/42">
-                            Provider outputs, runtime, and response transparency.
+                            {tv2("diagnosticsSubtitle")}
                           </div>
                         </div>
 
@@ -1357,17 +1399,17 @@ export default function CrosscheckV2Page() {
                           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                             <Metric
                               icon={<Clock3 size={14} />}
-                              label="Runtime"
+                              label={tv2("runtime")}
                               value={runtimeMs !== null ? `${runtimeMs} ms` : "—"}
                             />
                             <Metric
                               icon={<Bot size={14} />}
-                              label="Models attempted"
+                              label={tv2("modelsAttempted")}
                               value={`${attemptedCount}`}
                             />
                             <Metric
                               icon={<CheckCircle2 size={14} />}
-                              label="Models succeeded"
+                              label={tv2("modelsSucceeded")}
                               value={`${successCount}`}
                             />
                           </div>
@@ -1378,12 +1420,13 @@ export default function CrosscheckV2Page() {
                                 <ProviderCard
                                   key={`${provider.provider}-${provider.model}-${index}`}
                                   provider={provider}
+                                  emptyText={tv2("noProviderOutputReturned")}
                                 />
                               ))}
                             </div>
                           ) : (
                             <div className="text-sm leading-6 text-white/50">
-                              No provider diagnostics are available for this run.
+                              {tv2("noProviderDiagnostics")}
                             </div>
                           )}
                         </div>

@@ -4,7 +4,6 @@ import type { Metadata } from "next";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages, setRequestLocale } from "next-intl/server";
 
-// Client component (OK to render from a Server Component)
 import LanguageToggle from "./components/LanguageToggle";
 
 export const metadata: Metadata = {
@@ -13,10 +12,8 @@ export const metadata: Metadata = {
 };
 
 async function resolveLocale(params: any): Promise<string> {
-  // Handles either: params = { locale: "en" } OR params = Promise<{ locale: "en" }>
   const p = params && typeof params?.then === "function" ? await params : params;
-  const locale = typeof p?.locale === "string" ? p.locale : "en";
-  return locale;
+  return typeof p?.locale === "string" ? p.locale : "en";
 }
 
 export default async function LocaleLayout({
@@ -24,7 +21,7 @@ export default async function LocaleLayout({
   params,
 }: {
   children: React.ReactNode;
-  params: any; // avoids Next/Turbopack params typing mismatch
+  params: any;
 }) {
   const locale = await resolveLocale(params);
 
@@ -34,20 +31,26 @@ export default async function LocaleLayout({
   return (
     <html lang={locale}>
       <body>
-        {/* Global language toggle for any /[locale] route.
-            Positioned lower to avoid overlapping header buttons on auth pages. */}
-        <div className="fixed right-6 top-20 z-50">
-          <LanguageToggle />
-        </div>
-
         <NextIntlClientProvider locale={locale} messages={messages}>
+          {/* Keep toggle inside provider so locale-aware client hooks work */}
+          <div className="fixed right-6 top-20 z-50">
+            <LanguageToggle />
+          </div>
+
           {children}
+
+          <footer
+            style={{
+              textAlign: "center",
+              fontSize: 12,
+              color: "#999",
+              marginTop: 40,
+              paddingBottom: 20,
+            }}
+          >
+            TaxAiPro™ © 2026 Vendetta Global LLC. All rights reserved.
+          </footer>
         </NextIntlClientProvider>
-<footer
-        style={{ textAlign: "center", fontSize: 12, color: "#999", marginTop: 40, paddingBottom: 20 }}
-      >
-        TaxAiPro™ © 2026 Vendetta Global LLC. All rights reserved.
-      </footer>
       </body>
     </html>
   );
