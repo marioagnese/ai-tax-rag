@@ -1,4 +1,3 @@
-// app/[locale]/(auth)/signin/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -42,9 +41,11 @@ export default function SignInPage() {
         backgroundAttachment: "fixed",
       }}
     >
-      <div className="absolute inset-0 bg-black/10" />
+      {/* 🔥 DARKER OVERLAY (fix readability) */}
+      <div className="absolute inset-0 bg-black/40" />
 
-      {demoOpen ? (
+      {/* DEMO MODAL */}
+      {demoOpen && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4"
           onClick={() => setDemoOpen(false)}
@@ -54,33 +55,29 @@ export default function SignInPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <button
-              type="button"
               onClick={() => setDemoOpen(false)}
-              className="absolute right-4 top-4 z-10 rounded-full border border-white/15 bg-black/40 px-3 py-1.5 text-sm text-white/80 hover:bg-white/10"
-              aria-label="Close demo"
+              className="absolute right-4 top-4 rounded-full border border-white/15 bg-black/40 px-3 py-1.5 text-sm text-white/80 hover:bg-white/10"
             >
               ✕
             </button>
 
-            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black">
-              <video
-                className="h-auto w-full object-contain"
-                controls
-                playsInline
-                preload="auto"
-                autoPlay
-              >
-                <source src="/TaxAIProGuide.mp4" type="video/mp4" />
-                {t("videoFallback")}
-              </video>
-            </div>
+            <video
+              className="w-full rounded-2xl"
+              controls
+              autoPlay
+              playsInline
+            >
+              <source src="/TaxAIProGuide.mp4" type="video/mp4" />
+              {t("videoFallback")}
+            </video>
           </div>
         </div>
-      ) : null}
+      )}
 
+      {/* HEADER */}
       <header className="relative px-6 pt-6">
-        <div className="flex items-start justify-between gap-4">
-          <div className="relative h-16 w-56 sm:h-18 sm:w-64 md:h-20 md:w-72">
+        <div className="flex items-start justify-between">
+          <div className="relative h-16 w-56">
             <Image
               src="/taxaipro-logo.png"
               alt="TaxAiPro™"
@@ -90,20 +87,17 @@ export default function SignInPage() {
             />
           </div>
 
-          <div className="flex items-center gap-2 pt-1">
+          <div className="flex gap-2">
             <button
-              type="button"
-              onClick={() => router.push("/how-it-works")}
-              className="rounded-xl border border-black/60 bg-black/95 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-black/40 hover:bg-black focus:outline-none focus:ring-2 focus:ring-white/20"
-              title={t("howItWorksTitle")}
+              onClick={() => router.push(`/${locale}/how-it-works`)}
+              className="rounded-xl bg-black/90 px-4 py-2 text-xs text-white"
             >
               {t("howItWorks")}
             </button>
 
             <button
-              type="button"
-              onClick={() => router.push("/contact")}
-              className="rounded-xl border border-black/60 bg-black/95 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-black/40 hover:bg-black focus:outline-none focus:ring-2 focus:ring-white/20"
+              onClick={() => router.push(`/${locale}/contact`)}
+              className="rounded-xl bg-black/90 px-4 py-2 text-xs text-white"
             >
               {t("contact")}
             </button>
@@ -111,94 +105,81 @@ export default function SignInPage() {
         </div>
       </header>
 
-      <main className="relative mx-auto max-w-6xl px-6">
-        <section className="pt-14 md:pt-20 pb-16 md:pb-24">
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-start">
-            <div className="lg:col-span-6">
-              <div className="rounded-3xl border border-white/10 bg-black/45 backdrop-blur-sm px-6 py-7 md:px-8 md:py-8 shadow-2xl shadow-black/40">
-                <h1 className="text-4xl md:text-5xl font-semibold tracking-tight leading-[1.05]">
-                  {t("headline")}
-                  <span className="block text-white/65">{t("subheadline")}</span>
-                </h1>
+      {/* MAIN */}
+      <main className="relative mx-auto max-w-6xl px-6 pt-16">
+        <div className="grid lg:grid-cols-2 gap-10 items-center">
 
-                <p className="mt-5 text-sm md:text-base text-white/78 leading-relaxed">
-                  {t("bodyPrefix")}{" "}
-                  <span className="text-white font-medium">
-                    {t("bodyEmphasis")}
-                  </span>{" "}
-                  {t("bodySuffix")}
-                </p>
+          {/* LEFT SIDE */}
+          <div className="rounded-3xl bg-black/50 p-8 backdrop-blur-md border border-white/10">
 
-                <div className="mt-4 text-sm text-white/70">
-                  <span className="text-white/85 font-medium">
-                    {t("builtBy")}
-                  </span>{" "}
-                  {t("for")}{" "}
-                  <span className="text-white/85 font-medium">
-                    {t("forWhom")}
-                  </span>
-                  .
-                </div>
+            {/* ✅ KEEP YOUR POSITIONING */}
+            <h1 className="text-4xl md:text-5xl font-semibold leading-tight">
+              Multi-model tax analysis
+              <span className="block text-white/60">
+                built to reduce uncertainty.
+              </span>
+            </h1>
 
-                <div className="mt-7 flex flex-col sm:flex-row gap-3 sm:items-center sm:flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => router.push(`/${locale}/signup`)}
-                    className="h-11 px-5 rounded-xl bg-white text-black font-medium hover:bg-white/90 disabled:opacity-50"
-                    disabled={!configured}
-                    title={!configured ? t("firebaseMissing") : ""}
-                  >
-                    {t("cta")}
-                  </button>
+            {/* 🔥 NEW: PAIN */}
+            <p className="mt-4 text-red-300 text-sm">
+              Most AI tax answers miss assumptions, ignore key facts, or sound more certain than they should.
+            </p>
 
-                  <button
-                    type="button"
-                    onClick={() => router.push(`/${locale}/signup?mode=login#login`)}
-                    className="h-11 px-5 rounded-xl border border-white/20 bg-white/10 text-white font-medium hover:bg-white/15 disabled:opacity-50"
-                    disabled={!configured}
-                    title={!configured ? t("firebaseMissing") : ""}
-                  >
-                    Log in
-                  </button>
+            {/* DESCRIPTION */}
+            <p className="mt-5 text-white/80 text-sm leading-relaxed">
+              TaxAiPro runs multiple AI models in parallel, compares where they agree and where they differ, and produces a more reliable and conservative answer.
+            </p>
 
-                  <div className="text-sm text-white/65">{t("ctaHint")}</div>
-                </div>
+            {/* 🔥 NEW: BENEFITS */}
+            <ul className="mt-5 space-y-2 text-white/75 text-sm">
+              <li>• Cross-check multiple AI models instantly</li>
+              <li>• Surface disagreements and missing facts</li>
+              <li>• Generate conservative, audit-ready drafts</li>
+            </ul>
 
-                <div className="mt-8 text-xs text-white/55">
-                  {t("disclaimer")}
-                </div>
-              </div>
+            {/* AUTHORITY */}
+            <div className="mt-5 text-sm text-white/70">
+              Built by an international tax executive with 20+ years experience.
             </div>
 
-            <div className="lg:col-span-6">
-              <div className="w-full max-w-[520px] ml-auto">
-                <div className="rounded-3xl border border-white/10 bg-transparent p-2">
-                  <div className="aspect-square w-full overflow-hidden rounded-2xl border border-white/10 bg-black/30">
-                    <video
-                      className="h-full w-full object-cover"
-                      controls
-                      playsInline
-                      preload="metadata"
-                    >
-                      <source src="/demo-60s.mp4" type="video/mp4" />
-                      {t("videoFallback")}
-                    </video>
-                  </div>
+            {/* CTA */}
+            <div className="mt-6 flex flex-wrap gap-3 items-center">
+              <button
+                onClick={() => router.push(`/${locale}/signup`)}
+                className="bg-white text-black px-5 py-2 rounded-xl font-medium"
+                disabled={!configured}
+              >
+                Start free analysis
+              </button>
 
-                  <div className="mt-4 flex justify-center">
-                    <button
-                      type="button"
-                      onClick={() => setDemoOpen(true)}
-                      className="h-11 px-6 rounded-xl bg-white text-black font-semibold shadow-lg shadow-black/30 hover:bg-white/90"
-                    >
-                      Watch Demo
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <button
+                onClick={() => setDemoOpen(true)}
+                className="border border-white/20 px-5 py-2 rounded-xl"
+              >
+                Watch demo
+              </button>
+            </div>
+
+            <div className="mt-4 text-xs text-white/60">
+              {t("disclaimer")}
             </div>
           </div>
-        </section>
+
+          {/* RIGHT SIDE */}
+          <div className="text-center">
+            <p className="text-sm text-white/60 mb-2">
+              See how professionals validate AI answers in seconds
+            </p>
+
+            <video
+              className="rounded-2xl border border-white/10"
+              controls
+            >
+              <source src="/demo-60s.mp4" type="video/mp4" />
+            </video>
+          </div>
+
+        </div>
       </main>
     </div>
   );
