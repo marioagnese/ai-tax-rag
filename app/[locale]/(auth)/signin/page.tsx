@@ -41,7 +41,7 @@ export default function SignInPage() {
         backgroundAttachment: "fixed",
       }}
     >
-      {/* 🔥 DARKER OVERLAY (fix readability) */}
+      {/* ✅ DARKER OVERLAY */}
       <div className="absolute inset-0 bg-black/40" />
 
       {/* DEMO MODAL */}
@@ -61,12 +61,7 @@ export default function SignInPage() {
               ✕
             </button>
 
-            <video
-              className="w-full rounded-2xl"
-              controls
-              autoPlay
-              playsInline
-            >
+            <video className="w-full rounded-2xl" controls autoPlay playsInline>
               <source src="/TaxAIProGuide.mp4" type="video/mp4" />
               {t("videoFallback")}
             </video>
@@ -91,6 +86,7 @@ export default function SignInPage() {
             <button
               onClick={() => router.push(`/${locale}/how-it-works`)}
               className="rounded-xl bg-black/90 px-4 py-2 text-xs text-white"
+              title={t("howItWorksTitle")}
             >
               {t("howItWorks")}
             </button>
@@ -109,10 +105,10 @@ export default function SignInPage() {
       <main className="relative mx-auto max-w-6xl px-6 pt-16">
         <div className="grid lg:grid-cols-2 gap-10 items-center">
 
-          {/* LEFT SIDE */}
+          {/* LEFT */}
           <div className="rounded-3xl bg-black/50 p-8 backdrop-blur-md border border-white/10">
 
-            {/* ✅ KEEP YOUR POSITIONING */}
+            {/* HEADLINE */}
             <h1 className="text-4xl md:text-5xl font-semibold leading-tight">
               Multi-model tax analysis
               <span className="block text-white/60">
@@ -120,7 +116,7 @@ export default function SignInPage() {
               </span>
             </h1>
 
-            {/* 🔥 NEW: PAIN */}
+            {/* PAIN */}
             <p className="mt-4 text-red-300 text-sm">
               Most AI tax answers miss assumptions, ignore key facts, or sound more certain than they should.
             </p>
@@ -130,7 +126,7 @@ export default function SignInPage() {
               TaxAiPro runs multiple AI models in parallel, compares where they agree and where they differ, and produces a more reliable and conservative answer.
             </p>
 
-            {/* 🔥 NEW: BENEFITS */}
+            {/* BENEFITS */}
             <ul className="mt-5 space-y-2 text-white/75 text-sm">
               <li>• Cross-check multiple AI models instantly</li>
               <li>• Surface disagreements and missing facts</li>
@@ -142,30 +138,42 @@ export default function SignInPage() {
               Built by an international tax executive with 20+ years experience.
             </div>
 
-            {/* CTA */}
+            {/* CTA BLOCK */}
             <div className="mt-6 flex flex-wrap gap-3 items-center">
               <button
                 onClick={() => router.push(`/${locale}/signup`)}
-                className="bg-white text-black px-5 py-2 rounded-xl font-medium"
+                className="bg-white text-black px-5 py-2 rounded-xl font-medium hover:bg-white/90 disabled:opacity-50"
                 disabled={!configured}
+                title={!configured ? t("firebaseMissing") : ""}
               >
                 Start free analysis
               </button>
 
               <button
                 onClick={() => setDemoOpen(true)}
-                className="border border-white/20 px-5 py-2 rounded-xl"
+                className="border border-white/20 px-5 py-2 rounded-xl text-white hover:bg-white/10"
               >
                 Watch demo
               </button>
+
+              {/* ✅ LOGIN BUTTON RESTORED */}
+              <button
+                onClick={() => router.push(`/${locale}/signup?mode=login#login`)}
+                className="border border-white/20 px-5 py-2 rounded-xl text-white hover:bg-white/10 disabled:opacity-50"
+                disabled={!configured}
+                title={!configured ? t("firebaseMissing") : ""}
+              >
+                Log in
+              </button>
             </div>
 
+            {/* DISCLAIMER */}
             <div className="mt-4 text-xs text-white/60">
               {t("disclaimer")}
             </div>
           </div>
 
-          {/* RIGHT SIDE */}
+          {/* RIGHT */}
           <div className="text-center">
             <p className="text-sm text-white/60 mb-2">
               See how professionals validate AI answers in seconds
