@@ -45,7 +45,7 @@ function defaultOpenRouterModels(): string[] {
     .map((s) => s.trim())
     .filter(Boolean);
 
-  return models.length ? models : ["anthropic/claude-3.5-sonnet"];
+  return models.length ? models : ["anthropic/claude-sonnet-4.6","anthropic/claude-3.7-sonnet"];
 }
 
 function dualAdjudicatorEnabled(): boolean {
