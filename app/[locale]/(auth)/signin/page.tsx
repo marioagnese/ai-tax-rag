@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { firebaseClientConfigured } from "@/src/lib/firebase/client";
+import LanguageToggle from "../../components/LanguageToggle";
 
 export default function SignInPage() {
   const router = useRouter();
@@ -82,7 +83,9 @@ export default function SignInPage() {
             />
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            <LanguageToggle />
+
             <button
               onClick={() => router.push(`/${locale}/how-it-works`)}
               className="rounded-xl bg-black/90 px-4 py-2 text-xs text-white"
