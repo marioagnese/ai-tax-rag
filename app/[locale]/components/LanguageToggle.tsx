@@ -6,10 +6,10 @@ import { usePathname, useSearchParams } from "next/navigation";
 type Locale = "en" | "es" | "pt";
 const LOCALES: Locale[] = ["en", "es", "pt"];
 
-const LABEL: Record<Locale, string> = {
-  en: "EN",
-  es: "ES",
-  pt: "BR",
+const FLAGS: Record<Locale, string> = {
+  en: "🇺🇸",
+  es: "🇪🇸",
+  pt: "🇧🇷",
 };
 
 function replaceLocaleInPath(pathname: string, nextLocale: Locale) {
@@ -38,35 +38,36 @@ export default function LanguageToggle({
   const hrefWithQs = (p: string) => (qs ? `${p}?${qs}` : p);
 
   const seg0 = pathname.split("/").filter(Boolean)[0];
-  const current = (LOCALES.includes(seg0 as Locale) ? (seg0 as Locale) : "en") as Locale;
+  const current = (LOCALES.includes(seg0 as Locale)
+    ? (seg0 as Locale)
+    : "en") as Locale;
 
   return (
     <div
       className={[
-        "inline-flex items-center gap-1 rounded-full border border-white/20 bg-black/35 px-2 py-2 shadow-lg backdrop-blur-md",
+        "inline-flex items-center gap-1 rounded-full border border-white/20 bg-white/5 px-2 py-1 backdrop-blur-md",
         className,
       ].join(" ")}
-      aria-label="Language selector"
     >
       {LOCALES.map((loc) => {
         const active = loc === current;
-        const nextPath = hrefWithQs(replaceLocaleInPath(pathname, loc));
+        const nextPath = hrefWithQs(
+          replaceLocaleInPath(pathname, loc)
+        );
 
         return (
           <a
             key={loc}
             href={nextPath}
-            aria-label={LABEL[loc]}
-            title={LABEL[loc]}
-            aria-current={active ? "page" : undefined}
+            title={loc}
             className={[
-              "flex h-11 min-w-[44px] items-center justify-center rounded-full border px-3 text-sm font-semibold transition",
+              "flex h-9 w-9 items-center justify-center rounded-full text-lg transition",
               active
-                ? "border-white/70 bg-white/15 text-white"
-                : "border-white/15 bg-transparent text-white/85 hover:bg-white/10",
+                ? "bg-white/20"
+                : "opacity-60 hover:opacity-100",
             ].join(" ")}
           >
-            {LABEL[loc]}
+            {FLAGS[loc]}
           </a>
         );
       })}

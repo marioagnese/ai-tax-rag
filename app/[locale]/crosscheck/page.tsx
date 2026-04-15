@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
+import LanguageToggle from "../components/LanguageToggle";
 import {
   ArrowRight,
   ArrowUp,
@@ -1036,6 +1037,8 @@ export default function CrosscheckV2Page() {
                     </h1>
                   </div>
                 </div>
+
+                <LanguageToggle className="shrink-0 self-start" />
               </div>
 
               <p className="max-w-3xl text-sm leading-6 text-white/56 sm:text-[15px]">
