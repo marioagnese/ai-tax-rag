@@ -18,7 +18,14 @@
       "disclaimer": "Drafts for triage only — not legal or tax advice.",
       "videoFallback": "Your browser does not support the video tag.",
       "watchGuide": "Watch guide",
-      "watchGuideTitle": "Open TaxAiPro product guide"
+      "watchGuideTitle": "Open TaxAiPro product guide",
+      "pain": "Most AI tax answers miss assumptions, ignore key facts, or sound more certain than they should.",
+      "benefit1": "Cross-check multiple AI models instantly",
+      "benefit2": "Surface disagreements and missing facts",
+      "benefit3": "Generate conservative, audit-ready drafts",
+      "authority": "Built by an international tax executive with 20+ years experience.",
+      "login": "Log in",
+      "demoCaption": "See how professionals validate AI answers in seconds"
     }
   },
   "crosscheck": {

@@ -18,7 +18,14 @@
       "disclaimer": "Los resultados son borradores para análisis preliminar — no constituyen asesoría legal ni fiscal.",
       "videoFallback": "Tu navegador no admite la etiqueta de video.",
       "watchGuide": "Ver guía",
-      "watchGuideTitle": "Abrir guía del producto TaxAiPro"
+      "watchGuideTitle": "Abrir guía del producto TaxAiPro",
+      "pain": "La mayoría de las respuestas de IA omiten supuestos, ignoran hechos clave o parecen más seguras de lo que deberían.",
+      "benefit1": "Comparar múltiples modelos de IA al instante",
+      "benefit2": "Detectar discrepancias y hechos faltantes",
+      "benefit3": "Generar borradores conservadores listos para revisión",
+      "authority": "Desarrollado por un ejecutivo fiscal internacional con más de 20 años de experiencia.",
+      "login": "Iniciar sesión",
+      "demoCaption": "Mira cómo los profesionales validan respuestas de IA en segundos"
     }
   },
   "crosscheck": {

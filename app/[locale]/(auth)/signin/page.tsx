@@ -7,13 +7,71 @@ import { useTranslations } from "next-intl";
 import { firebaseClientConfigured } from "@/src/lib/firebase/client";
 import LanguageToggle from "../../components/LanguageToggle";
 
+type Locale = "en" | "es" | "pt";
+
+const COPY: Record<
+  Locale,
+  {
+    pain: string;
+    benefit1: string;
+    benefit2: string;
+    benefit3: string;
+    authority: string;
+    cta: string;
+    login: string;
+    watchDemo: string;
+    demoCaption: string;
+  }
+> = {
+  en: {
+    pain: "Most AI tax answers miss assumptions, ignore key facts, or sound more certain than they should.",
+    benefit1: "Cross-check multiple AI models instantly",
+    benefit2: "Surface disagreements and missing facts",
+    benefit3: "Generate conservative, audit-ready drafts",
+    authority: "Built by an international tax executive with 20+ years experience.",
+    cta: "Start free analysis",
+    login: "Log in",
+    watchDemo: "Watch demo",
+    demoCaption: "See how professionals validate AI answers in seconds",
+  },
+  es: {
+    pain: "Muchas respuestas fiscales de IA omiten supuestos, ignoran hechos clave o suenan más seguras de lo que deberían.",
+    benefit1: "Compara múltiples modelos de IA al instante",
+    benefit2: "Detecta diferencias y hechos faltantes",
+    benefit3: "Genera borradores conservadores y listos para revisión",
+    authority: "Desarrollado por un ejecutivo fiscal internacional con más de 20 años de experiencia.",
+    cta: "Comenzar análisis gratis",
+    login: "Iniciar sesión",
+    watchDemo: "Ver demo",
+    demoCaption: "Mira cómo los profesionales validan respuestas de IA en segundos",
+  },
+  pt: {
+    pain: "Muitas respostas tributárias de IA ignoram premissas, deixam de lado fatos importantes ou parecem mais certas do que deveriam.",
+    benefit1: "Compare vários modelos de IA instantaneamente",
+    benefit2: "Identifique divergências e fatos faltantes",
+    benefit3: "Gere rascunhos conservadores e prontos para revisão",
+    authority: "Desenvolvido por um executivo tributário internacional com mais de 20 anos de experiência.",
+    cta: "Começar análise grátis",
+    login: "Entrar",
+    watchDemo: "Ver demo",
+    demoCaption: "Veja como profissionais validam respostas de IA em segundos",
+  },
+};
+
 export default function SignInPage() {
   const router = useRouter();
   const params = useParams<{ locale?: string }>();
-  const locale = typeof params?.locale === "string" ? params.locale : "en";
+  const locale =
+    typeof params?.locale === "string" &&
+    ["en", "es", "pt"].includes(params.locale)
+      ? (params.locale as Locale)
+      : "en";
+
   const t = useTranslations("auth.signin");
   const configured = useMemo(() => firebaseClientConfigured(), []);
   const [demoOpen, setDemoOpen] = useState(false);
+
+  const copy = COPY[locale];
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -33,7 +91,7 @@ export default function SignInPage() {
 
   return (
     <div
-      className="min-h-screen text-white relative overflow-hidden"
+      className="relative min-h-screen overflow-hidden text-white"
       style={{
         backgroundImage: `url("/landing-bg.png")`,
         backgroundSize: "cover",
@@ -42,13 +100,11 @@ export default function SignInPage() {
         backgroundAttachment: "fixed",
       }}
     >
-      {/* ✅ DARKER OVERLAY */}
       <div className="absolute inset-0 bg-black/40" />
 
-      {/* DEMO MODAL */}
       {demoOpen && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm"
           onClick={() => setDemoOpen(false)}
         >
           <div
@@ -70,9 +126,8 @@ export default function SignInPage() {
         </div>
       )}
 
-      {/* HEADER */}
       <header className="relative px-6 pt-6">
-        <div className="flex items-start justify-between">
+        <div className="flex items-start justify-between gap-4">
           <div className="relative h-16 w-56">
             <Image
               src="/taxaipro-logo.png"
@@ -104,92 +159,77 @@ export default function SignInPage() {
         </div>
       </header>
 
-      {/* MAIN */}
       <main className="relative mx-auto max-w-6xl px-6 pt-16">
-        <div className="grid lg:grid-cols-2 gap-10 items-center">
-
-          {/* LEFT */}
-          <div className="rounded-3xl bg-black/50 p-8 backdrop-blur-md border border-white/10">
-
-            {/* HEADLINE */}
-            <h1 className="text-4xl md:text-5xl font-semibold leading-tight">
-              Multi-model tax analysis
-              <span className="block text-white/60">
-                built to reduce uncertainty.
-              </span>
+        <div className="grid items-stretch gap-10 lg:grid-cols-2">
+          <div className="rounded-3xl border border-white/10 bg-black/50 p-8 backdrop-blur-md">
+            <h1 className="text-4xl font-semibold leading-tight md:text-5xl">
+              {t("headline")}
+              <span className="block text-white/60">{t("subheadline")}</span>
             </h1>
 
-            {/* PAIN */}
-            <p className="mt-4 text-red-300 text-sm">
-              Most AI tax answers miss assumptions, ignore key facts, or sound more certain than they should.
+            <p className="mt-4 text-sm text-red-300">{copy.pain}</p>
+
+            <p className="mt-5 text-sm leading-relaxed text-white/80">
+              {t("bodyPrefix")}{" "}
+              <span className="font-semibold text-white">{t("bodyEmphasis")}</span>{" "}
+              {t("bodySuffix")}
             </p>
 
-            {/* DESCRIPTION */}
-            <p className="mt-5 text-white/80 text-sm leading-relaxed">
-              TaxAiPro runs multiple AI models in parallel, compares where they agree and where they differ, and produces a more reliable and conservative answer.
-            </p>
-
-            {/* BENEFITS */}
-            <ul className="mt-5 space-y-2 text-white/75 text-sm">
-              <li>• Cross-check multiple AI models instantly</li>
-              <li>• Surface disagreements and missing facts</li>
-              <li>• Generate conservative, audit-ready drafts</li>
+            <ul className="mt-5 space-y-2 text-sm text-white/75">
+              <li>• {copy.benefit1}</li>
+              <li>• {copy.benefit2}</li>
+              <li>• {copy.benefit3}</li>
             </ul>
 
-            {/* AUTHORITY */}
-            <div className="mt-5 text-sm text-white/70">
-              Built by an international tax executive with 20+ years experience.
-            </div>
+            <div className="mt-5 text-sm text-white/70">{copy.authority}</div>
 
-            {/* CTA BLOCK */}
-            <div className="mt-6 flex flex-wrap gap-3 items-center">
+            <div className="mt-6 flex flex-wrap items-center gap-3">
               <button
                 onClick={() => router.push(`/${locale}/signup`)}
-                className="bg-white text-black px-5 py-2 rounded-xl font-medium hover:bg-white/90 disabled:opacity-50"
+                className="rounded-xl bg-white px-5 py-2 font-medium text-black hover:bg-white/90 disabled:opacity-50"
                 disabled={!configured}
                 title={!configured ? t("firebaseMissing") : ""}
               >
-                Start free analysis
+                {copy.cta}
               </button>
 
               <button
                 onClick={() => setDemoOpen(true)}
-                className="border border-white/20 px-5 py-2 rounded-xl text-white hover:bg-white/10"
+                className="rounded-xl border border-white/20 px-5 py-2 text-white hover:bg-white/10"
+                title={t("watchGuideTitle")}
               >
-                Watch demo
+                {copy.watchDemo}
               </button>
 
-              {/* ✅ LOGIN BUTTON RESTORED */}
               <button
                 onClick={() => router.push(`/${locale}/signup?mode=login#login`)}
-                className="border border-white/20 px-5 py-2 rounded-xl text-white hover:bg-white/10 disabled:opacity-50"
+                className="rounded-xl border border-white/20 px-5 py-2 text-white hover:bg-white/10 disabled:opacity-50"
                 disabled={!configured}
                 title={!configured ? t("firebaseMissing") : ""}
               >
-                Log in
+                {copy.login}
               </button>
             </div>
 
-            {/* DISCLAIMER */}
-            <div className="mt-4 text-xs text-white/60">
-              {t("disclaimer")}
-            </div>
+            <div className="mt-4 text-xs text-white/60">{t("disclaimer")}</div>
           </div>
 
-          {/* RIGHT */}
-          <div className="text-center">
-            <p className="text-sm text-white/60 mb-2">
-              See how professionals validate AI answers in seconds
+          <div className="flex h-full flex-col rounded-3xl border border-white/10 bg-black/50 p-8 backdrop-blur-md">
+            <p className="mb-4 text-center text-sm text-white/60">
+              {copy.demoCaption}
             </p>
 
-            <video
-              className="rounded-2xl border border-white/10"
-              controls
-            >
-              <source src="/demo-60s.mp4" type="video/mp4" />
-            </video>
+            <div className="flex-1 overflow-hidden rounded-2xl border border-white/10 bg-black/20">
+              <video
+                className="h-full w-full object-cover"
+                controls
+                playsInline
+              >
+                <source src="/demo-60s.mp4" type="video/mp4" />
+                {t("videoFallback")}
+              </video>
+            </div>
           </div>
-
         </div>
       </main>
     </div>
