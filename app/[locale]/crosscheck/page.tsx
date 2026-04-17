@@ -13,10 +13,12 @@ import {
   BookOpenText,
   Bot,
   Building2,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Clock3,
+  Copy,
   CornerDownRight,
   CreditCard,
   FileSearch,
@@ -62,22 +64,61 @@ type CrosscheckResponse = {
   error?: string;
 };
 
+type AnalysisTurn = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  createdAt?: number;
+};
+
+type SavedDocument = {
+  id: string;
+  name: string;
+  size: number;
+  mimeType: string;
+  status?: "uploading" | "processing" | "ready" | "error";
+  extractedText?: string;
+  summary?: string;
+  error?: string;
+};
+
 type SavedAnalysis = {
   id: string;
+  runId?: string;
   title: string;
   question: string;
   answer?: string;
   confidence?: "low" | "medium" | "high";
   createdAt: number;
-};
-
-type AnalysisTurn = {
-  id: string;
-  role: "user" | "assistant";
-  text: string;
+  updatedAt?: number;
+  caveats?: string[];
+  followups?: string[];
+  disagreements?: string[];
+  thread?: AnalysisTurn[];
+  documents?: SavedDocument[];
 };
 
 type ProviderOutput = NonNullable<CrosscheckResponse["providers"]>[number];
+
+type PersistedHistoryResponse = {
+  ok: boolean;
+  tier?: "0" | "1" | "2";
+  runs?: Array<{
+    id: string;
+    title: string;
+    question: string;
+    answer?: string;
+    confidence?: "low" | "medium" | "high";
+    createdAt: number;
+    updatedAt?: number;
+    caveats?: string[];
+    followups?: string[];
+    disagreements?: string[];
+    thread?: AnalysisTurn[];
+    documents?: SavedDocument[];
+  }>;
+  error?: string;
+};
 
 const LS_HISTORY_KEY = "taxaipro_v2_history";
 const MAX_DOCS = 3;
@@ -106,6 +147,47 @@ function smartTitle(text: string) {
   const cleaned = text.trim().replace(/\s+/g, " ");
   if (!cleaned) return "Untitled analysis";
   return cleaned.length > 52 ? `${cleaned.slice(0, 52)}…` : cleaned;
+}
+
+function normalizeSavedAnalyses(items: SavedAnalysis[]) {
+  return [...items]
+    .filter((item) => item && typeof item === "object" && item.id && item.question)
+    .sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt))
+    .slice(0, 20);
+}
+
+function CopyButton({
+  text,
+  label,
+  copiedLabel,
+  copyKey,
+  copiedKey,
+  onCopy,
+  className,
+}: {
+  text: string;
+  label: string;
+  copiedLabel: string;
+  copyKey: string;
+  copiedKey: string | null;
+  onCopy: (key: string, value: string) => void;
+  className?: string;
+}) {
+  const copied = copiedKey === copyKey;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onCopy(copyKey, text)}
+      className={cn(
+        "inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/78 transition hover:bg-white/[0.08] hover:text-white",
+        className
+      )}
+    >
+      {copied ? <Check size={14} /> : <Copy size={14} />}
+      <span>{copied ? copiedLabel : label}</span>
+    </button>
+  );
 }
 
 function ConfidencePill({
@@ -240,6 +322,8 @@ function HistoryItem({
   draftLabel: string;
   locale: string;
 }) {
+  const stamp = item.updatedAt || item.createdAt;
+
   return (
     <button
       type="button"
@@ -257,7 +341,7 @@ function HistoryItem({
           {item.confidence ? `${item.confidence} ${confidenceLabel}` : draftLabel}
         </div>
         <div className="shrink-0 text-[11px] text-white/30">
-          {formatTimeAgo(item.createdAt, locale)}
+          {formatTimeAgo(stamp, locale)}
         </div>
       </div>
     </button>
@@ -289,12 +373,24 @@ function DetailSection({
   subtitle,
   items,
   empty,
+  copyLabel,
+  copiedLabel,
+  copyKey,
+  copiedKey,
+  onCopy,
 }: {
   title: string;
   subtitle?: string;
   items?: string[];
   empty: string;
+  copyLabel: string;
+  copiedLabel: string;
+  copyKey: string;
+  copiedKey: string | null;
+  onCopy: (key: string, value: string) => void;
 }) {
+  const copyText = items?.length ? items.map((item) => `• ${item}`).join("\n") : "";
+
   return (
     <details className="group rounded-2xl border border-white/10 bg-[#111827]">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3.5 marker:content-none">
@@ -309,17 +405,29 @@ function DetailSection({
 
       <div className="border-t border-white/10 px-4 py-4">
         {items && items.length ? (
-          <ul className="space-y-2">
-            {items.map((item, i) => (
-              <li
-                key={`${title}-${i}`}
-                className="flex gap-2 text-sm leading-6 text-white/72"
-              >
-                <span className="mt-[10px] h-1.5 w-1.5 shrink-0 rounded-full bg-white/35" />
-                <span>{item}</span>
-              </li>
-            ))}
-          </ul>
+          <>
+            <div className="mb-3 flex justify-end">
+              <CopyButton
+                text={copyText}
+                label={copyLabel}
+                copiedLabel={copiedLabel}
+                copyKey={copyKey}
+                copiedKey={copiedKey}
+                onCopy={onCopy}
+              />
+            </div>
+            <ul className="space-y-2">
+              {items.map((item, i) => (
+                <li
+                  key={`${title}-${i}`}
+                  className="flex gap-2 text-sm leading-6 text-white/72"
+                >
+                  <span className="mt-[10px] h-1.5 w-1.5 shrink-0 rounded-full bg-white/35" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </>
         ) : (
           <div className="text-sm leading-6 text-white/50">{empty}</div>
         )}
@@ -331,9 +439,19 @@ function DetailSection({
 function ProviderCard({
   provider,
   emptyText,
+  copyLabel,
+  copiedLabel,
+  copyKey,
+  copiedKey,
+  onCopy,
 }: {
   provider: ProviderOutput;
   emptyText: string;
+  copyLabel: string;
+  copiedLabel: string;
+  copyKey: string;
+  copiedKey: string | null;
+  onCopy: (key: string, value: string) => void;
 }) {
   const statusTone =
     provider.status === "ok"
@@ -341,6 +459,10 @@ function ProviderCard({
       : provider.status === "timeout"
       ? "border-amber-400/20 bg-amber-400/10 text-amber-200"
       : "border-red-400/20 bg-red-400/10 text-red-200";
+
+  const providerBody = provider.error
+    ? provider.error
+    : provider.text || "";
 
   return (
     <div className="rounded-2xl border border-white/10 bg-[#111827] p-4">
@@ -351,9 +473,23 @@ function ProviderCard({
           </div>
           <div className="mt-1 text-xs text-white/40">{provider.ms} ms</div>
         </div>
-        <span className={cn("rounded-full border px-2.5 py-1 text-xs", statusTone)}>
-          {provider.status}
-        </span>
+
+        <div className="flex items-center gap-2">
+          {providerBody ? (
+            <CopyButton
+              text={providerBody}
+              label={copyLabel}
+              copiedLabel={copiedLabel}
+              copyKey={copyKey}
+              copiedKey={copiedKey}
+              onCopy={onCopy}
+              className="px-2.5 py-1.5 text-xs"
+            />
+          ) : null}
+          <span className={cn("rounded-full border px-2.5 py-1 text-xs", statusTone)}>
+            {provider.status}
+          </span>
+        </div>
       </div>
 
       {provider.error ? (
@@ -616,23 +752,96 @@ export default function CrosscheckV2Page() {
   const [conversationTurns, setConversationTurns] = useState<AnalysisTurn[]>([]);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [currentRunId, setCurrentRunId] = useState<string | null>(null);
+  const [historyBootstrapped, setHistoryBootstrapped] = useState(false);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LS_HISTORY_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as SavedAnalysis[];
-      if (Array.isArray(parsed)) {
-        setHistory(parsed);
+    let cancelled = false;
+
+    async function loadHistory() {
+      let localItems: SavedAnalysis[] = [];
+
+      try {
+        const raw = localStorage.getItem(LS_HISTORY_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as SavedAnalysis[];
+          if (Array.isArray(parsed)) {
+            localItems = normalizeSavedAnalyses(parsed);
+          }
+        }
+      } catch {}
+
+      if (!cancelled && localItems.length) {
+        setHistory(localItems);
       }
-    } catch {}
+
+      try {
+        const res = await fetch("/api/runs/history?limit=20", {
+          method: "GET",
+          cache: "no-store",
+        });
+
+        const data = (await res.json()) as PersistedHistoryResponse;
+
+        if (!cancelled && res.ok && data?.ok && Array.isArray(data.runs)) {
+          const backendRuns: SavedAnalysis[] = normalizeSavedAnalyses(
+            data.runs.map((run) => ({
+              id: run.id,
+              runId: run.id,
+              title: run.title || smartTitle(run.question || ""),
+              question: run.question || "",
+              answer: run.answer || "",
+              confidence: run.confidence,
+              createdAt: run.createdAt || Date.now(),
+              updatedAt: run.updatedAt,
+              caveats: run.caveats || [],
+              followups: run.followups || [],
+              disagreements: run.disagreements || [],
+              thread: run.thread || [],
+              documents: run.documents || [],
+            }))
+          );
+
+          if (backendRuns.length) {
+            setHistory(backendRuns);
+            try {
+              localStorage.setItem(LS_HISTORY_KEY, JSON.stringify(backendRuns));
+            } catch {}
+          } else if (localItems.length) {
+            setHistory(localItems);
+          }
+        }
+      } catch {
+        if (!cancelled && localItems.length) {
+          setHistory(localItems);
+        }
+      } finally {
+        if (!cancelled) {
+          setHistoryBootstrapped(true);
+        }
+      }
+    }
+
+    loadHistory();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
+    if (!historyBootstrapped) return;
     try {
-      localStorage.setItem(LS_HISTORY_KEY, JSON.stringify(history));
+      localStorage.setItem(LS_HISTORY_KEY, JSON.stringify(normalizeSavedAnalyses(history)));
     } catch {}
-  }, [history]);
+  }, [history, historyBootstrapped]);
+
+  useEffect(() => {
+    if (!copiedKey) return;
+    const timer = window.setTimeout(() => setCopiedKey(null), 1800);
+    return () => window.clearTimeout(timer);
+  }, [copiedKey]);
 
   const canSubmit = useMemo(() => {
     return question.trim().length > 0 && !loading;
@@ -664,6 +873,7 @@ export default function CrosscheckV2Page() {
     setFollowupDraft("");
     setConversationTurns([]);
     setSidebarOpen(false);
+    setCurrentRunId(null);
   }
 
   function handleFilesSelected(event: React.ChangeEvent<HTMLInputElement>) {
@@ -698,6 +908,17 @@ export default function CrosscheckV2Page() {
     setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
+  async function handleCopy(copyKey: string, value: string) {
+    if (!value?.trim()) return;
+
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedKey(copyKey);
+    } catch {
+      setCopiedKey(null);
+    }
+  }
+
   function buildConversationPrompt(
     originalQuestion: string,
     turns: AnalysisTurn[],
@@ -721,13 +942,71 @@ export default function CrosscheckV2Page() {
       .join("\n\n");
   }
 
+  async function persistRun(args: {
+    runId?: string | null;
+    title: string;
+    question: string;
+    answer: string;
+    confidence?: "low" | "medium" | "high" | "";
+    caveats: string[];
+    followups: string[];
+    disagreements: string[];
+    thread: AnalysisTurn[];
+    documents?: SavedDocument[];
+  }) {
+    try {
+      const res = await fetch("/api/runs/autosave", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          runId: args.runId || undefined,
+          title: args.title,
+          question: args.question,
+          answer: args.answer,
+          confidence: args.confidence || undefined,
+          caveats: args.caveats,
+          followups: args.followups,
+          disagreements: args.disagreements,
+          facts: details.trim() || undefined,
+          thread: args.thread.map((turn) => ({
+            id: turn.id,
+            role: turn.role,
+            text: turn.text,
+            createdAt: turn.createdAt || Date.now(),
+          })),
+          documents: args.documents || [],
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (res.ok && data?.ok && data?.runId) {
+        setCurrentRunId(data.runId as string);
+
+        setHistory((prev) =>
+          normalizeSavedAnalyses(
+            prev.map((item) =>
+              item.id === (args.runId || currentRunId || "")
+                ? { ...item, id: data.runId as string, runId: data.runId as string }
+                : item
+            )
+          )
+        );
+
+        return data.runId as string;
+      }
+    } catch {}
+
+    return args.runId || currentRunId || null;
+  }
+
   async function executeAnalysis(args: {
     payloadQuestion: string;
     payloadDetails?: string;
-    historyTitle: string;
-    onSuccess?: (response: CrosscheckResponse) => void;
   }) {
-    if (!args.payloadQuestion.trim() || loading) return;
+    if (!args.payloadQuestion.trim() || loading) return null;
 
     setLoading(true);
     setRequestError("");
@@ -787,25 +1066,91 @@ export default function CrosscheckV2Page() {
       setAttemptedCount(data?.meta?.attempted?.length || 0);
       setSuccessCount(data?.meta?.succeeded?.length || 0);
 
-      const item: SavedAnalysis = {
-        id: crypto.randomUUID(),
-        title: smartTitle(args.historyTitle),
-        question: args.historyTitle,
-        answer: nextAnswer,
-        confidence: data?.consensus?.confidence,
-        createdAt: Date.now(),
+      return {
+        data,
+        nextAnswer,
       };
-
-      setHistory((prev) => [item, ...prev].slice(0, 20));
-      setSelectedHistoryId(item.id);
-
-      args.onSuccess?.(data);
     } catch (err) {
       setRequestError(
         err instanceof Error ? err.message : tv2("analysisErrorGeneric")
       );
+      return null;
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function saveAnalysisRecord(args: {
+    title: string;
+    questionText: string;
+    answerText: string;
+    confidenceValue?: "low" | "medium" | "high" | "";
+    caveatsValue: string[];
+    followupsValue: string[];
+    disagreementsValue: string[];
+    threadValue: AnalysisTurn[];
+  }) {
+    const now = Date.now();
+
+    const localId = currentRunId || crypto.randomUUID();
+
+    const item: SavedAnalysis = {
+      id: localId,
+      runId: currentRunId || undefined,
+      title: smartTitle(args.title),
+      question: args.questionText,
+      answer: args.answerText,
+      confidence: args.confidenceValue || undefined,
+      createdAt: now,
+      updatedAt: now,
+      caveats: args.caveatsValue,
+      followups: args.followupsValue,
+      disagreements: args.disagreementsValue,
+      thread: args.threadValue,
+      documents: attachedFiles.map((file, index) => ({
+        id: `${file.name}-${index}-${file.size}`,
+        name: file.name,
+        size: file.size,
+        mimeType: file.type || "application/octet-stream",
+        status: "ready",
+      })),
+    };
+
+    setHistory((prev) => {
+      const withoutSame = prev.filter((existing) => existing.id !== localId);
+      return normalizeSavedAnalyses([item, ...withoutSame]);
+    });
+    setSelectedHistoryId(localId);
+
+    const persistedRunId = await persistRun({
+      runId: currentRunId,
+      title: item.title,
+      question: item.question,
+      answer: item.answer || "",
+      confidence: item.confidence,
+      caveats: item.caveats || [],
+      followups: item.followups || [],
+      disagreements: item.disagreements || [],
+      thread: item.thread || [],
+      documents: item.documents || [],
+    });
+
+    if (persistedRunId && persistedRunId !== localId) {
+      setHistory((prev) =>
+        normalizeSavedAnalyses(
+          prev.map((existing) =>
+            existing.id === localId
+              ? {
+                  ...existing,
+                  id: persistedRunId,
+                  runId: persistedRunId,
+                }
+              : existing
+          )
+        )
+      );
+      setSelectedHistoryId(persistedRunId);
+      setCurrentRunId(persistedRunId);
     }
   }
 
@@ -815,18 +1160,41 @@ export default function CrosscheckV2Page() {
 
     setBaseQuestion(trimmed);
     setConversationTurns([]);
+    setCurrentRunId(null);
 
-    await executeAnalysis({
+    const result = await executeAnalysis({
       payloadQuestion: trimmed,
       payloadDetails: details,
-      historyTitle: trimmed,
-      onSuccess: (data) => {
-        const nextAnswer = data?.consensus?.answer || tv2("noAnswerReturned");
-        setConversationTurns([
-          { id: crypto.randomUUID(), role: "user", text: trimmed },
-          { id: crypto.randomUUID(), role: "assistant", text: nextAnswer },
-        ]);
+    });
+
+    if (!result) return;
+
+    const nextThread: AnalysisTurn[] = [
+      {
+        id: crypto.randomUUID(),
+        role: "user",
+        text: trimmed,
+        createdAt: Date.now(),
       },
+      {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        text: result.nextAnswer,
+        createdAt: Date.now(),
+      },
+    ];
+
+    setConversationTurns(nextThread);
+
+    await saveAnalysisRecord({
+      title: trimmed,
+      questionText: trimmed,
+      answerText: result.nextAnswer,
+      confidenceValue: result.data?.consensus?.confidence || "",
+      caveatsValue: result.data?.consensus?.caveats || [],
+      followupsValue: result.data?.consensus?.followups || [],
+      disagreementsValue: result.data?.consensus?.disagreements || [],
+      threadValue: nextThread,
     });
   }
 
@@ -841,22 +1209,40 @@ export default function CrosscheckV2Page() {
       refineInstruction
     );
 
-    await executeAnalysis({
+    const result = await executeAnalysis({
       payloadQuestion: refinePrompt,
       payloadDetails: details,
-      historyTitle: `${baseQuestion} — ${tv2("refineAnswer")}`,
-      onSuccess: (data) => {
-        const nextAnswer = data?.consensus?.answer || tv2("noAnswerReturned");
-        setConversationTurns((prev) => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            role: "user",
-            text: refineInstruction,
-          },
-          { id: crypto.randomUUID(), role: "assistant", text: nextAnswer },
-        ]);
+    });
+
+    if (!result) return;
+
+    const nextThread: AnalysisTurn[] = [
+      ...conversationTurns,
+      {
+        id: crypto.randomUUID(),
+        role: "user",
+        text: refineInstruction,
+        createdAt: Date.now(),
       },
+      {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        text: result.nextAnswer,
+        createdAt: Date.now(),
+      },
+    ];
+
+    setConversationTurns(nextThread);
+
+    await saveAnalysisRecord({
+      title: `${baseQuestion} — ${tv2("refineAnswer")}`,
+      questionText: baseQuestion,
+      answerText: result.nextAnswer,
+      confidenceValue: result.data?.consensus?.confidence || "",
+      caveatsValue: result.data?.consensus?.caveats || [],
+      followupsValue: result.data?.consensus?.followups || [],
+      disagreementsValue: result.data?.consensus?.disagreements || [],
+      threadValue: nextThread,
     });
   }
 
@@ -887,24 +1273,47 @@ export default function CrosscheckV2Page() {
       nextFollowup
     );
 
-    await executeAnalysis({
+    const result = await executeAnalysis({
       payloadQuestion,
       payloadDetails: details,
-      historyTitle: `${baseQuestion} — ${smartTitle(nextFollowup)}`,
-      onSuccess: (data) => {
-        const nextAnswer = data?.consensus?.answer || tv2("noAnswerReturned");
-        setConversationTurns((prev) => [
-          ...prev,
-          { id: crypto.randomUUID(), role: "user", text: nextFollowup },
-          { id: crypto.randomUUID(), role: "assistant", text: nextAnswer },
-        ]);
-        setFollowupDraft("");
+    });
+
+    if (!result) return;
+
+    const nextThread: AnalysisTurn[] = [
+      ...conversationTurns,
+      {
+        id: crypto.randomUUID(),
+        role: "user",
+        text: nextFollowup,
+        createdAt: Date.now(),
       },
+      {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        text: result.nextAnswer,
+        createdAt: Date.now(),
+      },
+    ];
+
+    setConversationTurns(nextThread);
+    setFollowupDraft("");
+
+    await saveAnalysisRecord({
+      title: `${baseQuestion} — ${smartTitle(nextFollowup)}`,
+      questionText: baseQuestion,
+      answerText: result.nextAnswer,
+      confidenceValue: result.data?.consensus?.confidence || "",
+      caveatsValue: result.data?.consensus?.caveats || [],
+      followupsValue: result.data?.consensus?.followups || [],
+      disagreementsValue: result.data?.consensus?.disagreements || [],
+      threadValue: nextThread,
     });
   }
 
   function loadHistoryItem(item: SavedAnalysis) {
     setSelectedHistoryId(item.id);
+    setCurrentRunId(item.runId || item.id);
     setQuestion(item.question);
     setDetails("");
     setShowDetails(false);
@@ -912,26 +1321,37 @@ export default function CrosscheckV2Page() {
     setRequestError("");
     setAnswer(item.answer || "");
     setConfidence(item.confidence || "");
-    setCaveats([]);
-    setFollowups([]);
-    setDisagreements([]);
+    setCaveats(item.caveats || []);
+    setFollowups(item.followups || []);
+    setDisagreements(item.disagreements || []);
     setProviders([]);
     setRuntimeMs(null);
     setAttemptedCount(0);
     setSuccessCount(0);
     setBaseQuestion(item.question);
     setFollowupDraft("");
-    setConversationTurns([
-      { id: crypto.randomUUID(), role: "user", text: item.question },
-      { id: crypto.randomUUID(), role: "assistant", text: item.answer || "" },
-    ]);
+    setConversationTurns(
+      item.thread?.length
+        ? item.thread
+        : [
+            {
+              id: crypto.randomUUID(),
+              role: "user",
+              text: item.question,
+              createdAt: item.createdAt,
+            },
+            {
+              id: crypto.randomUUID(),
+              role: "assistant",
+              text: item.answer || "",
+              createdAt: item.updatedAt || item.createdAt,
+            },
+          ]
+    );
     setSidebarOpen(false);
   }
 
   function handleLogout() {
-    try {
-      localStorage.removeItem(LS_HISTORY_KEY);
-    } catch {}
     window.location.assign(`/${locale}`);
   }
 
@@ -1195,9 +1615,22 @@ export default function CrosscheckV2Page() {
                             </h2>
                           </div>
 
-                          {confidence ? (
-                            <ConfidencePill value={confidence} label={confidenceLabel} />
-                          ) : null}
+                          <div className="flex items-center gap-2">
+                            {!loading && answer.trim() ? (
+                              <CopyButton
+                                text={answer}
+                                label="Copy"
+                                copiedLabel="Copied"
+                                copyKey="final-answer"
+                                copiedKey={copiedKey}
+                                onCopy={handleCopy}
+                              />
+                            ) : null}
+
+                            {confidence ? (
+                              <ConfidencePill value={confidence} label={confidenceLabel} />
+                            ) : null}
+                          </div>
                         </div>
 
                         {loading ? (
@@ -1222,8 +1655,28 @@ export default function CrosscheckV2Page() {
 
                             {conversationTurns.length > 2 ? (
                               <div className="mb-4 rounded-2xl border border-white/10 bg-[#0F172A] px-4 py-3">
-                                <div className="mb-3 text-xs font-medium uppercase tracking-[0.16em] text-white/40">
-                                  {tv2("conversation")}
+                                <div className="mb-3 flex items-center justify-between gap-3">
+                                  <div className="text-xs font-medium uppercase tracking-[0.16em] text-white/40">
+                                    {tv2("conversation")}
+                                  </div>
+                                  <CopyButton
+                                    text={conversationTurns
+                                      .slice(2)
+                                      .map((turn) =>
+                                        `${
+                                          turn.role === "user"
+                                            ? tv2("followUpLabel")
+                                            : tv2("answerLabel")
+                                        }:\n${turn.text}`
+                                      )
+                                      .join("\n\n")}
+                                    label="Copy"
+                                    copiedLabel="Copied"
+                                    copyKey="conversation-thread"
+                                    copiedKey={copiedKey}
+                                    onCopy={handleCopy}
+                                    className="px-2.5 py-1.5 text-xs"
+                                  />
                                 </div>
                                 <div className="space-y-3">
                                   {conversationTurns.slice(2).map((turn) => (
@@ -1339,6 +1792,11 @@ export default function CrosscheckV2Page() {
                         subtitle={tv2("keyCaveatsSubtitle")}
                         items={caveats}
                         empty={tv2("noCaveats")}
+                        copyLabel="Copy"
+                        copiedLabel="Copied"
+                        copyKey="caveats"
+                        copiedKey={copiedKey}
+                        onCopy={handleCopy}
                       />
 
                       <div className="rounded-2xl border border-white/10 bg-[#111827]">
@@ -1353,22 +1811,35 @@ export default function CrosscheckV2Page() {
 
                         <div className="px-4 py-4">
                           {followups.length ? (
-                            <div className="space-y-2">
-                              {followups.map((followup, i) => (
-                                <button
-                                  key={`${followup}-${i}`}
-                                  type="button"
-                                  onClick={() => handleUseFollowup(followup)}
-                                  className="flex w-full items-start justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-left text-sm text-white/72 transition hover:bg-white/[0.08] hover:text-white"
-                                >
-                                  <span>{followup}</span>
-                                  <CornerDownRight
-                                    size={14}
-                                    className="mt-0.5 shrink-0 text-white/35"
-                                  />
-                                </button>
-                              ))}
-                            </div>
+                            <>
+                              <div className="mb-3 flex justify-end">
+                                <CopyButton
+                                  text={followups.map((f) => `• ${f}`).join("\n")}
+                                  label="Copy"
+                                  copiedLabel="Copied"
+                                  copyKey="followups"
+                                  copiedKey={copiedKey}
+                                  onCopy={handleCopy}
+                                />
+                              </div>
+
+                              <div className="space-y-2">
+                                {followups.map((followup, i) => (
+                                  <button
+                                    key={`${followup}-${i}`}
+                                    type="button"
+                                    onClick={() => handleUseFollowup(followup)}
+                                    className="flex w-full items-start justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-left text-sm text-white/72 transition hover:bg-white/[0.08] hover:text-white"
+                                  >
+                                    <span>{followup}</span>
+                                    <CornerDownRight
+                                      size={14}
+                                      className="mt-0.5 shrink-0 text-white/35"
+                                    />
+                                  </button>
+                                ))}
+                              </div>
+                            </>
                           ) : (
                             <div className="text-sm leading-6 text-white/50">
                               {tv2("noFollowups")}
@@ -1382,6 +1853,11 @@ export default function CrosscheckV2Page() {
                         subtitle={tv2("modelDisagreementsSubtitle")}
                         items={disagreements}
                         empty={tv2("noDisagreements")}
+                        copyLabel="Copy"
+                        copiedLabel="Copied"
+                        copyKey="disagreements"
+                        copiedKey={copiedKey}
+                        onCopy={handleCopy}
                       />
 
                       <div
@@ -1424,6 +1900,11 @@ export default function CrosscheckV2Page() {
                                   key={`${provider.provider}-${provider.model}-${index}`}
                                   provider={provider}
                                   emptyText={tv2("noProviderOutputReturned")}
+                                  copyLabel="Copy"
+                                  copiedLabel="Copied"
+                                  copyKey={`provider-${provider.provider}-${provider.model}-${index}`}
+                                  copiedKey={copiedKey}
+                                  onCopy={handleCopy}
                                 />
                               ))}
                             </div>
