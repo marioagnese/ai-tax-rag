@@ -772,10 +772,6 @@ export default function CrosscheckV2Page() {
         }
       } catch {}
 
-      if (!cancelled && localItems.length) {
-        setHistory(localItems);
-      }
-
       try {
         const res = await fetch("/api/runs/history?limit=20", {
           method: "GET",
@@ -803,14 +799,13 @@ export default function CrosscheckV2Page() {
             }))
           );
 
-          if (backendRuns.length) {
-            setHistory(backendRuns);
-            try {
-              localStorage.setItem(LS_HISTORY_KEY, JSON.stringify(backendRuns));
-            } catch {}
-          } else if (localItems.length) {
-            setHistory(localItems);
-          }
+          setHistory(backendRuns);
+
+          try {
+            localStorage.setItem(LS_HISTORY_KEY, JSON.stringify(backendRuns));
+          } catch {}
+        } else if (!cancelled && localItems.length) {
+          setHistory(localItems);
         }
       } catch {
         if (!cancelled && localItems.length) {
