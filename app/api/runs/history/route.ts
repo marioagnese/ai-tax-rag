@@ -208,19 +208,6 @@ export async function GET(req: NextRequest) {
     const user = await requireSessionUser();
     const tier = await resolveTierForUserEmail(user.email);
 
-    if (tier === "0") {
-      return NextResponse.json(
-        {
-          ok: true,
-          tier,
-          runs: [],
-          source: "backend",
-          message: "Permanent history is not available on the free tier.",
-        },
-        { status: 200 }
-      );
-    }
-
     const { searchParams } = new URL(req.url);
     const limitRaw = Number(searchParams.get("limit"));
     const limit =
