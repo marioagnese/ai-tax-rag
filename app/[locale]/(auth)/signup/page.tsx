@@ -9,6 +9,7 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   sendEmailVerification,
+  onAuthStateChanged,
 } from "firebase/auth";
 
 import { getFirestore, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
@@ -106,6 +107,34 @@ export default function SignupPage() {
   const [accepted, setAccepted] = useState(false);
 
   const [corpInvite, setCorpInvite] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!auth) return;
+
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) return;
+
+      try {
+        const res = await fetch("/api/auth/session");
+        const data = await res.json().catch(() => ({}));
+
+        if (!data?.user) {
+          const idToken = await user.getIdToken(true);
+
+          await fetch("/api/auth/login", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ idToken }),
+          });
+        }
+      } catch (err) {
+        console.error("Session sync failed", err);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [auth]);
+
 
   const disable = busy || !configured;
 
