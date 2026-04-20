@@ -2020,10 +2020,7 @@ while (pending.length) {
   );
 
   let combinedDraft: NormalizedMemo | null = null;
-  if (
-    pipelineDecision.mode !== "fast_consensus" &&
-    reasoningArtifacts.length >= 2
-  ) {
+  if (reasoningArtifacts.length >= 2) {
     combinedDraft = await constructCombinedDraftWithOpenAI({
       input,
       artifacts: reasoningArtifacts,
@@ -2037,6 +2034,7 @@ while (pending.length) {
 
   if (pipelineDecision.mode === "fast_consensus") {
     finalMemo =
+      combinedDraft ||
       pickBestArtifact(reasoningArtifacts, reasoningAssessments)?.memo ||
       bestArtifact?.memo ||
       null;

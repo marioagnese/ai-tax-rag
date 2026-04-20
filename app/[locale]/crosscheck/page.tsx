@@ -26,6 +26,7 @@ import {
   Home,
   LogOut,
   Mail,
+  LoaderCircle,
   Paperclip,
   PanelLeft,
   Plus,
@@ -1623,14 +1624,17 @@ export default function CrosscheckV2Page() {
                       </div>
 
                       <div className="space-y-2">
-                        <div className="rounded-xl border border-white/10 bg-[#0F172A] px-3 py-3 text-sm text-white/74">
-                          1. Collecting initial model positions
+                        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-[#0F172A] px-3 py-3 text-sm text-white/74">
+                          {elapsedMs >= 5000 ? <Check size={16} className="text-emerald-300" /> : <LoaderCircle size={16} className="animate-spin text-white/65" />}
+                          <span>Collecting initial model positions</span>
                         </div>
-                        <div className="rounded-xl border border-white/10 bg-[#0F172A] px-3 py-3 text-sm text-white/74">
-                          2. Comparing agreement and disagreement areas
+                        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-[#0F172A] px-3 py-3 text-sm text-white/74">
+                          {elapsedMs >= 10000 ? <Check size={16} className="text-emerald-300" /> : elapsedMs >= 5000 ? <LoaderCircle size={16} className="animate-spin text-white/65" /> : <Clock3 size={16} className="text-white/45" />}
+                          <span>Comparing agreement and disagreement areas</span>
                         </div>
-                        <div className="rounded-xl border border-white/10 bg-[#0F172A] px-3 py-3 text-sm text-white/74">
-                          3. Preparing conservative answer structure
+                        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-[#0F172A] px-3 py-3 text-sm text-white/74">
+                          {elapsedMs >= 15000 ? <Check size={16} className="text-emerald-300" /> : elapsedMs >= 10000 ? <LoaderCircle size={16} className="animate-spin text-white/65" /> : <Clock3 size={16} className="text-white/45" />}
+                          <span>Preparing conservative answer structure</span>
                         </div>
                       </div>
                     </div>
