@@ -2136,6 +2136,8 @@ export async function runCrosscheck(
 
   const runtime_ms = Date.now() - t0;
 
+  console.log("[crosscheck] pipeline", { mode: pipelineDecision.mode, reasons: pipelineDecision.reasons, runtime_ms, attempted: attempted.length, succeeded: succeededCalls.length });
+
   return {
     ok: !!succeededCalls.length,
     meta: {
