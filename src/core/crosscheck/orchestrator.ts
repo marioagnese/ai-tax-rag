@@ -1886,7 +1886,24 @@ export async function runCrosscheck(
     );
   }
 
-  const providers = await Promise.all(tasks);
+  
+const providers: ProviderOutput[] = [];
+const pending = [...tasks];
+
+while (pending.length) {
+  const result = await Promise.race(pending.map(p => p.then(r => ({p, r}))));
+
+  providers.push(result.r);
+
+  // remove resolved promise
+  const idx = pending.indexOf(result.p);
+  if (idx >= 0) pending.splice(idx, 1);
+
+  // EARLY EXIT: once we have 2 successful providers
+  const successCount = providers.filter(p => p.status === "ok").length;
+  if (successCount >= 2) break;
+}
+
 
   const succeededCalls: ProviderCall[] = [];
   const failedCalls: ProviderCall[] = [];
