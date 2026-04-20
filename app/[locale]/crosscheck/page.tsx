@@ -755,6 +755,8 @@ export default function CrosscheckV2Page() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const [historyBootstrapped, setHistoryBootstrapped] = useState(false);
+  const [analysisStartedAt, setAnalysisStartedAt] = useState<number | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -838,6 +840,22 @@ export default function CrosscheckV2Page() {
     return () => window.clearTimeout(timer);
   }, [copiedKey]);
 
+  useEffect(() => {
+    if (!loading || !analysisStartedAt) {
+      setElapsedMs(0);
+      return;
+    }
+
+    setElapsedMs(Date.now() - analysisStartedAt);
+
+    const timer = window.setInterval(() => {
+      setElapsedMs(Date.now() - analysisStartedAt);
+    }, 100);
+
+    return () => window.clearInterval(timer);
+  }, [loading, analysisStartedAt]);
+
+
   const canSubmit = useMemo(() => {
     return question.trim().length > 0 && !loading;
   }, [question, loading]);
@@ -869,6 +887,8 @@ export default function CrosscheckV2Page() {
     setConversationTurns([]);
     setSidebarOpen(false);
     setCurrentRunId(null);
+    setAnalysisStartedAt(null);
+    setElapsedMs(0);
   }
 
   function handleFilesSelected(event: React.ChangeEvent<HTMLInputElement>) {
@@ -1004,6 +1024,8 @@ export default function CrosscheckV2Page() {
     if (!args.payloadQuestion.trim() || loading) return null;
 
     setLoading(true);
+    setAnalysisStartedAt(Date.now());
+    setElapsedMs(0);
     setRequestError("");
     setAnswer("");
     setConfidence("");
@@ -1072,6 +1094,7 @@ export default function CrosscheckV2Page() {
       return null;
     } finally {
       setLoading(false);
+      setAnalysisStartedAt(null);
     }
   }
 
@@ -1582,6 +1605,36 @@ export default function CrosscheckV2Page() {
                       </button>
                     </div>
                   </div>
+
+                  {loading ? (
+                    <div className="mt-5 rounded-2xl border border-white/12 bg-[#111827] p-4 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-medium text-white/88">
+                            TaxAiPro is building a preliminary synthesis
+                          </div>
+                          <div className="mt-1 text-xs text-white/46">
+                            Multi-model review in progress
+                          </div>
+                        </div>
+                        <div className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-white/68">
+                          {(elapsedMs / 1000).toFixed(1)}s
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="rounded-xl border border-white/10 bg-[#0F172A] px-3 py-3 text-sm text-white/74">
+                          1. Collecting initial model positions
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-[#0F172A] px-3 py-3 text-sm text-white/74">
+                          2. Comparing agreement and disagreement areas
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-[#0F172A] px-3 py-3 text-sm text-white/74">
+                          3. Preparing conservative answer structure
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
 
                   {requestError ? (
                     <div className="mt-5 rounded-2xl border border-red-400/20 bg-red-400/10 p-4">

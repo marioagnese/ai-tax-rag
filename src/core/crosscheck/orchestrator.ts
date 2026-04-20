@@ -1799,7 +1799,7 @@ function decidePipelineMode(args: {
     args.round1ConflictMatrix.missing_or_underdeveloped_issues.length;
 
   if (
-    args.selectedRound1.length >= 3 &&
+    args.selectedRound1.length >= 2 &&
     criticalDisputedCount === 0 &&
     totalDisputedCount <= 1 &&
     missingIssueCount <= 1
@@ -2035,7 +2035,14 @@ while (pending.length) {
 
   let finalMemo: NormalizedMemo | null = null;
 
-  if (reasoningArtifacts.length >= 2) {
+  if (pipelineDecision.mode === "fast_consensus") {
+    finalMemo =
+      pickBestArtifact(reasoningArtifacts, reasoningAssessments)?.memo ||
+      bestArtifact?.memo ||
+      null;
+  }
+
+  if (!finalMemo && reasoningArtifacts.length >= 2) {
     if (dualAdjudicatorEnabled()) {
       const [gptFinal, claudeFinal] = await Promise.all([
         adjudicateFinalWithOpenAI({
