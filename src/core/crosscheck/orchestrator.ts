@@ -45,11 +45,15 @@ function defaultOpenRouterModels(): string[] {
     .map((s) => s.trim())
     .filter(Boolean);
 
-  return models.length ? models : ["anthropic/claude-sonnet-4.6","anthropic/claude-3.7-sonnet"];
+  return models.length
+    ? models
+    : ["anthropic/claude-sonnet-4.6", "anthropic/claude-3.7-sonnet"];
 }
 
 function dualAdjudicatorEnabled(): boolean {
-  const raw = (env("CROSSCHECK_DUAL_ADJUDICATOR") || "true").trim().toLowerCase();
+  const raw = (env("CROSSCHECK_DUAL_ADJUDICATOR") || "true")
+    .trim()
+    .toLowerCase();
   return raw !== "false" && raw !== "0" && raw !== "off";
 }
 
@@ -138,7 +142,10 @@ function cleanMemoText(s: string): string {
     .replace(/\bminority view\b:?/gi, "")
     .replace(/\bone model\b/gi, "")
     .replace(/\bsome models\b/gi, "")
-    .replace(/\bconsult (?:local )?counsel\b/gi, "obtain targeted review where needed")
+    .replace(
+      /\bconsult (?:local )?counsel\b/gi,
+      "obtain targeted review where needed"
+    )
     .replace(/\bcontact tax authorities\b/gi, "confirm the applicable rule set")
     .replace(/\bpenalt(?:y|ies)\b[^.]*\./gi, "")
     .replace(/\bselic\b[^.]*\./gi, "")
@@ -293,6 +300,24 @@ type SurvivingClaims = {
   excludedCriticalClaims: string[];
 };
 
+type PipelineMode = "fast_consensus" | "standard" | "deep";
+
+type PipelineDecision = {
+  mode: PipelineMode;
+  reasons: string[];
+  criticalDisputedCount: number;
+  totalDisputedCount: number;
+  missingIssueCount: number;
+};
+
+function emptyConflictMatrix(): ConflictMatrix {
+  return {
+    common_claims: [],
+    disputed_claims: [],
+    missing_or_underdeveloped_issues: [],
+  };
+}
+
 function buildMemoAnswer(parsed: Omit<NormalizedMemo, "answer" | "claims">): string {
   const lines: string[] = [];
 
@@ -362,14 +387,49 @@ function normalizeClaims(claims: unknown): NormalizedClaim[] {
 
 function heuristicClaimExtraction(text: string): NormalizedClaim[] {
   const snippets = splitIntoSnippets(text);
-  const keywordPatterns: Array<{ topic: string; regex: RegExp; controlling?: boolean }> = [
-    { topic: "governing_tax", regex: /\btax\b|\bvat\b|\bgst\b|\bicms\b|\bwithholding\b|\biss\b|\bipi\b/i, controlling: true },
-    { topic: "buyer_status", regex: /\bbuyer\b|\bcustomer\b|\bconsumer\b|\btaxpayer\b|\bnon-taxpayer\b|\bcontributor\b|\bnon-contributor\b/i, controlling: true },
-    { topic: "transaction_purpose", regex: /\bresale\b|\bindustrialization\b|\bown use\b|\bfixed asset\b|\bconsumption\b|\bpurpose\b/i, controlling: true },
-    { topic: "transaction_type", regex: /\bgoods\b|\bservices\b|\bintangibles?\b|\bdigital\b/i, controlling: true },
-    { topic: "geography", regex: /\binterstate\b|\bcross-border\b|\borigin\b|\bdestination\b|\bstate\b|\bcountry\b/i, controlling: true },
-    { topic: "rate_mechanics", regex: /\brate\b|\b7%\b|\b12%\b|\b4%\b|\bdifal\b|\bdifferential\b|\bcredit\b/i, controlling: true },
-    { topic: "special_regime", regex: /\bst\b|\bsubstitui\b|\bexempt\b|\bdeferr/i, controlling: false },
+  const keywordPatterns: Array<{
+    topic: string;
+    regex: RegExp;
+    controlling?: boolean;
+  }> = [
+    {
+      topic: "governing_tax",
+      regex: /\btax\b|\bvat\b|\bgst\b|\bicms\b|\bwithholding\b|\biss\b|\bipi\b/i,
+      controlling: true,
+    },
+    {
+      topic: "buyer_status",
+      regex:
+        /\bbuyer\b|\bcustomer\b|\bconsumer\b|\btaxpayer\b|\bnon-taxpayer\b|\bcontributor\b|\bnon-contributor\b/i,
+      controlling: true,
+    },
+    {
+      topic: "transaction_purpose",
+      regex:
+        /\bresale\b|\bindustrialization\b|\bown use\b|\bfixed asset\b|\bconsumption\b|\bpurpose\b/i,
+      controlling: true,
+    },
+    {
+      topic: "transaction_type",
+      regex: /\bgoods\b|\bservices\b|\bintangibles?\b|\bdigital\b/i,
+      controlling: true,
+    },
+    {
+      topic: "geography",
+      regex:
+        /\binterstate\b|\bcross-border\b|\borigin\b|\bdestination\b|\bstate\b|\bcountry\b/i,
+      controlling: true,
+    },
+    {
+      topic: "rate_mechanics",
+      regex: /\brate\b|\b7%\b|\b12%\b|\b4%\b|\bdifal\b|\bdifferential\b|\bcredit\b/i,
+      controlling: true,
+    },
+    {
+      topic: "special_regime",
+      regex: /\bst\b|\bsubstitui\b|\bexempt\b|\bdeferr/i,
+      controlling: false,
+    },
   ];
 
   const claims: NormalizedClaim[] = [];
@@ -388,8 +448,8 @@ function heuristicClaimExtraction(text: string): NormalizedClaim[] {
     }
   }
 
-  return uniq(claims.map((x) => JSON.stringify(x))).map((x) =>
-    JSON.parse(x) as NormalizedClaim
+  return uniq(claims.map((x) => JSON.stringify(x))).map(
+    (x) => JSON.parse(x) as NormalizedClaim
   );
 }
 
@@ -448,18 +508,14 @@ function parseProviderMemo(rawText: string): NormalizedMemo {
 }
 
 function normalizeConflictMatrix(parsed: ConflictMatrixJson | null): ConflictMatrix {
-  if (!parsed) {
-    return {
-      common_claims: [],
-      disputed_claims: [],
-      missing_or_underdeveloped_issues: [],
-    };
-  }
+  if (!parsed) return emptyConflictMatrix();
 
   const disputed_claims: DisputedClaim[] = Array.isArray(parsed.disputed_claims)
     ? parsed.disputed_claims
         .map((d, idx) => {
-          const provider_positions: ConflictPosition[] = Array.isArray(d?.provider_positions)
+          const provider_positions: ConflictPosition[] = Array.isArray(
+            d?.provider_positions
+          )
             ? d.provider_positions
                 .map((p) => ({
                   provider: String(p?.provider || "").trim(),
@@ -525,7 +581,9 @@ function serializeConflictMatrix(matrix: ConflictMatrix): string {
 }
 
 function inferExpectedDimensions(input: CrosscheckInput): string[] {
-  const hay = `${input.question || ""}\n${input.facts || ""}\n${input.constraints || ""}\n${input.jurisdiction || ""}`.toLowerCase();
+  const hay = `${input.question || ""}\n${input.facts || ""}\n${
+    input.constraints || ""
+  }\n${input.jurisdiction || ""}`.toLowerCase();
   const out: string[] = [];
 
   if (
@@ -596,8 +654,9 @@ function validateStructuralCompleteness(
     };
   }
 
-  const text =
-    `${memo.executive_summary}\n${memo.analysis}\n${memo.transaction_specific_treatment.join("\n")}\n${memo.required_confirmations.join("\n")}`.toLowerCase();
+  const text = `${memo.executive_summary}\n${memo.analysis}\n${memo.transaction_specific_treatment.join(
+    "\n"
+  )}\n${memo.required_confirmations.join("\n")}`.toLowerCase();
 
   const issues: string[] = [];
   const dimensionsCovered: string[] = [];
@@ -605,28 +664,40 @@ function validateStructuralCompleteness(
 
   const has = {
     buyer_status:
-      /\bbuyer\b|\bcustomer\b|\bconsumer\b|\btaxpayer\b|\bnon-taxpayer\b|\bcontributor\b|\bfinal consumer\b/i.test(text),
+      /\bbuyer\b|\bcustomer\b|\bconsumer\b|\btaxpayer\b|\bnon-taxpayer\b|\bcontributor\b|\bfinal consumer\b/i.test(
+        text
+      ),
     transaction_purpose:
-      /\bresale\b|\bown use\b|\bfixed asset\b|\bconsumption\b|\bindustrialization\b|\bpurpose\b/i.test(text),
+      /\bresale\b|\bown use\b|\bfixed asset\b|\bconsumption\b|\bindustrialization\b|\bpurpose\b/i.test(
+        text
+      ),
     transaction_type:
       /\bgoods\b|\bservices\b|\bintangibles?\b|\bdigital\b/i.test(text),
     geography:
-      /\binterstate\b|\bcross-border\b|\borigin\b|\bdestination\b|\bstate\b|\bcountry\b/i.test(text),
+      /\binterstate\b|\bcross-border\b|\borigin\b|\bdestination\b|\bstate\b|\bcountry\b/i.test(
+        text
+      ),
     product_or_special_regime:
-      /\bproduct\b|\bclassification\b|\bncm\b|\bimport\b|\bspecial regime\b|\bsubstitui\b|\bexempt\b/i.test(text),
+      /\bproduct\b|\bclassification\b|\bncm\b|\bimport\b|\bspecial regime\b|\bsubstitui\b|\bexempt\b/i.test(
+        text
+      ),
   };
 
   for (const dim of expected) {
     if (has[dim as keyof typeof has]) {
       dimensionsCovered.push(dim);
     } else {
-      issues.push(`Missing coverage for expected dimension: ${dim.replace(/_/g, " ")}.`);
+      issues.push(
+        `Missing coverage for expected dimension: ${dim.replace(/_/g, " ")}.`
+      );
       penalty += 70;
     }
   }
 
   if (expected.length >= 2 && memo.transaction_specific_treatment.length === 0) {
-    issues.push("Missing transaction-specific treatment despite multi-branch question.");
+    issues.push(
+      "Missing transaction-specific treatment despite multi-branch question."
+    );
     penalty += 100;
   }
 
@@ -652,19 +723,35 @@ function validateStructuralCompleteness(
 function classifyClaimKind(text: string): ClaimKind {
   const t = text.toLowerCase();
 
-  if (/\b\d+%|\brate\b|\bamount\b|\bthreshold\b|\bcalculation\b|\bdifferential\b/.test(t)) {
+  if (
+    /\b\d+%|\brate\b|\bamount\b|\bthreshold\b|\bcalculation\b|\bdifferential\b/.test(
+      t
+    )
+  ) {
     return "numeric";
   }
 
-  if (/\borigin\b|\bdestination\b|\bfrom\b|\bto\b|\bbetween\b|\binto\b|\bout of\b|\bdirection\b/.test(t)) {
+  if (
+    /\borigin\b|\bdestination\b|\bfrom\b|\bto\b|\bbetween\b|\binto\b|\bout of\b|\bdirection\b/.test(
+      t
+    )
+  ) {
     return "directional";
   }
 
-  if (/\bapplies\b|\bdoes not apply\b|\bscope\b|\bonly if\b|\bunless\b|\btrigger\b|\bdue when\b/.test(t)) {
+  if (
+    /\bapplies\b|\bdoes not apply\b|\bscope\b|\bonly if\b|\bunless\b|\btrigger\b|\bdue when\b/.test(
+      t
+    )
+  ) {
     return "scope";
   }
 
-  if (/\bb2b\b|\bb2c\b|\bfinal consumer\b|\btaxpayer\b|\bnon-taxpayer\b|\bresale\b|\bown use\b|\bfixed asset\b|\bindustrialization\b/.test(t)) {
+  if (
+    /\bb2b\b|\bb2c\b|\bfinal consumer\b|\btaxpayer\b|\bnon-taxpayer\b|\bresale\b|\bown use\b|\bfixed asset\b|\bindustrialization\b/.test(
+      t
+    )
+  ) {
     return "branch";
   }
 
@@ -672,7 +759,12 @@ function classifyClaimKind(text: string): ClaimKind {
 }
 
 function isCriticalClaimKind(kind: ClaimKind): boolean {
-  return kind === "numeric" || kind === "directional" || kind === "scope" || kind === "branch";
+  return (
+    kind === "numeric" ||
+    kind === "directional" ||
+    kind === "scope" ||
+    kind === "branch"
+  );
 }
 
 function evaluateClaimStability(matrix: ConflictMatrix): ClaimStability[] {
@@ -693,7 +785,8 @@ function evaluateClaimStability(matrix: ConflictMatrix): ClaimStability[] {
         .filter(Boolean)
     );
 
-    const unstable = normalizedPositions.length > 1 || claim.provider_positions.length >= 2;
+    const unstable =
+      normalizedPositions.length > 1 || claim.provider_positions.length >= 2;
 
     return {
       claim,
@@ -769,7 +862,8 @@ function filterUnstableClaimsFromArtifacts(
       required_confirmations: uniq([
         ...filteredMemo.required_confirmations,
         ...surviving.excludedCriticalClaims.map(
-          (x) => `Unresolved controlling issue removed from final synthesis: ${x}`
+          (x) =>
+            `Unresolved controlling issue removed from final synthesis: ${x}`
         ),
       ]),
       recommendation: filteredMemo.recommendation,
@@ -783,7 +877,10 @@ function filterUnstableClaimsFromArtifacts(
   });
 }
 
-function buildProviderWorkPrompt(input: CrosscheckInput, providerLabel: string): string {
+function buildProviderWorkPrompt(
+  input: CrosscheckInput,
+  providerLabel: string
+): string {
   return [
     `You are ${providerLabel}, acting as a senior international tax associate preparing an internal tax memo.`,
     "You are NOT a chatbot.",
@@ -932,7 +1029,11 @@ function buildChallengePrompt(args: {
     ),
     "",
     args.assessment
-      ? `Your provider quality assessment:\n${JSON.stringify(args.assessment, null, 2)}`
+      ? `Your provider quality assessment:\n${JSON.stringify(
+          args.assessment,
+          null,
+          2
+        )}`
       : "",
     "",
     "Conflict matrix to address:",
@@ -1036,7 +1137,12 @@ function providerAssessmentForArtifact(
     reasons.push("weak prioritization of controlling distinctions");
   }
 
-  if (text.includes("vat") || text.includes("tax") || text.includes("withholding") || text.includes("icms")) {
+  if (
+    text.includes("vat") ||
+    text.includes("tax") ||
+    text.includes("withholding") ||
+    text.includes("icms")
+  ) {
     score += 40;
     reasons.push("addresses governing tax regime");
   }
@@ -1052,7 +1158,9 @@ function providerAssessmentForArtifact(
     }
 
     if (structural.dimensionsCovered.length) {
-      reasons.push(`covered dimensions: ${structural.dimensionsCovered.join("; ")}`);
+      reasons.push(
+        `covered dimensions: ${structural.dimensionsCovered.join("; ")}`
+      );
     }
   }
 
@@ -1071,7 +1179,8 @@ function providerAssessmentForArtifact(
 
 function chooseArtifactsForReasoning(
   artifacts: ProviderMemoArtifact[],
-  assessments: ProviderAssessment[]
+  assessments: ProviderAssessment[],
+  maxCount = 4
 ): ProviderMemoArtifact[] {
   const scoreMap = new Map(
     assessments.map((a) => [`${a.provider}::${a.model}`, a] as const)
@@ -1087,13 +1196,13 @@ function chooseArtifactsForReasoning(
     const s = scoreMap.get(`${a.provider}::${a.model}`);
     return s?.tier === "core";
   });
-  if (core.length >= 2) return core.slice(0, 4);
+  if (core.length >= 2) return core.slice(0, maxCount);
 
   const supportOrCore = ordered.filter((a) => {
     const s = scoreMap.get(`${a.provider}::${a.model}`);
     return s?.tier === "core" || s?.tier === "supporting";
   });
-  if (supportOrCore.length >= 2) return supportOrCore.slice(0, 4);
+  if (supportOrCore.length >= 2) return supportOrCore.slice(0, maxCount);
 
   return ordered.slice(0, Math.min(3, ordered.length));
 }
@@ -1222,18 +1331,11 @@ async function extractConflictMatrixWithClaude(args: {
   return normalizeConflictMatrix(safeJsonParse<ConflictMatrixJson>(extracted));
 }
 
-
 function mergeConflictMatrices(
   a: ConflictMatrix | null,
   b: ConflictMatrix | null
 ): ConflictMatrix {
-  if (!a && !b) {
-    return {
-      common_claims: [],
-      disputed_claims: [],
-      missing_or_underdeveloped_issues: [],
-    };
-  }
+  if (!a && !b) return emptyConflictMatrix();
   if (!a) return b as ConflictMatrix;
   if (!b) return a;
 
@@ -1262,12 +1364,12 @@ async function buildConflictMatrix(args: {
   input: CrosscheckInput;
   artifacts: ProviderMemoArtifact[];
   assessments: ProviderAssessment[];
+  dual?: boolean;
 }): Promise<ConflictMatrix> {
-  const [gpt, claude] = await Promise.all([
-    extractConflictMatrixWithOpenAI(args).catch(() => null),
-    extractConflictMatrixWithClaude(args).catch(() => null),
-  ]);
+  const gpt = await extractConflictMatrixWithOpenAI(args).catch(() => null);
+  if (!args.dual) return gpt || emptyConflictMatrix();
 
+  const claude = await extractConflictMatrixWithClaude(args).catch(() => null);
   return mergeConflictMatrices(gpt, claude);
 }
 
@@ -1330,10 +1432,10 @@ function summarizeAssessmentsForSelection(
   assessments: ProviderAssessment[],
   selected: ProviderMemoArtifact[]
 ): ProviderAssessment[] {
-  const selectedKeys = new Set(
-    selected.map((a) => `${a.provider}::${a.model}`)
+  const selectedKeys = new Set(selected.map((a) => `${a.provider}::${a.model}`));
+  return assessments.filter((a) =>
+    selectedKeys.has(`${a.provider}::${a.model}`)
   );
-  return assessments.filter((a) => selectedKeys.has(`${a.provider}::${a.model}`));
 }
 
 async function constructCombinedDraftWithOpenAI(args: {
@@ -1347,9 +1449,7 @@ async function constructCombinedDraftWithOpenAI(args: {
   if (!apiKey) return null;
 
   const model =
-    env("OPENAI_SYNTH_MODEL") ||
-    env("OPENAI_MODEL") ||
-    "gpt-4.1-mini";
+    env("OPENAI_SYNTH_MODEL") || env("OPENAI_MODEL") || "gpt-4.1-mini";
 
   const client = new OpenAI({ apiKey });
 
@@ -1685,6 +1785,53 @@ function assessmentMapFor(assessments: ProviderAssessment[]) {
   );
 }
 
+function decidePipelineMode(args: {
+  selectedRound1: ProviderMemoArtifact[];
+  selectedAssessments: ProviderAssessment[];
+  round1ConflictMatrix: ConflictMatrix;
+}): PipelineDecision {
+  const stability = evaluateClaimStability(args.round1ConflictMatrix);
+  const criticalDisputedCount = stability.filter(
+    (x) => x.critical && x.unstable
+  ).length;
+  const totalDisputedCount = args.round1ConflictMatrix.disputed_claims.length;
+  const missingIssueCount =
+    args.round1ConflictMatrix.missing_or_underdeveloped_issues.length;
+
+  if (
+    args.selectedRound1.length >= 3 &&
+    criticalDisputedCount === 0 &&
+    totalDisputedCount <= 1 &&
+    missingIssueCount <= 1
+  ) {
+    return {
+      mode: "fast_consensus",
+      reasons: ["strong round-1 convergence", "no critical disputed claims"],
+      criticalDisputedCount,
+      totalDisputedCount,
+      missingIssueCount,
+    };
+  }
+
+  if (criticalDisputedCount >= 2 || missingIssueCount >= 3) {
+    return {
+      mode: "deep",
+      reasons: ["multiple critical disputes or weak structural coverage"],
+      criticalDisputedCount,
+      totalDisputedCount,
+      missingIssueCount,
+    };
+  }
+
+  return {
+    mode: "standard",
+    reasons: ["some disagreement requires challenge-back"],
+    criticalDisputedCount,
+    totalDisputedCount,
+    missingIssueCount,
+  };
+}
+
 export async function runCrosscheck(
   input: CrosscheckInput
 ): Promise<CrosscheckResult> {
@@ -1754,75 +1901,100 @@ export async function runCrosscheck(
   const round1Assessments = round1Artifacts.map((a) =>
     providerAssessmentForArtifact(a, input)
   );
-  const selectedRound1 = chooseArtifactsForReasoning(round1Artifacts, round1Assessments);
+  const selectedRound1 = chooseArtifactsForReasoning(
+    round1Artifacts,
+    round1Assessments,
+    4
+  );
   const selectedAssessments = summarizeAssessmentsForSelection(
     round1Assessments,
     selectedRound1
   );
   const bestArtifact = pickBestArtifact(round1Artifacts, round1Assessments);
 
-  let round1ConflictMatrix: ConflictMatrix = {
-    common_claims: [],
-    disputed_claims: [],
-    missing_or_underdeveloped_issues: [],
+  let round1ConflictMatrix: ConflictMatrix = emptyConflictMatrix();
+  let pipelineDecision: PipelineDecision = {
+    mode: "standard",
+    reasons: ["default"],
+    criticalDisputedCount: 0,
+    totalDisputedCount: 0,
+    missingIssueCount: 0,
   };
 
   let round2Artifacts: ProviderMemoArtifact[] = [];
   let round2Assessments: ProviderAssessment[] = [];
-  let round2ConflictMatrix: ConflictMatrix = {
-    common_claims: [],
-    disputed_claims: [],
-    missing_or_underdeveloped_issues: [],
-  };
+  let round2ConflictMatrix: ConflictMatrix = emptyConflictMatrix();
 
   if (selectedRound1.length >= 2) {
     round1ConflictMatrix = await buildConflictMatrix({
       input,
       artifacts: selectedRound1,
       assessments: selectedAssessments,
-    }).catch(() => ({
-      common_claims: [],
-      disputed_claims: [],
-      missing_or_underdeveloped_issues: [],
-    }));
+      dual: selectedRound1.length < 3 ? true : false,
+    }).catch(() => emptyConflictMatrix());
 
-    const assessmentMap = assessmentMapFor(selectedAssessments);
+    pipelineDecision = decidePipelineMode({
+      selectedRound1,
+      selectedAssessments,
+      round1ConflictMatrix,
+    });
 
-    const revised = await Promise.all(
-      selectedRound1.map((artifact) =>
-        runProviderRound2(
-          artifact,
+    if (pipelineDecision.mode !== "fast_consensus") {
+      const assessmentMap = assessmentMapFor(selectedAssessments);
+
+      const round2Candidates = chooseArtifactsForReasoning(
+        selectedRound1,
+        selectedAssessments,
+        pipelineDecision.mode === "deep" ? 4 : 3
+      );
+
+      const revised = await Promise.all(
+        round2Candidates.map((artifact) =>
+          runProviderRound2(
+            artifact,
+            input,
+            round1ConflictMatrix,
+            assessmentMap.get(`${artifact.provider}::${artifact.model}`)
+          ).catch(() => null)
+        )
+      );
+
+      round2Artifacts = revised.filter(Boolean) as ProviderMemoArtifact[];
+      round2Assessments = round2Artifacts.map((a) =>
+        providerAssessmentForArtifact(a, input)
+      );
+
+      if (round2Artifacts.length >= 2) {
+        round2ConflictMatrix = await buildConflictMatrix({
           input,
-          round1ConflictMatrix,
-          assessmentMap.get(`${artifact.provider}::${artifact.model}`)
-        ).catch(() => null)
-      )
-    );
-
-    round2Artifacts = revised.filter(Boolean) as ProviderMemoArtifact[];
-    round2Assessments = round2Artifacts.map((a) =>
-      providerAssessmentForArtifact(a, input)
-    );
-
-    if (round2Artifacts.length >= 2) {
-      round2ConflictMatrix = await buildConflictMatrix({
-        input,
-        artifacts: round2Artifacts,
-        assessments: round2Assessments,
-      }).catch(() => ({
-        common_claims: [],
-        disputed_claims: [],
-        missing_or_underdeveloped_issues: [],
-      }));
+          artifacts: round2Artifacts,
+          assessments: round2Assessments,
+          dual: pipelineDecision.mode === "deep",
+        }).catch(() => emptyConflictMatrix());
+      }
     }
   }
 
-  let reasoningArtifacts =
-    round2Artifacts.length >= 2 ? round2Artifacts : selectedRound1;
-  const reasoningAssessments =
-    round2Artifacts.length >= 2 ? round2Assessments : selectedAssessments;
-  const reasoningConflictMatrix =
-    round2Artifacts.length >= 2 ? round2ConflictMatrix : round1ConflictMatrix;
+  let reasoningArtifacts: ProviderMemoArtifact[] =
+    pipelineDecision.mode === "fast_consensus"
+      ? selectedRound1
+      : round2Artifacts.length >= 2
+      ? round2Artifacts
+      : selectedRound1;
+
+  const reasoningAssessments: ProviderAssessment[] =
+    pipelineDecision.mode === "fast_consensus"
+      ? selectedAssessments
+      : round2Artifacts.length >= 2
+      ? round2Assessments
+      : selectedAssessments;
+
+  const reasoningConflictMatrix: ConflictMatrix =
+    pipelineDecision.mode === "fast_consensus"
+      ? round1ConflictMatrix
+      : round2Artifacts.length >= 2
+      ? round2ConflictMatrix
+      : round1ConflictMatrix;
 
   const survivingClaims = buildSurvivingClaims(reasoningConflictMatrix);
   reasoningArtifacts = filterUnstableClaimsFromArtifacts(
@@ -1831,7 +2003,10 @@ export async function runCrosscheck(
   );
 
   let combinedDraft: NormalizedMemo | null = null;
-  if (reasoningArtifacts.length >= 2) {
+  if (
+    pipelineDecision.mode !== "fast_consensus" &&
+    reasoningArtifacts.length >= 2
+  ) {
     combinedDraft = await constructCombinedDraftWithOpenAI({
       input,
       artifacts: reasoningArtifacts,
@@ -1926,6 +2101,11 @@ export async function runCrosscheck(
           "Multiple providers responded, but most were screened out as too generic or low-quality for core adjudication.",
         ]
       : []),
+    ...(pipelineDecision.mode === "fast_consensus"
+      ? [
+          "Strong initial cross-model convergence was detected, so deeper escalation was not required for this issue.",
+        ]
+      : []),
     ...(claimStability.some((x) => x.critical && x.unstable)
       ? [
           "Some controlling mechanical claims remained unresolved after the challenge-back round; those claims were excluded from final synthesis rather than narrated as fact.",
@@ -1941,7 +2121,8 @@ export async function runCrosscheck(
   ]);
 
   let confidence: "low" | "medium" | "high" =
-    finalMemo?.confidence || (selectedRound1.length >= 2 ? "medium" : "low");
+    finalMemo?.confidence ||
+    (selectedRound1.length >= 2 ? "medium" : "low");
 
   const unresolvedControllingCount = claimStability.filter(
     (x) => x.critical && x.unstable
@@ -1949,6 +2130,9 @@ export async function runCrosscheck(
 
   if (unresolvedControllingCount >= 1) confidence = "low";
   else if (selectedRound1.length < 2) confidence = "low";
+  else if (pipelineDecision.mode === "fast_consensus" && confidence === "low") {
+    confidence = "medium";
+  }
 
   const runtime_ms = Date.now() - t0;
 
@@ -1959,6 +2143,15 @@ export async function runCrosscheck(
       succeeded: succeededCalls,
       failed: failedCalls,
       runtime_ms,
+      pipeline: {
+        mode: pipelineDecision.mode,
+        reasons: pipelineDecision.reasons,
+      },
+    } as CrosscheckResult["meta"] & {
+      pipeline?: {
+        mode: PipelineMode;
+        reasons: string[];
+      };
     },
     consensus: {
       answer,

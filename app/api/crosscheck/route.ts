@@ -27,7 +27,10 @@ export async function POST(req: Request) {
 
     const question = String(body?.question || "").trim();
     if (!question) {
-      return NextResponse.json({ ok: false, error: "Missing 'question' in JSON body." }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: "Missing 'question' in JSON body." },
+        { status: 400 }
+      );
     }
 
     const jurisdiction = body?.jurisdiction ? String(body.jurisdiction) : undefined;
@@ -37,9 +40,20 @@ export async function POST(req: Request) {
     const timeoutMs = body?.timeoutMs ? Number(body.timeoutMs) : undefined;
     const maxTokens = body?.maxTokens ? Number(body.maxTokens) : undefined;
 
-    const result = await runCrosscheck({ question, jurisdiction, facts, constraints, timeoutMs, maxTokens });
+    const result = await runCrosscheck({
+      question,
+      jurisdiction,
+      facts,
+      constraints,
+      timeoutMs,
+      maxTokens,
+    });
+
     return NextResponse.json(result);
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err?.message || "Unknown error" }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: err?.message || "Unknown error" },
+      { status: 500 }
+    );
   }
 }
