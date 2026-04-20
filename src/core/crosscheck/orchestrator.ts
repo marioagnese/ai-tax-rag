@@ -47,7 +47,7 @@ function defaultOpenRouterModels(): string[] {
 
   return models.length
     ? models
-    : ["anthropic/claude-sonnet-4.6", "anthropic/claude-3.7-sonnet"];
+    : ["anthropic/claude-sonnet-4.6"];
 }
 
 function dualAdjudicatorEnabled(): boolean {
@@ -1836,7 +1836,7 @@ export async function runCrosscheck(
   input: CrosscheckInput
 ): Promise<CrosscheckResult> {
   const t0 = Date.now();
-  const timeoutMs = clampInt(input.timeoutMs, 8_000, 120_000, 45_000);
+  const timeoutMs = clampInt(input.timeoutMs, 8_000, 120_000, 18_000);
 
   const attempted: ProviderCall[] = [];
   const tasks: Array<Promise<ProviderOutput>> = [];
