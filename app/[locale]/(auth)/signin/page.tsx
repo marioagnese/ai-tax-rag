@@ -15,114 +15,160 @@ const COPY: Record<
     badge: string;
     headline: string;
     subheadline: string;
-    pain: string;
-    body: string;
-    benefit1: string;
-    benefit2: string;
-    benefit3: string;
-    authority: string;
     cta: string;
     login: string;
     watchDemo: string;
+    pricing: string;
     demoCaption: string;
-    exampleTitle: string;
-    exampleQuestionLabel: string;
-    exampleQuestion: string;
-    exampleRiskTitle: string;
-    exampleRiskBody: string;
-    exampleOutputTitle: string;
-    exampleOutputBody: string;
-    pricingLine: string;
+    promptLabel: string;
+    prompt: string;
+    taxaiproTitle: string;
+    taxaiproText: string;
   }
 > = {
   en: {
     badge: "Built for professionals who need to be right",
     headline: "Don’t trust a single AI answer on tax questions.",
     subheadline:
-      "TaxAiPro cross-checks multiple AI models, surfaces disagreements, and returns a more conservative draft.",
-    pain: "Most AI tax answers sound confident even when they miss key facts, collapse distinctions, or quietly disagree.",
-    body:
-      "In tax, false confidence is dangerous. TaxAiPro helps you review an answer before you rely on it.",
-    benefit1: "Cross-check multiple AI models in one place",
-    benefit2: "Spot disagreements and missing assumptions quickly",
-    benefit3: "Generate conservative drafts designed for review",
-    authority:
-      "Built from real international tax workflow experience.",
+      "TaxAiPro cross-checks multiple AI models and flags when a question is too broad, incomplete, or risky to answer at face value.",
     cta: "Try it free",
     login: "Log in",
-    watchDemo: "See how it works",
-    demoCaption: "Why relying on one AI answer can be risky",
-    exampleTitle: "Example cross-check",
-    exampleQuestionLabel: "Question",
-    exampleQuestion:
-      "Does a US company buying FOB from LATAM create PE risk or withholding exposure if support services are also performed locally?",
-    exampleRiskTitle: "Why one-model answers can mislead",
-    exampleRiskBody:
-      "One model says no PE risk. Another says possible PE risk. A third says it depends on local functions. That difference matters.",
-    exampleOutputTitle: "TaxAiPro output",
-    exampleOutputBody:
-      "Potential PE and withholding exposure may arise depending on the nature of local support functions, authority exercised locally, and whether activities go beyond preparatory or auxiliary support. A conservative review should isolate service scope, local personnel functions, and payment flows before relying on a low-risk conclusion.",
-    pricingLine: "Free · 5 runs/day   Basic · 25/day   Premium · Unlimited",
+    watchDemo: "Watch demo",
+    pricing: "Free · 5/day   Basic · 25/day   Premium · Unlimited",
+    demoCaption: "See how TaxAiPro challenges broad tax questions before you rely on them",
+    promptLabel: "Same prompt",
+    prompt: "What taxes apply in Brazil?",
+    taxaiproTitle: "TaxAiPro",
+    taxaiproText:
+      "This question is too broad to answer reliably without clarifying the taxpayer, transaction type, and tax category. A safer starting point is to separate corporate income tax, indirect taxes, payroll taxes, and withholding taxes before drawing conclusions.",
   },
   es: {
     badge: "Creado para profesionales que necesitan acertar",
     headline: "No confíes en una sola respuesta de IA para temas fiscales.",
     subheadline:
-      "TaxAiPro compara múltiples modelos de IA, muestra diferencias y devuelve un borrador más conservador.",
-    pain: "Muchas respuestas fiscales de IA suenan seguras incluso cuando omiten hechos clave, simplifican demasiado o discrepan entre sí.",
-    body:
-      "En impuestos, la falsa seguridad es riesgosa. TaxAiPro te ayuda a revisar una respuesta antes de confiar en ella.",
-    benefit1: "Compara múltiples modelos de IA en un solo lugar",
-    benefit2: "Detecta diferencias y supuestos faltantes rápidamente",
-    benefit3: "Genera borradores conservadores diseñados para revisión",
-    authority:
-      "Basado en experiencia real de trabajo tributario internacional.",
+      "TaxAiPro compara múltiples modelos de IA y detecta cuando una pregunta es demasiado amplia, incompleta o riesgosa para responderla de forma directa.",
     cta: "Probar gratis",
     login: "Iniciar sesión",
-    watchDemo: "Ver cómo funciona",
-    demoCaption: "Por qué confiar en una sola respuesta de IA puede ser riesgoso",
-    exampleTitle: "Ejemplo de validación cruzada",
-    exampleQuestionLabel: "Pregunta",
-    exampleQuestion:
-      "¿Una empresa de EE. UU. que compra FOB desde LATAM genera riesgo de EP o de retención si también se prestan servicios de soporte localmente?",
-    exampleRiskTitle: "Por qué una sola respuesta puede confundir",
-    exampleRiskBody:
-      "Un modelo dice que no hay riesgo de EP. Otro dice que sí puede existir. Un tercero dice que depende de las funciones locales. Esa diferencia importa.",
-    exampleOutputTitle: "Salida de TaxAiPro",
-    exampleOutputBody:
-      "Puede existir exposición a establecimiento permanente y retención dependiendo de la naturaleza de las funciones de soporte locales, la autoridad ejercida localmente y si las actividades exceden funciones preparatorias o auxiliares. Una revisión conservadora debe aislar el alcance del servicio, las funciones del personal local y los flujos de pago antes de asumir una conclusión de bajo riesgo.",
-    pricingLine: "Gratis · 5 análisis/día   Basic · 25/día   Premium · Ilimitado",
+    watchDemo: "Ver demo",
+    pricing: "Gratis · 5/día   Basic · 25/día   Premium · Ilimitado",
+    demoCaption: "Mira cómo TaxAiPro cuestiona preguntas fiscales amplias antes de que confíes en una respuesta",
+    promptLabel: "Mismo prompt",
+    prompt: "¿Qué impuestos aplican en Brasil?",
+    taxaiproTitle: "TaxAiPro",
+    taxaiproText:
+      "Esta pregunta es demasiado amplia para responderse de forma fiable sin aclarar el tipo de contribuyente, la naturaleza de la transacción y la categoría tributaria. Un enfoque más seguro es separar impuesto corporativo, impuestos indirectos, nómina y retenciones antes de sacar conclusiones.",
   },
   pt: {
     badge: "Feito para profissionais que precisam acertar",
     headline: "Não confie em apenas uma resposta de IA para temas tributários.",
     subheadline:
-      "O TaxAiPro cruza vários modelos de IA, mostra divergências e entrega um rascunho mais conservador.",
-    pain: "Muitas respostas tributárias de IA parecem confiantes mesmo quando ignoram fatos relevantes, simplificam demais ou divergem entre si.",
-    body:
-      "Em tributos, falsa confiança é arriscada. O TaxAiPro ajuda você a revisar uma resposta antes de confiar nela.",
-    benefit1: "Compare vários modelos de IA em um só lugar",
-    benefit2: "Identifique divergências e premissas faltantes rapidamente",
-    benefit3: "Gere rascunhos conservadores feitos para revisão",
-    authority:
-      "Baseado em experiência real de trabalho tributário internacional.",
+      "O TaxAiPro cruza vários modelos de IA e identifica quando a pergunta é ampla demais, incompleta ou arriscada para ser respondida de forma direta.",
     cta: "Testar grátis",
     login: "Entrar",
-    watchDemo: "Ver como funciona",
-    demoCaption: "Por que confiar em apenas uma resposta de IA pode ser arriscado",
-    exampleTitle: "Exemplo de cross-check",
-    exampleQuestionLabel: "Pergunta",
-    exampleQuestion:
-      "Uma empresa dos EUA comprando FOB da América Latina gera risco de estabelecimento permanente ou retenção se serviços de suporte também forem prestados localmente?",
-    exampleRiskTitle: "Por que uma única resposta pode induzir ao erro",
-    exampleRiskBody:
-      "Um modelo diz que não há risco de EP. Outro diz que pode haver. Um terceiro diz que depende das funções locais. Essa diferença importa.",
-    exampleOutputTitle: "Saída do TaxAiPro",
-    exampleOutputBody:
-      "Pode haver exposição a estabelecimento permanente e retenção dependendo da natureza das funções locais de suporte, da autoridade exercida localmente e se as atividades excedem funções preparatórias ou auxiliares. Uma revisão conservadora deve isolar o escopo dos serviços, as funções da equipe local e os fluxos de pagamento antes de apoiar uma conclusão de baixo risco.",
-    pricingLine: "Grátis · 5 análises/dia   Basic · 25/dia   Premium · Ilimitado",
+    watchDemo: "Ver demo",
+    pricing: "Grátis · 5/dia   Basic · 25/dia   Premium · Ilimitado",
+    demoCaption: "Veja como o TaxAiPro questiona perguntas tributárias amplas antes que você confie na resposta",
+    promptLabel: "Mesmo prompt",
+    prompt: "Quais tributos se aplicam no Brasil?",
+    taxaiproTitle: "TaxAiPro",
+    taxaiproText:
+      "Essa pergunta é ampla demais para ser respondida com segurança sem esclarecer o tipo de contribuinte, a natureza da operação e a categoria tributária envolvida. Um caminho mais seguro é separar imposto corporativo, tributos indiretos, folha e retenções antes de chegar a uma conclusão.",
   },
 };
+
+const MODEL_CARDS: Record<
+  Locale,
+  Array<{ name: string; logo: string; text: string }>
+> = {
+  en: [
+    {
+      name: "OpenAI",
+      logo: "/openai-logo.png",
+      text: "Brazil has federal, state, and municipal taxes, including corporate income tax, social contributions, VAT-like indirect taxes, and payroll-related charges.",
+    },
+    {
+      name: "Claude",
+      logo: "/claude-logo.png",
+      text: "Taxes in Brazil may include corporate income taxes, indirect taxes such as ICMS and ISS, payroll taxes, and withholding taxes depending on the transaction.",
+    },
+    {
+      name: "Perplexity",
+      logo: "/perplexity-logo.png",
+      text: "Main taxes in Brazil include IRPJ, CSLL, PIS, COFINS, ICMS, ISS, IPI, and social security contributions, depending on the taxpayer and activity.",
+    },
+    {
+      name: "Gemini",
+      logo: "/gemini-logo.png",
+      text: "Brazil’s tax system includes federal, state, and local taxes, with common categories covering income, turnover, services, products, and payroll.",
+    },
+  ],
+  es: [
+    {
+      name: "OpenAI",
+      logo: "/openai-logo.png",
+      text: "Brasil tiene impuestos federales, estatales y municipales, incluyendo impuesto corporativo, contribuciones sociales, impuestos indirectos y cargas sobre nómina.",
+    },
+    {
+      name: "Claude",
+      logo: "/claude-logo.png",
+      text: "Los impuestos en Brasil pueden incluir impuesto sobre la renta corporativa, tributos indirectos como ICMS e ISS, impuestos sobre nómina y retenciones según la operación.",
+    },
+    {
+      name: "Perplexity",
+      logo: "/perplexity-logo.png",
+      text: "Entre los principales impuestos están IRPJ, CSLL, PIS, COFINS, ICMS, ISS, IPI y contribuciones a la seguridad social, según el contribuyente y la actividad.",
+    },
+    {
+      name: "Gemini",
+      logo: "/gemini-logo.png",
+      text: "El sistema tributario brasileño incluye impuestos federales, estatales y municipales sobre renta, operaciones, servicios, productos y nómina.",
+    },
+  ],
+  pt: [
+    {
+      name: "OpenAI",
+      logo: "/openai-logo.png",
+      text: "O Brasil possui tributos federais, estaduais e municipais, incluindo imposto de renda corporativo, contribuições sociais, tributos indiretos e encargos sobre folha.",
+    },
+    {
+      name: "Claude",
+      logo: "/claude-logo.png",
+      text: "Os tributos no Brasil podem incluir imposto sobre a renda da pessoa jurídica, tributos indiretos como ICMS e ISS, encargos sobre folha e retenções, dependendo da operação.",
+    },
+    {
+      name: "Perplexity",
+      logo: "/perplexity-logo.png",
+      text: "Entre os principais tributos estão IRPJ, CSLL, PIS, COFINS, ICMS, ISS, IPI e contribuições previdenciárias, conforme o contribuinte e a atividade.",
+    },
+    {
+      name: "Gemini",
+      logo: "/gemini-logo.png",
+      text: "O sistema tributário brasileiro inclui tributos federais, estaduais e municipais sobre renda, operações, serviços, produtos e folha.",
+    },
+  ],
+};
+
+function ModelCard({
+  name,
+  logo,
+  text,
+}: {
+  name: string;
+  logo: string;
+  text: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[#0B162A] p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <div className="relative h-5 w-5 overflow-hidden rounded-full bg-white">
+          <Image src={logo} alt={name} fill className="object-contain p-0.5" />
+        </div>
+        <span className="text-sm font-medium text-white/86">{name}</span>
+      </div>
+      <p className="text-sm leading-6 text-white/66">{text}</p>
+    </div>
+  );
+}
 
 export default function SignInPage() {
   const router = useRouter();
@@ -138,6 +184,7 @@ export default function SignInPage() {
   const [demoOpen, setDemoOpen] = useState(false);
 
   const copy = COPY[locale];
+  const models = MODEL_CARDS[locale];
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -166,7 +213,7 @@ export default function SignInPage() {
         backgroundAttachment: "fixed",
       }}
     >
-      <div className="absolute inset-0 bg-[#081120]/65" />
+      <div className="absolute inset-0 bg-[#081120]/68" />
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(39,91,255,0.18),transparent_35%)]" />
 
       {demoOpen && (
@@ -227,7 +274,7 @@ export default function SignInPage() {
       </header>
 
       <main className="relative mx-auto max-w-7xl px-6 pb-16 pt-14">
-        <div className="grid items-stretch gap-10 lg:grid-cols-[1.05fr_0.95fr]">
+        <div className="grid gap-10 lg:grid-cols-[0.95fr_1.05fr]">
           <div className="rounded-3xl border border-white/10 bg-black/45 p-8 backdrop-blur-md">
             <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.05] px-4 py-2 text-sm text-white/72">
               <span className="inline-block h-2 w-2 rounded-full bg-emerald-400" />
@@ -238,25 +285,9 @@ export default function SignInPage() {
               {copy.headline}
             </h1>
 
-            <p className="mt-5 max-w-2xl text-lg leading-8 text-white/74">
+            <p className="mt-5 max-w-xl text-lg leading-8 text-white/74">
               {copy.subheadline}
             </p>
-
-            <p className="mt-5 text-sm leading-7 text-red-300">
-              {copy.pain}
-            </p>
-
-            <p className="mt-5 max-w-2xl text-sm leading-7 text-white/78">
-              {copy.body}
-            </p>
-
-            <ul className="mt-6 space-y-2 text-sm text-white/78">
-              <li>• {copy.benefit1}</li>
-              <li>• {copy.benefit2}</li>
-              <li>• {copy.benefit3}</li>
-            </ul>
-
-            <div className="mt-6 text-sm text-white/65">{copy.authority}</div>
 
             <div className="mt-7 flex flex-wrap items-center gap-3">
               <button
@@ -286,58 +317,51 @@ export default function SignInPage() {
               </button>
             </div>
 
-            <div className="mt-5 text-xs text-white/56">{copy.pricingLine}</div>
+            <div className="mt-5 text-xs text-white/56">{copy.pricing}</div>
             <div className="mt-4 text-xs text-white/50">{t("disclaimer")}</div>
           </div>
 
-          <div className="flex h-full flex-col rounded-3xl border border-white/10 bg-black/45 p-8 backdrop-blur-md">
-            <p className="mb-5 text-center text-sm text-white/62">
-              {copy.demoCaption}
-            </p>
+          <div className="rounded-3xl border border-white/10 bg-black/45 p-6 backdrop-blur-md">
+            <div className="mb-4 text-sm text-white/62">{copy.demoCaption}</div>
 
-            <div className="rounded-2xl border border-white/10 bg-[#0B162A] p-5">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div className="text-sm font-medium text-white/86">
-                  {copy.exampleTitle}
-                </div>
-                <div className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs text-white/56">
-                  Conservative output
-                </div>
+            <div className="rounded-2xl border border-white/10 bg-[#101B30] p-4">
+              <div className="mb-2 text-[11px] uppercase tracking-[0.16em] text-white/38">
+                {copy.promptLabel}
               </div>
-
-              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-white/38">
-                  {copy.exampleQuestionLabel}
-                </div>
-                <div className="text-sm leading-7 text-white/84">
-                  {copy.exampleQuestion}
-                </div>
-              </div>
-
-              <div className="mt-4 rounded-2xl border border-red-400/20 bg-red-400/10 p-4">
-                <div className="mb-1 text-sm font-medium text-red-200">
-                  {copy.exampleRiskTitle}
-                </div>
-                <div className="text-sm leading-6 text-red-100/85">
-                  {copy.exampleRiskBody}
-                </div>
-              </div>
-
-              <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
-                <div className="mb-1 text-sm font-medium text-emerald-200">
-                  {copy.exampleOutputTitle}
-                </div>
-                <div className="text-sm leading-6 text-emerald-100/85">
-                  {copy.exampleOutputBody}
-                </div>
+              <div className="text-base font-medium text-white/88">
+                {copy.prompt}
               </div>
             </div>
 
-            <div className="mt-5 flex-1 overflow-hidden rounded-2xl border border-white/10 bg-black/20">
-              <video className="h-full w-full object-cover" controls playsInline>
-                <source src="/demo-60s.mp4" type="video/mp4" />
-                {t("videoFallback")}
-              </video>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {models.map((model) => (
+                <ModelCard
+                  key={model.name}
+                  name={model.name}
+                  logo={model.logo}
+                  text={model.text}
+                />
+              ))}
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-5">
+              <div className="mb-2 flex items-center gap-2">
+                <div className="relative h-5 w-5 overflow-hidden rounded-full bg-white">
+                  <Image
+                    src="/taxaipro-logo.png"
+                    alt="TaxAiPro"
+                    fill
+                    className="object-contain p-0.5"
+                  />
+                </div>
+                <span className="text-sm font-medium text-emerald-200">
+                  {copy.taxaiproTitle}
+                </span>
+              </div>
+
+              <p className="text-sm leading-7 text-emerald-100/88">
+                {copy.taxaiproText}
+              </p>
             </div>
           </div>
         </div>
