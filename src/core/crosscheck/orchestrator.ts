@@ -62,11 +62,11 @@ function geminiEnabled(): boolean {
 }
 
 function providerCoreThreshold(): number {
-  return clampInt(env("CROSSCHECK_PROVIDER_MIN_SCORE"), 0, 1000, 230);
+  return clampInt(env("CROSSCHECK_PROVIDER_MIN_SCORE"), 0, 1000, 320);
 }
 
 function providerSupportThreshold(): number {
-  return clampInt(env("CROSSCHECK_PROVIDER_SUPPORT_SCORE"), 0, 1000, 145);
+  return clampInt(env("CROSSCHECK_PROVIDER_SUPPORT_SCORE"), 0, 1000, 200);
 }
 
 function safeJsonParse<T>(s: string): T | null {
@@ -1799,7 +1799,7 @@ function decidePipelineMode(args: {
     args.round1ConflictMatrix.missing_or_underdeveloped_issues.length;
 
   if (
-    args.selectedRound1.length >= 2 &&
+    args.selectedRound1.length >= 3 &&
     criticalDisputedCount === 0 &&
     totalDisputedCount <= 1 &&
     missingIssueCount <= 1
@@ -1942,7 +1942,7 @@ while (pending.length) {
   let round2Assessments: ProviderAssessment[] = [];
   let round2ConflictMatrix: ConflictMatrix = emptyConflictMatrix();
 
-  if (selectedRound1.length >= 2) {
+  if (selectedRound1.length >= 3) {
     round1ConflictMatrix = await buildConflictMatrix({
       input,
       artifacts: selectedRound1,
@@ -2144,7 +2144,7 @@ while (pending.length) {
 
   let confidence: "low" | "medium" | "high" =
     finalMemo?.confidence ||
-    (selectedRound1.length >= 2 ? "medium" : "low");
+    (selectedRound1.length >= 3 ? "medium" : "low");
 
   const unresolvedControllingCount = claimStability.filter(
     (x) => x.critical && x.unstable

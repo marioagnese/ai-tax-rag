@@ -1,0 +1,675 @@
+// app/api/ui/crosscheck/route.ts
+import { NextResponse, type NextRequest } from "next/server";
+import { GoogleGenAI } from "@google/genai";
+import { requireSessionUser } from "../../../../src/lib/auth/session";
+import {
+  assertWithinDailyLimit,
+  getClientId,
+  getTierFromRequest,
+  type RateLimitMeta,
+} from "../../../../src/lib/usage/ratelimit";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+/* ---------------- Env helpers ---------------- */
+
+function env(name: string): string {
+  return (process.env[name] || "").trim();
+}
+
+function requireEnv(name: string) {
+  const v = env(name);
+  if (!v) throw new Error(`Missing env var: ${name}`);
+  return v;
+}
+
+/* ---------------- Types ---------------- */
+
+type CrosscheckUiBody = {
+  jurisdiction?: string;
+  facts?: string;
+  constraints?: string;
+  question?: string;
+  timeoutMs?: number;
+  maxTokens?: number;
+  [k: string]: unknown;
+};
+
+type ProviderResult = {
+  provider: string;
+  model: string;
+  status: "ok" | "error" | "timeout";
+  ms: number;
+  text?: string;
+  error?: string;
+};
+
+type CrosscheckResponse = {
+  ok: boolean;
+  meta?: {
+    attempted?: Array<{ provider: string; model: string }>;
+    succeeded?: Array<{ provider: string; model: string }>;
+    failed?: Array<{ provider: string; model: string }>;
+    runtime_ms?: number;
+  };
+  consensus?: {
+    answer?: string;
+    caveats?: string[];
+    followups?: string[];
+    disagreements?: string[];
+    confidence?: "low" | "medium" | "high";
+  };
+  providers?: ProviderResult[];
+  error?: string;
+};
+
+type ChatMsg = { role: "system" | "user" | "assistant"; content: string };
+
+type OpenAiCompatibleProvider = {
+  provider: "openai" | "perplexity" | "xai";
+  kind: "openai-compatible";
+  baseURL: string;
+  apiKey: string;
+  model: string;
+};
+
+type GeminiProvider = {
+  provider: "gemini";
+  kind: "gemini";
+  apiKey: string;
+  model: string;
+};
+
+type ProviderConfig = OpenAiCompatibleProvider | GeminiProvider;
+
+/* ---------------- Sanitization ---------------- */
+
+function sanitizeBody(raw: unknown): CrosscheckUiBody {
+  const b: CrosscheckUiBody = raw && typeof raw === "object" ? (raw as any) : {};
+
+  const jurisdiction =
+    typeof b.jurisdiction === "string" ? b.jurisdiction.trim() : undefined;
+  const facts = typeof b.facts === "string" ? b.facts : undefined;
+  const constraints = typeof b.constraints === "string" ? b.constraints : undefined;
+  const question =
+    typeof b.question === "string" ? b.question.trim() : undefined;
+
+  const timeoutMs =
+    typeof b.timeoutMs === "number" && Number.isFinite(b.timeoutMs)
+      ? Math.max(1_000, Math.min(120_000, Math.floor(b.timeoutMs)))
+      : undefined;
+
+  const maxTokens =
+    typeof b.maxTokens === "number" && Number.isFinite(b.maxTokens)
+      ? Math.max(64, Math.min(8_192, Math.floor(b.maxTokens)))
+      : undefined;
+
+  return {
+    jurisdiction: jurisdiction || undefined,
+    facts: typeof facts === "string" ? facts : undefined,
+    constraints: typeof constraints === "string" ? constraints : undefined,
+    question: question || undefined,
+    timeoutMs,
+    maxTokens,
+  };
+}
+
+/* ---------------- Rate-limit headers ---------------- */
+
+function applyRateLimitHeaders(h: Headers, meta?: RateLimitMeta) {
+  if (!meta) return;
+
+  h.set("x-taxaipro-tier", String(meta.tier));
+  h.set("x-ratelimit-limit", String(meta.limit));
+  h.set("x-ratelimit-used", String(meta.used));
+  h.set("x-ratelimit-remaining", String(meta.remaining));
+  h.set("x-ratelimit-reset", meta.resetAt);
+}
+
+/* ---------------- Provider calls (OpenAI-compatible) ---------------- */
+
+function normalizeBaseForProvider(provider: string, baseURL: string) {
+  const base = (baseURL || "").trim().replace(/\/+$/, "");
+
+  if (!base) {
+    if (provider === "openai") return "https://api.openai.com/v1";
+    if (provider === "perplexity") return "https://api.perplexity.ai";
+    if (provider === "xai") return "https://api.x.ai/v1";
+    return "";
+  }
+
+  if (provider === "xai") {
+    return base.endsWith("/v1") ? base : `${base}/v1`;
+  }
+
+  return base;
+}
+
+async function callChatCompletions(args: {
+  provider: string;
+  baseURL: string;
+  apiKey: string;
+  model: string;
+  messages: ChatMsg[];
+  temperature: number;
+  timeoutMs: number;
+  maxTokens?: number;
+}): Promise<ProviderResult> {
+  const started = Date.now();
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), args.timeoutMs);
+
+  try {
+    const base = normalizeBaseForProvider(args.provider, args.baseURL);
+    const url = `${base.replace(/\/+$/, "")}/chat/completions`;
+
+    const r = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${args.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: args.model,
+        messages: args.messages,
+        temperature: args.temperature,
+        max_tokens: args.maxTokens,
+        stream: false,
+      }),
+      signal: ctrl.signal,
+      cache: "no-store",
+    });
+
+    const ms = Date.now() - started;
+    const text = await r.text();
+
+    if (!r.ok) {
+      return {
+        provider: args.provider,
+        model: args.model,
+        status: "error",
+        ms,
+        error: `HTTP ${r.status}: ${text.slice(0, 800)}`,
+      };
+    }
+
+    let json: any = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = null;
+    }
+
+    const content = String(json?.choices?.[0]?.message?.content ?? "").trim();
+
+    if (!content) {
+      return {
+        provider: args.provider,
+        model: args.model,
+        status: "error",
+        ms,
+        error: "Empty response content.",
+      };
+    }
+
+    return {
+      provider: args.provider,
+      model: args.model,
+      status: "ok",
+      ms,
+      text: content,
+    };
+  } catch (e: any) {
+    const ms = Date.now() - started;
+    const aborted = e?.name === "AbortError";
+    return {
+      provider: args.provider,
+      model: args.model,
+      status: aborted ? "timeout" : "error",
+      ms,
+      error: aborted ? "Timed out" : e?.message || "Request failed",
+    };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/* ---------------- Gemini ---------------- */
+
+async function callGemini(args: {
+  provider: "gemini";
+  apiKey: string;
+  model: string;
+  messages: ChatMsg[];
+  timeoutMs: number;
+}): Promise<ProviderResult> {
+  const started = Date.now();
+
+  try {
+    const client = new GoogleGenAI({ apiKey: args.apiKey });
+
+    const prompt = args.messages
+      .map((m) => `${m.role.toUpperCase()}:\n${m.content}`)
+      .join("\n\n");
+
+    const response = await Promise.race([
+      client.models.generateContent({
+        model: args.model,
+        contents: prompt,
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Timed out")), args.timeoutMs)
+      ),
+    ]);
+
+    const ms = Date.now() - started;
+    const text = String((response as any)?.text ?? "").trim();
+
+    if (!text) {
+      return {
+        provider: args.provider,
+        model: args.model,
+        status: "error",
+        ms,
+        error: "Empty response content.",
+      };
+    }
+
+    return {
+      provider: args.provider,
+      model: args.model,
+      status: "ok",
+      ms,
+      text,
+    };
+  } catch (e: any) {
+    const ms = Date.now() - started;
+    const timedOut = String(e?.message || "")
+      .toLowerCase()
+      .includes("timed out");
+
+    return {
+      provider: args.provider,
+      model: args.model,
+      status: timedOut ? "timeout" : "error",
+      ms,
+      error: e?.message || "Request failed",
+    };
+  }
+}
+
+/* ---------------- Prompt building ---------------- */
+
+function buildMessages(body: CrosscheckUiBody): ChatMsg[] {
+  const sysParts: string[] = [];
+
+  if (body.constraints?.trim()) sysParts.push(body.constraints.trim());
+  if (body.jurisdiction?.trim()) {
+    sysParts.push(`Jurisdiction: ${body.jurisdiction.trim()}`);
+  }
+  if (body.facts?.trim()) {
+    sysParts.push(`Facts:\n${body.facts.trim()}`);
+  }
+
+  sysParts.push(
+    [
+      "Return your answer in this exact structure:",
+      "",
+      "Bottom line:",
+      "<short answer>",
+      "",
+      "Caveats:",
+      "- <bullet>",
+      "- <bullet>",
+      "",
+      "Missing facts:",
+      "- <bullet>",
+      "- <bullet>",
+      "",
+      "Assumptions:",
+      "- <bullet>",
+      "- <bullet>",
+    ].join("\n")
+  );
+
+  const system = sysParts.length
+    ? sysParts.join("\n\n")
+    : "Be conservative. Avoid overclaiming.";
+
+  const user = body.question?.trim() || "";
+
+  return [
+    { role: "system", content: system },
+    { role: "user", content: user },
+  ];
+}
+
+/* ---------------- Consensus helpers ---------------- */
+
+function extractSectionLines(text: string, sectionNames: string[]) {
+  const lines = text.split(/\r?\n/);
+  const normalizedTargets = sectionNames.map((s) => s.toLowerCase());
+
+  let inSection = false;
+  const collected: string[] = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    const lower = line.toLowerCase();
+
+    const isHeader = /^[a-zà-ÿ][a-zà-ÿ\s\/-]{2,}:\s*$/i.test(line);
+    const matchedTarget = normalizedTargets.some((target) => lower === `${target}:`);
+
+    if (matchedTarget) {
+      inSection = true;
+      continue;
+    }
+
+    if (inSection && isHeader) {
+      break;
+    }
+
+    if (!inSection) continue;
+
+    const cleaned = line.replace(/^[-•*]\s*/, "").trim();
+    if (cleaned) collected.push(cleaned);
+  }
+
+  return Array.from(new Set(collected));
+}
+
+function extractAnswerBody(text: string) {
+  const lines = text.split(/\r?\n/);
+  const cleaned: string[] = [];
+  let skippingHeaderLine = false;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+
+    if (/^bottom line:\s*$/i.test(line)) {
+      skippingHeaderLine = true;
+      continue;
+    }
+
+    if (/^(caveats|caveat|limitations|warnings|missing facts|follow-ups|followups|assumptions|ressalvas|advertencias|fatos faltantes|hechos faltantes):\s*$/i.test(line)) {
+      break;
+    }
+
+    if (skippingHeaderLine || cleaned.length > 0) {
+      cleaned.push(rawLine);
+      skippingHeaderLine = false;
+    }
+  }
+
+  const answer = cleaned.join("\n").trim();
+  return answer || text.trim();
+}
+
+/* ---------------- Consensus ---------------- */
+
+function buildConsensus(
+  providers: ProviderResult[]
+): CrosscheckResponse["consensus"] {
+  const oks = providers.filter((p) => p.status === "ok" && p.text?.trim());
+  const fails = providers.filter((p) => p.status !== "ok");
+
+  if (!oks.length) {
+    return {
+      answer: "",
+      caveats: [],
+      followups: [],
+      disagreements: [],
+      confidence: "low",
+    };
+  }
+
+  const openai = oks.find((p) => p.provider === "openai");
+  const chosen = openai ?? oks[0];
+  const chosenText = chosen.text || "";
+
+  const unique = Array.from(
+    new Set(
+      oks
+        .map((p) => (p.text || "").slice(0, 240).replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+    )
+  );
+
+  const disagreements =
+    unique.length > 1
+      ? unique
+          .slice(0, 3)
+          .map(
+            (u, i) =>
+              `Model disagreement #${i + 1}: ${u}${u.length >= 240 ? "…" : ""}`
+          )
+      : [];
+
+  const confidence: "low" | "medium" | "high" =
+    oks.length >= 4 && fails.length === 0
+      ? "high"
+      : oks.length >= 2
+      ? "medium"
+      : "low";
+
+  const caveats = extractSectionLines(chosenText, [
+    "Caveats",
+    "Caveat",
+    "Limitations",
+    "Warnings",
+    "Ressalvas",
+    "Advertencias",
+  ]);
+
+  const followups = extractSectionLines(chosenText, [
+    "Missing facts",
+    "Follow-ups",
+    "Followups",
+    "Fatos faltantes",
+    "Hechos faltantes",
+  ]);
+
+  const answer = extractAnswerBody(chosenText);
+
+  return {
+    answer,
+    caveats,
+    followups,
+    disagreements,
+    confidence,
+  };
+}
+
+/* ---------------- xAI model normalization ---------------- */
+
+function normalizeXaiModel(maybe: string) {
+  const m = (maybe || "").trim();
+  if (!m) return "grok-4-1-fast-reasoning";
+  if (/-latest$/i.test(m)) return "grok-4-1-fast-reasoning";
+  return m;
+}
+
+/* ---------------- Provider config ---------------- */
+
+function getProvidersToRun(): ProviderConfig[] {
+  const providers: ProviderConfig[] = [
+    {
+      provider: "openai",
+      kind: "openai-compatible",
+      baseURL: env("OPENAI_BASE_URL") || "https://api.openai.com/v1",
+      apiKey: requireEnv("OPENAI_API_KEY"),
+      model: env("OPENAI_MODEL") || "gpt-4.1-mini",
+    },
+    {
+      provider: "perplexity",
+      kind: "openai-compatible",
+      baseURL: env("PERPLEXITY_BASE_URL") || "https://api.perplexity.ai",
+      apiKey: requireEnv("PERPLEXITY_API_KEY"),
+      model: env("PERPLEXITY_MODEL") || "sonar-pro",
+    },
+    {
+      provider: "xai",
+      kind: "openai-compatible",
+      baseURL: env("XAI_BASE_URL") || "https://api.x.ai",
+      apiKey: requireEnv("XAI_API_KEY"),
+      model: normalizeXaiModel(env("XAI_MODEL") || "grok-4-1-fast-reasoning"),
+    },
+  ];
+
+  if (env("GEMINI_ENABLED").toLowerCase() === "true") {
+    providers.push({
+      provider: "gemini",
+      kind: "gemini",
+      apiKey: requireEnv("GEMINI_API_KEY"),
+      model: env("GEMINI_MODEL") || "gemini-2.5-pro",
+    });
+  }
+
+  return providers;
+}
+
+/* ---------------- Route ---------------- */
+
+export async function POST(req: NextRequest) {
+  let rlMeta: RateLimitMeta | undefined;
+
+  try {
+    await requireSessionUser();
+
+    const tier = getTierFromRequest(req as unknown as Request);
+    const clientId = getClientId(req as unknown as Request);
+
+    rlMeta = await assertWithinDailyLimit({
+      req: req as unknown as Request,
+      tier,
+      clientId,
+    });
+
+    const raw = await req.json().catch(() => ({}));
+    const body = sanitizeBody(raw);
+
+    if (!body.question) {
+      const res = NextResponse.json(
+        { ok: false, error: "Missing 'question'." },
+        { status: 400 }
+      );
+      applyRateLimitHeaders(res.headers, rlMeta);
+      res.headers.set("cache-control", "no-store, max-age=0");
+      return res;
+    }
+
+    const timeoutMs = body.timeoutMs ?? 35_000;
+    const maxTokens = body.maxTokens ?? 1_200;
+    const messages = buildMessages(body);
+    const providersToRun = getProvidersToRun();
+
+    const startedAll = Date.now();
+
+    const settled = await Promise.allSettled(
+      providersToRun.map((p) => {
+        if (p.kind === "gemini") {
+          return callGemini({
+            provider: p.provider,
+            apiKey: p.apiKey,
+            model: p.model,
+            messages,
+            timeoutMs,
+          });
+        }
+
+        return callChatCompletions({
+          provider: p.provider,
+          baseURL: p.baseURL,
+          apiKey: p.apiKey,
+          model: p.model,
+          messages,
+          temperature: 0.2,
+          timeoutMs,
+          maxTokens,
+        });
+      })
+    );
+
+    const results: ProviderResult[] = settled.map((s, i) => {
+      if (s.status === "fulfilled") return s.value;
+      return {
+        provider: providersToRun[i].provider,
+        model: providersToRun[i].model,
+        status: "error",
+        ms: Date.now() - startedAll,
+        error: String((s.reason as any)?.message ?? s.reason ?? "error"),
+      };
+    });
+
+    const attempted = providersToRun.map((p) => ({
+      provider: p.provider,
+      model: p.model,
+    }));
+
+    const succeeded = results
+      .filter((r) => r.status === "ok")
+      .map((r) => ({ provider: r.provider, model: r.model }));
+
+    const failed = results
+      .filter((r) => r.status !== "ok")
+      .map((r) => ({ provider: r.provider, model: r.model }));
+
+    const response: CrosscheckResponse = {
+      ok: succeeded.length > 0,
+      meta: {
+        attempted,
+        succeeded,
+        failed,
+        runtime_ms: Date.now() - startedAll,
+      },
+      consensus: buildConsensus(results),
+      providers: results,
+      error: succeeded.length > 0 ? undefined : "All providers failed.",
+    };
+
+    const status = response.ok ? 200 : 502;
+
+    const res = NextResponse.json(response, { status });
+    applyRateLimitHeaders(res.headers, rlMeta);
+    res.headers.set("cache-control", "no-store, max-age=0");
+    return res;
+  } catch (err: any) {
+    const msg = err?.message || "Unknown error";
+
+    if (msg === "UNAUTHORIZED") {
+      const res = NextResponse.json(
+        { ok: false, error: "Unauthorized" },
+        { status: 401 }
+      );
+      applyRateLimitHeaders(res.headers, rlMeta);
+      res.headers.set("cache-control", "no-store, max-age=0");
+      return res;
+    }
+
+    if (msg === "RATE_LIMIT") {
+      const status = typeof err?.status === "number" ? err.status : 429;
+      const meta = (err?.meta as RateLimitMeta | undefined) || rlMeta;
+
+      const res = NextResponse.json(
+        { ok: false, error: "Daily usage limit reached for your tier.", meta },
+        { status }
+      );
+      applyRateLimitHeaders(res.headers, meta);
+      res.headers.set("cache-control", "no-store, max-age=0");
+      return res;
+    }
+
+    if (msg.startsWith("Missing env var:")) {
+      const res = NextResponse.json({ ok: false, error: msg }, { status: 500 });
+      applyRateLimitHeaders(res.headers, rlMeta);
+      res.headers.set("cache-control", "no-store, max-age=0");
+      return res;
+    }
+
+    const res = NextResponse.json({ ok: false, error: msg }, { status: 500 });
+    applyRateLimitHeaders(res.headers, rlMeta);
+    res.headers.set("cache-control", "no-store, max-age=0");
+    return res;
+  }
+}
