@@ -144,6 +144,49 @@ function formatTimeAgo(ts: number, locale?: string) {
   return new Date(ts).toLocaleDateString(locale);
 }
 
+function normalizeDisplayName(raw: unknown, email?: unknown) {
+  const bad = new Set(["contact", "admin", "support", "info", "sales", "hello", "team"]);
+
+  const cleanToken = (v: string) =>
+    v
+      .replace(/[^a-zA-ZÀ-ÿ' -]/g, " ")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+
+  const pickFromString = (value: string) => {
+    const parts = cleanToken(value);
+    if (!parts.length) return "";
+
+    const first = parts[0].toLowerCase();
+    if (bad.has(first)) return "";
+
+    return parts[0].charAt(0).toUpperCase() + parts[0].slice(1).toLowerCase();
+  };
+
+  if (typeof raw === "string" && raw.trim()) {
+    const direct = pickFromString(raw);
+    if (direct) return direct;
+  }
+
+  if (typeof email === "string" && email.includes("@")) {
+    const local = email.split("@")[0].trim();
+
+    const candidates = local.includes(".")
+      ? local.split(".").reverse()
+      : local.includes("_")
+      ? local.split("_").reverse()
+      : [local];
+
+    for (const c of candidates) {
+      const picked = pickFromString(c);
+      if (picked) return picked;
+    }
+  }
+
+  return "User";
+}
+
 function smartTitle(text: string) {
   const cleaned = text.trim().replace(/\s+/g, " ");
   if (!cleaned) return "Untitled analysis";
@@ -774,15 +817,11 @@ export default function CrosscheckV2Page() {
         const data = await res.json().catch(() => null);
 
         if (!cancelled && data?.ok && data?.user) {
-          const rawName =
-            data.user.name ||
-            data.user.displayName ||
-            data.user.firstName ||
-            (typeof data.user.email === "string" ? data.user.email.split("@")[0] : "") ||
-            "User";
-
-          const firstName = String(rawName).trim().split(/\s+/)[0] || "User";
-          setSessionDisplayName(firstName);
+          const display = normalizeDisplayName(
+            data.user.name || data.user.displayName || data.user.firstName,
+            data.user.email
+          );
+          setSessionDisplayName(display);
         }
       } catch {}
     }
