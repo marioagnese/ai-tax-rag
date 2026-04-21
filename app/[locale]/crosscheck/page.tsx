@@ -802,6 +802,7 @@ export default function CrosscheckV2Page() {
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const [historyBootstrapped, setHistoryBootstrapped] = useState(false);
   const [sessionDisplayName, setSessionDisplayName] = useState("User");
+  const [currentPlanTier, setCurrentPlanTier] = useState<"0" | "1" | "2">("0");
   const [analysisStartedAt, setAnalysisStartedAt] = useState<number | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
 
@@ -826,7 +827,22 @@ export default function CrosscheckV2Page() {
       } catch {}
     }
 
+    async function loadBillingTier() {
+      try {
+        const res = await fetch("/api/billing/tier", {
+          method: "GET",
+          cache: "no-store",
+        });
+        const data = await res.json().catch(() => null);
+
+        if (!cancelled && data?.ok && (data?.tier === "0" || data?.tier === "1" || data?.tier === "2")) {
+          setCurrentPlanTier(data.tier);
+        }
+      } catch {}
+    }
+
     loadSessionUser();
+    loadBillingTier();
 
     async function loadHistory() {
       let localItems: SavedAnalysis[] = [];
@@ -1456,6 +1472,20 @@ export default function CrosscheckV2Page() {
   const completedProviderCount = providers.filter((p) => p.status === "ok").length;
   const totalProviderCount = Math.max(attemptedCount, providers.length, 6);
 
+  const currentPlanLabel =
+    currentPlanTier === "2"
+      ? "Premium"
+      : currentPlanTier === "1"
+      ? "Basic"
+      : "Free";
+
+  const currentPlanUsageLabel =
+    currentPlanTier === "2"
+      ? "Unlimited"
+      : currentPlanTier === "1"
+      ? "25/day"
+      : "5/day";
+
 
   return (
     <main className="min-h-screen bg-[#0B1220] text-white">
@@ -1548,7 +1578,16 @@ export default function CrosscheckV2Page() {
                   </div>
                 </div>
 
-                <LanguageToggle className="shrink-0 self-start" />
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex flex-col rounded-2xl border border-white/10 bg-[#111827] px-3 py-2 text-left">
+                    <span className="text-[11px] uppercase tracking-[0.16em] text-white/42">Plan</span>
+                    <span className="text-sm font-medium text-white/88">
+                      {currentPlanLabel}
+                      <span className="ml-2 text-white/45">· {currentPlanUsageLabel}</span>
+                    </span>
+                  </div>
+                  <LanguageToggle className="shrink-0 self-start" />
+                </div>
               </div>
 
               <p className="max-w-3xl text-sm leading-6 text-white/56 sm:text-[15px]">
