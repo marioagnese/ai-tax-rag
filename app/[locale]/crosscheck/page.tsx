@@ -1387,6 +1387,10 @@ export default function CrosscheckV2Page() {
       ? tv2("confidenceMedium")
       : tv2("confidenceLow");
 
+  const completedProviderCount = providers.filter((p) => p.status === "ok").length;
+  const totalProviderCount = Math.max(attemptedCount, providers.length, 6);
+
+
   return (
     <main className="min-h-screen bg-[#0B1220] text-white">
       <div className="flex min-h-screen">
@@ -1625,16 +1629,38 @@ export default function CrosscheckV2Page() {
 
                       <div className="space-y-2">
                         <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-[#0F172A] px-3 py-3 text-sm text-white/74">
-                          {elapsedMs >= 5000 ? <Check size={16} className="text-emerald-300" /> : <LoaderCircle size={16} className="animate-spin text-white/65" />}
-                          <span>Collecting initial model positions</span>
+                          {elapsedMs >= 4000 ? <Check size={16} className="text-emerald-300" /> : <LoaderCircle size={16} className="animate-spin text-white/65" />}
+                          <span>
+                            {elapsedMs < 2000
+                              ? "Routing question to premium models"
+                              : elapsedMs < 4000
+                              ? "Collecting first model positions"
+                              : "Initial model collection complete"}
+                          </span>
                         </div>
                         <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-[#0F172A] px-3 py-3 text-sm text-white/74">
-                          {elapsedMs >= 10000 ? <Check size={16} className="text-emerald-300" /> : elapsedMs >= 5000 ? <LoaderCircle size={16} className="animate-spin text-white/65" /> : <Clock3 size={16} className="text-white/45" />}
-                          <span>Comparing agreement and disagreement areas</span>
+                          {elapsedMs >= 9000 ? <Check size={16} className="text-emerald-300" /> : elapsedMs >= 4000 ? <LoaderCircle size={16} className="animate-spin text-white/65" /> : <Clock3 size={16} className="text-white/45" />}
+                          <span>
+                            {elapsedMs < 4000
+                              ? "Waiting to compare model outputs"
+                              : elapsedMs < 7000
+                              ? "Comparing agreement across models"
+                              : elapsedMs < 9000
+                              ? "Reviewing disagreement areas"
+                              : "Cross-model comparison complete"}
+                          </span>
                         </div>
                         <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-[#0F172A] px-3 py-3 text-sm text-white/74">
-                          {elapsedMs >= 15000 ? <Check size={16} className="text-emerald-300" /> : elapsedMs >= 10000 ? <LoaderCircle size={16} className="animate-spin text-white/65" /> : <Clock3 size={16} className="text-white/45" />}
-                          <span>Preparing conservative answer structure</span>
+                          {elapsedMs >= 14000 ? <Check size={16} className="text-emerald-300" /> : elapsedMs >= 9000 ? <LoaderCircle size={16} className="animate-spin text-white/65" /> : <Clock3 size={16} className="text-white/45" />}
+                          <span>
+                            {elapsedMs < 9000
+                              ? "Preparing final synthesis stage"
+                              : elapsedMs < 12000
+                              ? "Building conservative answer structure"
+                              : elapsedMs < 14000
+                              ? "Finalizing premium crosscheck response"
+                              : "Final synthesis ready"}
+                          </span>
                         </div>
                       </div>
                     </div>
