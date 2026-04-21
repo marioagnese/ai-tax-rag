@@ -10,6 +10,7 @@ export async function resolveTierForUserEmail(
   const tier2PriceId = prices.tier2;
 
   const customers = await stripe.customers.list({ email, limit: 10 });
+  console.log("[billing] resolveTierForUserEmail", { email, customerCount: customers.data.length });
   if (!customers.data.length) return "0";
 
   let best: "0" | "1" | "2" = "0";
@@ -22,12 +23,16 @@ export async function resolveTierForUserEmail(
       expand: ["data.items.data.price"],
     });
 
+    console.log("[billing] customer subscriptions", { customerId: c.id, subscriptionCount: subs.data.length, statuses: subs.data.map(x => x.status) });
+
     for (const s of subs.data) {
       if (!["active", "trialing", "past_due"].includes(s.status)) continue;
 
       const metaTier = (s.metadata?.taxaipro_tier || s.metadata?.TAXAIPRO_TIER || "").trim();
       if (metaTier === "2") return "2";
       if (metaTier === "1") best = best === "2" ? "2" : "1";
+
+      console.log("[billing] subscription", { subscriptionId: s.id, status: s.status, metadata: s.metadata, priceIds: s.items.data.map(it => (it.price as any)?.id).filter(Boolean) });
 
       for (const it of s.items.data) {
         const pid = (it.price as any)?.id as string | undefined;
