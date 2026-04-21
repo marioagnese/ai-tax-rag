@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 type Tier = 0 | 1 | 2;
 
@@ -94,7 +94,7 @@ export default function PlansPage() {
   const [loadingTier2, setLoadingTier2] = useState(false);
   const [pageError, setPageError] = useState("");
 
-  useMemo(() => {
+  useEffect(() => {
     let cancelled = false;
 
     async function loadCurrentTier() {
@@ -153,8 +153,8 @@ export default function PlansPage() {
 
   const tier0Cta =
     currentTier === 0 || currentTier === null ? "Start" : "Current access";
-  const tier1Cta = currentTier === 1 ? "Current plan" : "Upgrade to Tier 1";
-  const tier2Cta = currentTier === 2 ? "Current plan" : "Upgrade to Tier 2";
+  const tier1Cta = currentTier === 1 ? "Current plan" : "Upgrade to Basic";
+  const tier2Cta = currentTier === 2 ? "Current plan" : "Upgrade to Premium";
 
   return (
     <div className="min-h-screen bg-[#070A12] text-white">
@@ -201,11 +201,11 @@ export default function PlansPage() {
         <div className="mt-10">
           <h1 className="text-2xl font-semibold text-white/95">Choose a tier</h1>
           <p className="mt-2 max-w-2xl text-sm text-white/60">
-            Start free, then upgrade as usage grows. Daily limits reset every 24h.
+            Start free, then upgrade as usage grows. Daily limits reset every 24h. Paid plans sync from Stripe automatically after checkout.
           </p>
           {tierLoaded && currentTier !== null ? (
             <div className="mt-3 inline-flex rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-white/65">
-              Current tier: Tier {currentTier}
+              Current tier: {currentTier === 0 ? "Free" : currentTier === 1 ? "Basic" : "Premium"}
             </div>
           ) : null}
         </div>
@@ -218,7 +218,7 @@ export default function PlansPage() {
 
         <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-3">
           <TierCard
-            title="Tier 0 — Simple"
+            title="Free"
             subtitle="For quick checks and occasional use."
             runs="5 per day"
             price="$0"
@@ -228,7 +228,7 @@ export default function PlansPage() {
           />
 
           <TierCard
-            title="Tier 1 — Pro"
+            title="Basic"
             subtitle="For frequent scenario testing and follow-ups."
             runs="25 per day"
             price="$5.99/mo"
@@ -240,7 +240,7 @@ export default function PlansPage() {
           />
 
           <TierCard
-            title="Tier 2 — Unlimited"
+            title="Premium"
             subtitle="For heavy users and team workflows."
             runs="Unlimited"
             price="$19.99/mo"

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireSessionUser } from "../../../../src/lib/auth/session";
+import { resolveTierForUserEmail } from "../../../../src/lib/billing/resolveTier";
 import { runCrosscheck } from "../../../../src/core/crosscheck/orchestrator";
 import {
   assertWithinDailyLimit,
@@ -99,9 +100,9 @@ export async function POST(req: NextRequest) {
   let rlMeta: RateLimitMeta | undefined;
 
   try {
-    await requireSessionUser();
+    const user = await requireSessionUser();
 
-    const tier = getTierFromRequest(req as unknown as Request);
+    const tier = Number(await resolveTierForUserEmail(user.email)) as 0 | 1 | 2;
     const clientId = getClientId(req as unknown as Request);
 
     rlMeta = await assertWithinDailyLimit({

@@ -521,6 +521,7 @@ function SidebarContent({
   handleLogout,
   diagnosticsRef,
   labels,
+  sessionDisplayName,
 }: {
   locale: string;
   showHistory: boolean;
@@ -555,6 +556,7 @@ function SidebarContent({
     confidenceWord: string;
     draft: string;
   };
+  sessionDisplayName: string;
 }) {
   return (
     <div className="flex h-full flex-col justify-between">
@@ -699,7 +701,7 @@ function SidebarContent({
         <div className="mb-2 text-xs text-white/35">{labels.loggedInAs}</div>
         <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white/84">
           <User2 size={15} className="text-white/45" />
-          <span>Mario</span>
+          <span>{sessionDisplayName}</span>
         </div>
         <button
           type="button"
@@ -756,11 +758,36 @@ export default function CrosscheckV2Page() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const [historyBootstrapped, setHistoryBootstrapped] = useState(false);
+  const [sessionDisplayName, setSessionDisplayName] = useState("User");
   const [analysisStartedAt, setAnalysisStartedAt] = useState<number | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+
+    async function loadSessionUser() {
+      try {
+        const res = await fetch("/api/auth/session", {
+          method: "GET",
+          cache: "no-store",
+        });
+        const data = await res.json().catch(() => null);
+
+        if (!cancelled && data?.ok && data?.user) {
+          const rawName =
+            data.user.name ||
+            data.user.displayName ||
+            data.user.firstName ||
+            (typeof data.user.email === "string" ? data.user.email.split("@")[0] : "") ||
+            "User";
+
+          const firstName = String(rawName).trim().split(/\s+/)[0] || "User";
+          setSessionDisplayName(firstName);
+        }
+      } catch {}
+    }
+
+    loadSessionUser();
 
     async function loadHistory() {
       let localItems: SavedAnalysis[] = [];
@@ -1454,6 +1481,7 @@ export default function CrosscheckV2Page() {
               confidenceWord: t("common.confidence").toLowerCase(),
               draft: tv2("draft"),
             }}
+            sessionDisplayName={sessionDisplayName}
           />
         </aside>
 
@@ -1476,7 +1504,7 @@ export default function CrosscheckV2Page() {
                       <span>{tv2("sandbox")}</span>
                     </div>
                     <h1 className="text-2xl font-semibold tracking-tight text-white/95 sm:text-3xl">
-                      {tv2("greeting", { name: "Mario" })}
+                      {tv2("greeting", { name: sessionDisplayName })}
                     </h1>
                   </div>
                 </div>
