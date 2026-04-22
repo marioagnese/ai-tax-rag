@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import LanguageToggle from "../../components/LanguageToggle";
@@ -16,6 +16,7 @@ type CopyShape = {
   exampleWarning: string;
   founderLine: string;
   videoLabel: string;
+  videoPeekCta: string;
   taxaiproTitle: string;
   taxaiproLines: string[];
   prompt: string;
@@ -33,6 +34,7 @@ const COPY: Record<Locale, CopyShape> = {
     exampleWarning: "Models sound right — but miss key assumptions",
     founderLine: "[MA] Built from real international tax workflow experience",
     videoLabel: "Watch 60s demo",
+    videoPeekCta: "See TaxAiPro in action",
     taxaiproTitle: "TaxAiPro",
     taxaiproLines: [
       '“34%” alone is incomplete and can mislead decisions',
@@ -42,21 +44,9 @@ const COPY: Record<Locale, CopyShape> = {
     ],
     prompt: "What are the taxes in Brazil?",
     modelResponses: [
-      {
-        name: "OpenAI",
-        logo: "/openai-logo.png",
-        text: "Brazil corporate tax is 34%",
-      },
-      {
-        name: "Claude",
-        logo: "/claude-logo.png",
-        text: "Depends on regime and company type",
-      },
-      {
-        name: "Perplexity",
-        logo: "/perplexity-logo.png",
-        text: "Federal + state taxes may apply",
-      },
+      { name: "OpenAI", logo: "/openai-logo.png", text: "Brazil corporate tax is 34%" },
+      { name: "Claude", logo: "/claude-logo.png", text: "Depends on regime and company type" },
+      { name: "Perplexity", logo: "/perplexity-logo.png", text: "Federal + state taxes may apply" },
     ],
   },
   es: {
@@ -69,6 +59,7 @@ const COPY: Record<Locale, CopyShape> = {
     exampleWarning: "Los modelos suenan correctos, pero omiten supuestos clave",
     founderLine: "[MA] Basado en experiencia real de trabajo tributario internacional",
     videoLabel: "Ver demo de 60s",
+    videoPeekCta: "Ver TaxAiPro en acción",
     taxaiproTitle: "TaxAiPro",
     taxaiproLines: [
       '“34%” por sí solo es incompleto y puede inducir a error',
@@ -78,21 +69,9 @@ const COPY: Record<Locale, CopyShape> = {
     ],
     prompt: "¿Qué impuestos aplican en Brasil?",
     modelResponses: [
-      {
-        name: "OpenAI",
-        logo: "/openai-logo.png",
-        text: "El impuesto corporativo en Brasil es 34%",
-      },
-      {
-        name: "Claude",
-        logo: "/claude-logo.png",
-        text: "Depende del régimen y del tipo de empresa",
-      },
-      {
-        name: "Perplexity",
-        logo: "/perplexity-logo.png",
-        text: "Pueden aplicar impuestos federales y estatales",
-      },
+      { name: "OpenAI", logo: "/openai-logo.png", text: "El impuesto corporativo en Brasil es 34%" },
+      { name: "Claude", logo: "/claude-logo.png", text: "Depende del régimen y del tipo de empresa" },
+      { name: "Perplexity", logo: "/perplexity-logo.png", text: "Pueden aplicar impuestos federales y estatales" },
     ],
   },
   pt: {
@@ -105,6 +84,7 @@ const COPY: Record<Locale, CopyShape> = {
     exampleWarning: "Os modelos parecem corretos, mas ignoram premissas importantes",
     founderLine: "[MA] Construído com base em experiência real de trabalho tributário internacional",
     videoLabel: "Assistir demo de 60s",
+    videoPeekCta: "Ver TaxAiPro em ação",
     taxaiproTitle: "TaxAiPro",
     taxaiproLines: [
       '“34%” sozinho é incompleto e pode induzir a erro',
@@ -114,21 +94,9 @@ const COPY: Record<Locale, CopyShape> = {
     ],
     prompt: "Quais tributos se aplicam no Brasil?",
     modelResponses: [
-      {
-        name: "OpenAI",
-        logo: "/openai-logo.png",
-        text: "O imposto corporativo no Brasil é 34%",
-      },
-      {
-        name: "Claude",
-        logo: "/claude-logo.png",
-        text: "Depende do regime e do tipo de empresa",
-      },
-      {
-        name: "Perplexity",
-        logo: "/perplexity-logo.png",
-        text: "Tributos federais e estaduais podem se aplicar",
-      },
+      { name: "OpenAI", logo: "/openai-logo.png", text: "O imposto corporativo no Brasil é 34%" },
+      { name: "Claude", logo: "/claude-logo.png", text: "Depende do regime e do tipo de empresa" },
+      { name: "Perplexity", logo: "/perplexity-logo.png", text: "Tributos federais e estaduais podem se aplicar" },
     ],
   },
 };
@@ -137,12 +105,10 @@ function Typewriter({
   text,
   start,
   speed = 18,
-  className = "",
 }: {
   text: string;
   start: boolean;
   speed?: number;
-  className?: string;
 }) {
   const [displayed, setDisplayed] = useState("");
 
@@ -151,20 +117,16 @@ function Typewriter({
       setDisplayed("");
       return;
     }
-
     let i = 0;
     const timer = window.setInterval(() => {
       i += 1;
       setDisplayed(text.slice(0, i));
-      if (i >= text.length) {
-        window.clearInterval(timer);
-      }
+      if (i >= text.length) window.clearInterval(timer);
     }, speed);
-
     return () => window.clearInterval(timer);
   }, [text, start, speed]);
 
-  return <span className={className}>{displayed}</span>;
+  return <span>{displayed}</span>;
 }
 
 function AnimatedExample({
@@ -228,22 +190,14 @@ function AnimatedExample({
               }`}
             >
               <div className="relative mt-0.5 h-5 w-5 shrink-0 overflow-hidden rounded-full bg-white">
-                <Image
-                  src={item.logo}
-                  alt={item.name}
-                  fill
-                  className="object-contain p-0.5"
-                  sizes="20px"
-                />
+                <Image src={item.logo} alt={item.name} fill className="object-contain p-0.5" sizes="20px" />
               </div>
               <div className="min-w-0">
                 <div className="text-[11px] uppercase tracking-[0.16em] text-white/40">
                   {item.name}
                 </div>
                 <div className="text-sm leading-6 text-white/78">
-                  {visible ? (
-                    <Typewriter text={item.text} start={visible} speed={18} />
-                  ) : null}
+                  {visible ? <Typewriter text={item.text} start={visible} speed={18} /> : null}
                 </div>
               </div>
             </div>
@@ -251,11 +205,7 @@ function AnimatedExample({
         })}
       </div>
 
-      <div
-        className={`mt-4 text-xs font-medium text-yellow-400 transition-all duration-500 ${
-          stage >= 5 ? "opacity-100" : "opacity-0"
-        }`}
-      >
+      <div className={`mt-4 text-xs font-medium text-yellow-400 transition-all duration-500 ${stage >= 5 ? "opacity-100" : "opacity-0"}`}>
         {warning}
       </div>
 
@@ -266,37 +216,19 @@ function AnimatedExample({
       >
         <div className="mb-2 flex items-center gap-2">
           <div className="relative h-5 w-5 shrink-0 overflow-hidden rounded-full bg-white">
-            <Image
-              src="/taxaipro-logo.png"
-              alt="TaxAiPro"
-              fill
-              className="object-contain p-0.5"
-              sizes="20px"
-            />
+            <Image src="/taxaipro-logo.png" alt="TaxAiPro" fill className="object-contain p-0.5" sizes="20px" />
           </div>
-          <span className="text-sm font-medium text-emerald-200">
-            {taxaiproTitle}
-          </span>
+          <span className="text-sm font-medium text-emerald-200">{taxaiproTitle}</span>
         </div>
 
         <div className="space-y-1.5 text-sm leading-6 text-emerald-100/88">
           {taxaiproLines.slice(0, 3).map((line, idx) => (
             <div key={line}>
-              •{" "}
-              <Typewriter
-                text={line}
-                start={stage >= 5}
-                speed={14 + idx * 2}
-              />
+              • <Typewriter text={line} start={stage >= 5} speed={14 + idx * 2} />
             </div>
           ))}
           <div className="pt-1 font-medium">
-            →{" "}
-            <Typewriter
-              text={taxaiproLines[3]}
-              start={stage >= 5}
-              speed={16}
-            />
+            → <Typewriter text={taxaiproLines[3]} start={stage >= 5} speed={16} />
           </div>
         </div>
       </div>
@@ -307,10 +239,10 @@ function AnimatedExample({
 export default function Page() {
   const router = useRouter();
   const params = useParams<{ locale?: string }>();
+  const [guideOpen, setGuideOpen] = useState(false);
 
   const locale =
-    typeof params?.locale === "string" &&
-    ["en", "es", "pt"].includes(params.locale)
+    typeof params?.locale === "string" && ["en", "es", "pt"].includes(params.locale)
       ? (params.locale as Locale)
       : "en";
 
@@ -326,6 +258,29 @@ export default function Page() {
       }}
     >
       <div className="absolute inset-0 bg-black/72" />
+
+      {guideOpen && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 px-4 backdrop-blur-sm"
+          onClick={() => setGuideOpen(false)}
+        >
+          <div
+            className="relative w-full max-w-4xl rounded-3xl border border-white/10 bg-[#0A0F1A] p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setGuideOpen(false)}
+              className="absolute right-4 top-4 rounded-full border border-white/15 bg-black/40 px-3 py-1.5 text-sm text-white/80 hover:bg-white/10"
+            >
+              ✕
+            </button>
+
+            <video className="w-full rounded-2xl" controls autoPlay playsInline>
+              <source src="/TaxAIProGuide.mp4" type="video/mp4" />
+            </video>
+          </div>
+        </div>
+      )}
 
       <div className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6 py-6">
         <header className="mb-8 flex items-center justify-between gap-4">
@@ -362,7 +317,7 @@ export default function Page() {
               {copy.sub}
             </p>
 
-            <div className="mt-6 w-full max-w-[260px] overflow-hidden rounded-2xl border border-white/10 bg-black/30 shadow-[0_16px_40px_rgba(0,0,0,0.28)]">
+            <div className="mt-6 w-full max-w-[240px] overflow-hidden rounded-2xl border border-white/10 bg-black/30 shadow-[0_16px_40px_rgba(0,0,0,0.28)]">
               <div className="border-b border-white/10 px-3 py-2 text-xs font-medium text-white/72">
                 {copy.videoLabel}
               </div>
@@ -374,6 +329,15 @@ export default function Page() {
                 playsInline
                 className="aspect-square w-full object-cover"
               />
+              <div className="p-3">
+                <button
+                  type="button"
+                  onClick={() => setGuideOpen(true)}
+                  className="w-full rounded-xl bg-cyan-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-cyan-400"
+                >
+                  {copy.videoPeekCta}
+                </button>
+              </div>
             </div>
 
             <p className="mt-5 max-w-xl text-xs leading-6 text-white/52">
