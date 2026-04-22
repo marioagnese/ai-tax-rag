@@ -1,29 +1,28 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import LanguageToggle from "../../components/LanguageToggle";
 
 type Locale = "en" | "es" | "pt";
 
-const COPY: Record<
-  Locale,
-  {
-    headline: string;
-    sub: string;
-    cta: string;
-    login: string;
-    disclaimer: string;
-    exampleWarning: string;
-    founderLine: string;
-    videoLabel: string;
-    taxaiproTitle: string;
-    taxaiproLines: string[];
-    prompt: string;
-    modelResponses: Array<{ name: string; logo: string; text: string }>;
-  }
-> = {
+type CopyShape = {
+  headline: string;
+  sub: string;
+  cta: string;
+  login: string;
+  disclaimer: string;
+  exampleWarning: string;
+  founderLine: string;
+  videoLabel: string;
+  taxaiproTitle: string;
+  taxaiproLines: string[];
+  prompt: string;
+  modelResponses: Array<{ name: string; logo: string; text: string }>;
+};
+
+const COPY: Record<Locale, CopyShape> = {
   en: {
     headline: "Don’t trust a single AI answer on tax questions.",
     sub: "TaxAiPro is not another AI. It cross-checks multiple models to detect missing assumptions, conflicts, and risk.",
@@ -134,33 +133,174 @@ const COPY: Record<
   },
 };
 
-function ModelRow({
-  logo,
-  name,
+function Typewriter({
   text,
+  start,
+  speed = 18,
+  className = "",
 }: {
-  logo: string;
-  name: string;
   text: string;
+  start: boolean;
+  speed?: number;
+  className?: string;
 }) {
+  const [displayed, setDisplayed] = useState("");
+
+  useEffect(() => {
+    if (!start) {
+      setDisplayed("");
+      return;
+    }
+
+    let i = 0;
+    const timer = window.setInterval(() => {
+      i += 1;
+      setDisplayed(text.slice(0, i));
+      if (i >= text.length) {
+        window.clearInterval(timer);
+      }
+    }, speed);
+
+    return () => window.clearInterval(timer);
+  }, [text, start, speed]);
+
+  return <span className={className}>{displayed}</span>;
+}
+
+function AnimatedExample({
+  prompt,
+  warning,
+  taxaiproTitle,
+  taxaiproLines,
+  modelResponses,
+}: {
+  prompt: string;
+  warning: string;
+  taxaiproTitle: string;
+  taxaiproLines: string[];
+  modelResponses: Array<{ name: string; logo: string; text: string }>;
+}) {
+  const [stage, setStage] = useState(0);
+
+  useEffect(() => {
+    const timers: number[] = [];
+
+    const loop = () => {
+      setStage(0);
+      timers.push(window.setTimeout(() => setStage(1), 400));
+      timers.push(window.setTimeout(() => setStage(2), 1500));
+      timers.push(window.setTimeout(() => setStage(3), 2600));
+      timers.push(window.setTimeout(() => setStage(4), 3900));
+      timers.push(window.setTimeout(() => setStage(5), 5200));
+    };
+
+    loop();
+    const repeat = window.setInterval(loop, 10000);
+
+    return () => {
+      timers.forEach(window.clearTimeout);
+      window.clearInterval(repeat);
+    };
+  }, []);
+
   return (
-    <div className="flex items-start gap-3 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-3 transition hover:bg-white/[0.05]">
-      <div className="relative mt-0.5 h-5 w-5 shrink-0 overflow-hidden rounded-full bg-white">
-        <Image
-          src={logo}
-          alt={name}
-          fill
-          className="object-contain p-0.5"
-          sizes="20px"
-        />
-      </div>
-      <div className="min-w-0">
-        <div className="text-[11px] uppercase tracking-[0.16em] text-white/40">
-          {name}
+    <section className="rounded-3xl border border-white/10 bg-black/45 p-5 backdrop-blur-md">
+      <div className="mb-4 rounded-2xl border border-white/10 bg-[#101B30] px-4 py-3">
+        <div className="mb-1 text-[11px] uppercase tracking-[0.16em] text-white/38">
+          Same prompt
         </div>
-        <div className="text-sm leading-6 text-white/78">{text}</div>
+        <div className="text-base font-medium text-white/88">
+          <Typewriter text={prompt} start={stage >= 1} speed={28} />
+          {stage >= 1 && <span className="ml-0.5 inline-block animate-pulse text-white/70">|</span>}
+        </div>
       </div>
-    </div>
+
+      <div className="space-y-3">
+        {modelResponses.map((item, index) => {
+          const rowStage = index + 2;
+          const visible = stage >= rowStage;
+
+          return (
+            <div
+              key={item.name}
+              className={`flex items-start gap-3 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-3 transition-all duration-500 ${
+                visible ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0"
+              }`}
+            >
+              <div className="relative mt-0.5 h-5 w-5 shrink-0 overflow-hidden rounded-full bg-white">
+                <Image
+                  src={item.logo}
+                  alt={item.name}
+                  fill
+                  className="object-contain p-0.5"
+                  sizes="20px"
+                />
+              </div>
+              <div className="min-w-0">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-white/40">
+                  {item.name}
+                </div>
+                <div className="text-sm leading-6 text-white/78">
+                  {visible ? (
+                    <Typewriter text={item.text} start={visible} speed={18} />
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div
+        className={`mt-4 text-xs font-medium text-yellow-400 transition-all duration-500 ${
+          stage >= 5 ? "opacity-100" : "opacity-0"
+        }`}
+      >
+        {warning}
+      </div>
+
+      <div
+        className={`mt-4 rounded-2xl border border-emerald-400/25 bg-emerald-400/10 p-4 shadow-[0_0_0_1px_rgba(16,185,129,0.08)] transition-all duration-500 ${
+          stage >= 5 ? "opacity-100 ring-1 ring-emerald-300/20 animate-pulse" : "opacity-0"
+        }`}
+      >
+        <div className="mb-2 flex items-center gap-2">
+          <div className="relative h-5 w-5 shrink-0 overflow-hidden rounded-full bg-white">
+            <Image
+              src="/taxaipro-logo.png"
+              alt="TaxAiPro"
+              fill
+              className="object-contain p-0.5"
+              sizes="20px"
+            />
+          </div>
+          <span className="text-sm font-medium text-emerald-200">
+            {taxaiproTitle}
+          </span>
+        </div>
+
+        <div className="space-y-1.5 text-sm leading-6 text-emerald-100/88">
+          {taxaiproLines.slice(0, 3).map((line, idx) => (
+            <div key={line}>
+              •{" "}
+              <Typewriter
+                text={line}
+                start={stage >= 5}
+                speed={14 + idx * 2}
+              />
+            </div>
+          ))}
+          <div className="pt-1 font-medium">
+            →{" "}
+            <Typewriter
+              text={taxaiproLines[3]}
+              start={stage >= 5}
+              speed={16}
+            />
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -222,16 +362,7 @@ export default function Page() {
               {copy.sub}
             </p>
 
-            <div className="mt-6 flex items-center gap-3">
-              <button
-                onClick={() => router.push(`/${locale}/signup`)}
-                className="rounded-xl bg-white px-5 py-3 text-sm font-medium text-black transition hover:bg-white/90"
-              >
-                {copy.cta}
-              </button>
-            </div>
-
-            <div className="mt-6 w-full max-w-[300px] overflow-hidden rounded-2xl border border-white/10 bg-black/30 shadow-[0_16px_40px_rgba(0,0,0,0.28)]">
+            <div className="mt-6 w-full max-w-[260px] overflow-hidden rounded-2xl border border-white/10 bg-black/30 shadow-[0_16px_40px_rgba(0,0,0,0.28)]">
               <div className="border-b border-white/10 px-3 py-2 text-xs font-medium text-white/72">
                 {copy.videoLabel}
               </div>
@@ -250,55 +381,13 @@ export default function Page() {
             </p>
           </section>
 
-          <section className="rounded-3xl border border-white/10 bg-black/45 p-5 backdrop-blur-md">
-            <div className="mb-4 rounded-2xl border border-white/10 bg-[#101B30] px-4 py-3">
-              <div className="mb-1 text-[11px] uppercase tracking-[0.16em] text-white/38">
-                Same prompt
-              </div>
-              <div className="text-base font-medium text-white/88">
-                {copy.prompt}
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              {copy.modelResponses.map((item: { name: string; logo: string; text: string }) => (
-                <ModelRow
-                  key={item.name}
-                  logo={item.logo}
-                  name={item.name}
-                  text={item.text}
-                />
-              ))}
-            </div>
-
-            <div className="mt-4 text-xs font-medium text-yellow-400">
-              {copy.exampleWarning}
-            </div>
-
-            <div className="mt-4 rounded-2xl border border-emerald-400/25 bg-emerald-400/10 p-4 shadow-[0_0_0_1px_rgba(16,185,129,0.08)]">
-              <div className="mb-2 flex items-center gap-2">
-                <div className="relative h-5 w-5 shrink-0 overflow-hidden rounded-full bg-white">
-                  <Image
-                    src="/taxaipro-logo.png"
-                    alt="TaxAiPro"
-                    fill
-                    className="object-contain p-0.5"
-                    sizes="20px"
-                  />
-                </div>
-                <span className="text-sm font-medium text-emerald-200">
-                  {copy.taxaiproTitle}
-                </span>
-              </div>
-
-              <div className="space-y-1.5 text-sm leading-6 text-emerald-100/88">
-                {copy.taxaiproLines.slice(0, 3).map((line) => (
-                  <div key={line}>• {line}</div>
-                ))}
-                <div className="pt-1 font-medium">→ {copy.taxaiproLines[3]}</div>
-              </div>
-            </div>
-          </section>
+          <AnimatedExample
+            prompt={copy.prompt}
+            warning={copy.exampleWarning}
+            taxaiproTitle={copy.taxaiproTitle}
+            taxaiproLines={copy.taxaiproLines}
+            modelResponses={copy.modelResponses}
+          />
         </main>
       </div>
     </div>
