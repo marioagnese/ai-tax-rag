@@ -16,115 +16,122 @@ const COPY: Record<
     login: string;
     disclaimer: string;
     exampleWarning: string;
+    founderLine: string;
+    videoLabel: string;
     taxaiproTitle: string;
     taxaiproLines: string[];
+    prompt: string;
+    modelResponses: Array<{ name: string; logo: string; text: string }>;
   }
 > = {
   en: {
     headline: "Don’t trust a single AI answer on tax questions.",
     sub: "TaxAiPro is not another AI. It cross-checks multiple models to detect missing assumptions, conflicts, and risk.",
-    cta: "Start free analysis",
+    cta: "Validate your answer now",
     login: "Log in",
     disclaimer:
       "TaxAiPro provides informational cross-checking support only. It does not provide legal or tax advice.",
     exampleWarning: "Models sound right — but miss key assumptions",
+    founderLine: "[MA] Built from real international tax workflow experience",
+    videoLabel: "Watch 60s demo",
     taxaiproTitle: "TaxAiPro",
     taxaiproLines: [
-      '“34%” is incomplete and can mislead decisions',
-      "Outcome depends on tax regime (Real vs Presumido)",
-      "Missing: revenue, activity, jurisdiction",
-      "Answer is not reliable without more facts",
+      '“34%” alone is incomplete and can mislead decisions',
+      "Brazil tax analysis depends on regime, taxpayer type, and transaction",
+      "Relevant buckets may include IRPJ, CSLL, PIS/COFINS, ICMS, ISS, IPI, and withholding depending on the facts",
+      "This answer is unsafe to rely on without additional facts",
+    ],
+    prompt: "What are the taxes in Brazil?",
+    modelResponses: [
+      {
+        name: "OpenAI",
+        logo: "/openai-logo.png",
+        text: "Brazil corporate tax is 34%",
+      },
+      {
+        name: "Claude",
+        logo: "/claude-logo.png",
+        text: "Depends on regime and company type",
+      },
+      {
+        name: "Perplexity",
+        logo: "/perplexity-logo.png",
+        text: "Federal + state taxes may apply",
+      },
     ],
   },
   es: {
     headline: "No confíes en una sola respuesta de IA para temas fiscales.",
     sub: "TaxAiPro no es otra IA. Compara múltiples modelos para detectar supuestos faltantes, conflictos y riesgo.",
-    cta: "Comenzar análisis gratis",
+    cta: "Valida tu respuesta ahora",
     login: "Iniciar sesión",
     disclaimer:
       "TaxAiPro solo ofrece apoyo informativo de validación cruzada. No brinda asesoría legal ni fiscal.",
     exampleWarning: "Los modelos suenan correctos, pero omiten supuestos clave",
+    founderLine: "[MA] Basado en experiencia real de trabajo tributario internacional",
+    videoLabel: "Ver demo de 60s",
     taxaiproTitle: "TaxAiPro",
     taxaiproLines: [
-      '“34%” es incompleto y puede inducir a error',
-      "El resultado depende del régimen fiscal",
-      "Faltan datos: ingresos, actividad, jurisdicción",
-      "La respuesta no es confiable sin más hechos",
+      '“34%” por sí solo es incompleto y puede inducir a error',
+      "El análisis fiscal en Brasil depende del régimen, del tipo de contribuyente y de la transacción",
+      "Los impuestos relevantes pueden incluir IRPJ, CSLL, PIS/COFINS, ICMS, ISS, IPI y retenciones según los hechos",
+      "No es seguro confiar en esta respuesta sin hechos adicionales",
+    ],
+    prompt: "¿Qué impuestos aplican en Brasil?",
+    modelResponses: [
+      {
+        name: "OpenAI",
+        logo: "/openai-logo.png",
+        text: "El impuesto corporativo en Brasil es 34%",
+      },
+      {
+        name: "Claude",
+        logo: "/claude-logo.png",
+        text: "Depende del régimen y del tipo de empresa",
+      },
+      {
+        name: "Perplexity",
+        logo: "/perplexity-logo.png",
+        text: "Pueden aplicar impuestos federales y estatales",
+      },
     ],
   },
   pt: {
     headline: "Não confie em apenas uma resposta de IA para questões tributárias.",
     sub: "TaxAiPro não é outra IA. Ele cruza múltiplos modelos para detectar premissas faltantes, conflitos e risco.",
-    cta: "Começar análise grátis",
+    cta: "Valide sua resposta agora",
     login: "Entrar",
     disclaimer:
       "O TaxAiPro oferece apenas apoio informativo de validação cruzada. Não fornece aconselhamento jurídico ou tributário.",
     exampleWarning: "Os modelos parecem corretos, mas ignoram premissas importantes",
+    founderLine: "[MA] Construído com base em experiência real de trabalho tributário internacional",
+    videoLabel: "Assistir demo de 60s",
     taxaiproTitle: "TaxAiPro",
     taxaiproLines: [
-      '“34%” é incompleto e pode induzir a erro',
-      "O resultado depende do regime tributário",
-      "Faltam dados: receita, atividade, jurisdição",
-      "A resposta não é confiável sem mais fatos",
+      '“34%” sozinho é incompleto e pode induzir a erro',
+      "A análise tributária no Brasil depende do regime, do tipo de contribuinte e da operação",
+      "Os tributos relevantes podem incluir IRPJ, CSLL, PIS/COFINS, ICMS, ISS, IPI e retenções conforme os fatos",
+      "Não é seguro confiar nessa resposta sem fatos adicionais",
+    ],
+    prompt: "Quais tributos se aplicam no Brasil?",
+    modelResponses: [
+      {
+        name: "OpenAI",
+        logo: "/openai-logo.png",
+        text: "O imposto corporativo no Brasil é 34%",
+      },
+      {
+        name: "Claude",
+        logo: "/claude-logo.png",
+        text: "Depende do regime e do tipo de empresa",
+      },
+      {
+        name: "Perplexity",
+        logo: "/perplexity-logo.png",
+        text: "Tributos federais e estaduais podem se aplicar",
+      },
     ],
   },
-};
-
-const MODEL_RESPONSES: Record<
-  Locale,
-  Array<{ name: string; logo: string; text: string }>
-> = {
-  en: [
-    {
-      name: "OpenAI",
-      logo: "/openai-logo.png",
-      text: "Brazil corporate tax is 34%",
-    },
-    {
-      name: "Claude",
-      logo: "/claude-logo.png",
-      text: "Depends on regime and company type",
-    },
-    {
-      name: "Perplexity",
-      logo: "/perplexity-logo.png",
-      text: "Federal + state taxes may apply",
-    },
-  ],
-  es: [
-    {
-      name: "OpenAI",
-      logo: "/openai-logo.png",
-      text: "El impuesto corporativo en Brasil es 34%",
-    },
-    {
-      name: "Claude",
-      logo: "/claude-logo.png",
-      text: "Depende del régimen y del tipo de empresa",
-    },
-    {
-      name: "Perplexity",
-      logo: "/perplexity-logo.png",
-      text: "Pueden aplicar impuestos federales y estatales",
-    },
-  ],
-  pt: [
-    {
-      name: "OpenAI",
-      logo: "/openai-logo.png",
-      text: "O imposto corporativo no Brasil é 34%",
-    },
-    {
-      name: "Claude",
-      logo: "/claude-logo.png",
-      text: "Depende do regime e do tipo de empresa",
-    },
-    {
-      name: "Perplexity",
-      logo: "/perplexity-logo.png",
-      text: "Tributos federais e estaduais podem se aplicar",
-    },
-  ],
 };
 
 function ModelRow({
@@ -137,7 +144,7 @@ function ModelRow({
   text: string;
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-3">
+    <div className="flex items-start gap-3 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-3 transition hover:bg-white/[0.05]">
       <div className="relative mt-0.5 h-5 w-5 shrink-0 overflow-hidden rounded-full bg-white">
         <Image
           src={logo}
@@ -168,7 +175,6 @@ export default function Page() {
       : "en";
 
   const copy = COPY[locale];
-  const modelResponses = MODEL_RESPONSES[locale];
 
   return (
     <div
@@ -204,6 +210,10 @@ export default function Page() {
 
         <main className="grid flex-1 items-center gap-8 lg:grid-cols-[0.95fr_1.05fr]">
           <section>
+            <div className="mb-4 inline-flex items-center rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-white/72">
+              {copy.founderLine}
+            </div>
+
             <h1 className="max-w-xl text-4xl font-semibold leading-tight tracking-tight lg:text-5xl">
               {copy.headline}
             </h1>
@@ -212,7 +222,19 @@ export default function Page() {
               {copy.sub}
             </p>
 
+            <div className="mt-6 flex items-center gap-3">
+              <button
+                onClick={() => router.push(`/${locale}/signup`)}
+                className="rounded-xl bg-white px-5 py-3 text-sm font-medium text-black transition hover:bg-white/90"
+              >
+                {copy.cta}
+              </button>
+            </div>
+
             <div className="mt-6 w-full max-w-[300px] overflow-hidden rounded-2xl border border-white/10 bg-black/30 shadow-[0_16px_40px_rgba(0,0,0,0.28)]">
+              <div className="border-b border-white/10 px-3 py-2 text-xs font-medium text-white/72">
+                {copy.videoLabel}
+              </div>
               <video
                 src="/demo-60s.mp4"
                 autoPlay
@@ -234,12 +256,12 @@ export default function Page() {
                 Same prompt
               </div>
               <div className="text-base font-medium text-white/88">
-                What are the taxes in Brazil?
+                {copy.prompt}
               </div>
             </div>
 
             <div className="space-y-3">
-              {modelResponses.map((item) => (
+              {copy.modelResponses.map((item: { name: string; logo: string; text: string }) => (
                 <ModelRow
                   key={item.name}
                   logo={item.logo}
@@ -253,7 +275,7 @@ export default function Page() {
               {copy.exampleWarning}
             </div>
 
-            <div className="mt-4 rounded-2xl border border-emerald-400/25 bg-emerald-400/10 p-4">
+            <div className="mt-4 rounded-2xl border border-emerald-400/25 bg-emerald-400/10 p-4 shadow-[0_0_0_1px_rgba(16,185,129,0.08)]">
               <div className="mb-2 flex items-center gap-2">
                 <div className="relative h-5 w-5 shrink-0 overflow-hidden rounded-full bg-white">
                   <Image
