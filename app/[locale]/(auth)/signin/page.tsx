@@ -1,163 +1,185 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useState } from "react";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
-import { firebaseClientConfigured } from "@/src/lib/firebase/client";
-import LanguageToggle from "../../components/LanguageToggle";
 
 type Locale = "en" | "es" | "pt";
 
 const COPY: Record<Locale, any> = {
   en: {
     headline: "Don’t trust a single AI answer on tax questions.",
-    sub: "TaxAiPro cross-checks multiple models and tells you when the answer is incomplete, risky, or needs refinement.",
-    cta: "Try it free",
+    sub: "See what happens when models disagree — and what they miss.",
+    cta: "Run your own crosscheck →",
     login: "Log in",
-    pricing: "Free · 5/day   Basic · 25/day   Premium · Unlimited",
-    prompt: "What taxes apply in Brazil?",
-    taxaipro: `This question is too broad to answer reliably without context.
-
-As a starting point:
-
-• Corporate operations: IRPJ, CSLL, PIS/COFINS, and potentially ICMS, ISS or IPI depending on the activity  
-• Individuals / payroll: income tax and employment charges  
-• Cross-border flows: withholding taxes depending on services, royalties or interest  
-
-A safer approach is to first clarify whether the question relates to corporate income, indirect tax, payroll, or withholding before relying on a conclusion.`,
+    prompt: "What are the taxes in Brazil?",
+    taxaipro: "TaxAiPro Crosscheck™",
+  },
+  es: {
+    headline: "No confíes en una sola respuesta de IA.",
+    sub: "Descubre lo que los modelos no te dicen.",
+    cta: "Probar análisis →",
+    login: "Entrar",
+    prompt: "¿Cuáles son los impuestos en Brasil?",
+    taxaipro: "Análisis TaxAiPro™",
+  },
+  pt: {
+    headline: "Não confie em uma única resposta de IA.",
+    sub: "Veja o que os modelos ignoram.",
+    cta: "Testar análise →",
+    login: "Entrar",
+    prompt: "Quais são os impostos no Brasil?",
+    taxaipro: "Análise TaxAiPro™",
   },
 };
 
-const MODELS = [
-  {
-    name: "OpenAI",
-    logo: "/openai-logo.png",
-    text: "Brazil has federal, state and municipal taxes including corporate income tax and indirect taxes.",
-  },
-  {
-    name: "Claude",
-    logo: "/claude-logo.png",
-    text: "Taxes may include income taxes, indirect taxes like ICMS/ISS, and payroll-related obligations.",
-  },
-  {
-    name: "Perplexity",
-    logo: "/perplexity-logo.png",
-    text: "Main taxes include IRPJ, CSLL, PIS, COFINS, ICMS, ISS and social contributions.",
-  },
-  {
-    name: "Gemini",
-    logo: "/gemini-logo.png",
-    text: "Brazil has multiple layers of taxation covering income, consumption and payroll.",
-  },
-];
+function InteractiveDemo() {
+  const [step, setStep] = useState(0);
 
-function ModelCard({ model }: any) {
+  const runDemo = () => {
+    setStep(0);
+    setTimeout(() => setStep(1), 800);
+    setTimeout(() => setStep(2), 2000);
+    setTimeout(() => setStep(3), 3500);
+    setTimeout(() => setStep(4), 5000);
+  };
+
   return (
-    <div className="rounded-xl border border-white/10 bg-[#0F1B2E] p-3">
-      <div className="flex items-center gap-2 mb-2">
-        <div className="relative h-4 w-4">
-          <Image src={model.logo} alt="" fill className="object-contain" />
-        </div>
-        <span className="text-xs text-white/70">{model.name}</span>
+    <div className="rounded-3xl border border-white/10 bg-black/50 p-6 backdrop-blur-md">
+
+      {/* Input */}
+      <div className="flex gap-2">
+        <input
+          defaultValue="What are the taxes in Brazil?"
+          className="flex-1 rounded-xl bg-black/60 px-4 py-2 text-white"
+        />
+        <button
+          onClick={runDemo}
+          className="rounded-xl bg-white px-4 py-2 text-black font-medium"
+        >
+          Run
+        </button>
       </div>
-      <p className="text-xs text-white/60 leading-5">{model.text}</p>
+
+      {/* Flow */}
+      <div className="mt-6 space-y-3 text-sm">
+
+        {step >= 1 && (
+          <div className="rounded-xl bg-white/5 p-3 animate-fadeIn">
+            🤖 GPT: Brazil corporate tax is ~34%
+          </div>
+        )}
+
+        {step >= 2 && (
+          <div className="rounded-xl bg-white/5 p-3 animate-fadeIn">
+            🤖 Claude: Depends on tax regime and entity type
+          </div>
+        )}
+
+        {step >= 2 && (
+          <div className="rounded-xl bg-white/5 p-3 animate-fadeIn">
+            🤖 Perplexity: Federal, state, and municipal taxes apply
+          </div>
+        )}
+
+        {step >= 3 && (
+          <div className="text-yellow-300 text-xs">
+            Models miss key assumptions
+          </div>
+        )}
+
+        {step >= 4 && (
+          <div className="rounded-xl border border-white/20 bg-white/10 p-4 animate-fadeIn">
+            <strong>TaxAiPro Crosscheck™</strong>
+            <ul className="mt-2 space-y-1 text-white/80">
+              <li>• Corporate rate alone is incomplete</li>
+              <li>• Depends on regime (Real vs Presumido)</li>
+              <li>• Missing facts: revenue, activity, jurisdiction</li>
+            </ul>
+          </div>
+        )}
+      </div>
+
+      {step >= 4 && (
+        <button className="mt-4 w-full rounded-xl bg-white px-4 py-2 text-black font-medium">
+          Run your own analysis →
+        </button>
+      )}
     </div>
   );
 }
 
-export default function SignInPage() {
+export default function LandingPage() {
   const router = useRouter();
-  const params = useParams();
-  const locale = "en";
+  const params = useParams<{ locale?: string }>();
 
-  const configured = useMemo(() => firebaseClientConfigured(), []);
+  const locale =
+    typeof params?.locale === "string" &&
+    ["en", "es", "pt"].includes(params.locale)
+      ? (params.locale as Locale)
+      : "en";
+
   const copy = COPY[locale];
 
   return (
-    <div className="min-h-screen text-white bg-black relative">
-      <div className="absolute inset-0 bg-gradient-to-b from-[#0B1220] to-black" />
+    <div
+      className="relative min-h-screen text-white"
+      style={{
+        backgroundImage: `url("/landing-bg.png")`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      }}
+    >
+      <div className="absolute inset-0 bg-black/60" />
 
       {/* HEADER */}
-      <header className="relative flex justify-between items-center p-6">
-        <div className="relative h-10 w-40">
-          <Image src="/taxaipro-logo.png" alt="" fill className="object-contain" />
-        </div>
-        <LanguageToggle />
+      <header className="relative flex items-center justify-between px-6 pt-6">
+        <Image src="/taxaipro-logo.png" alt="logo" width={160} height={40} />
+
+        <button
+          onClick={() => router.push(`/${locale}/signup?mode=login`)}
+          className="rounded-xl border border-white/20 px-4 py-2 text-sm"
+        >
+          {copy.login}
+        </button>
       </header>
 
       {/* HERO */}
-      <main className="relative max-w-7xl mx-auto px-6 pt-10 pb-16 grid lg:grid-cols-2 gap-10">
+      <main className="relative mx-auto max-w-6xl px-6 pt-20">
+        <div className="grid gap-10 lg:grid-cols-2">
 
-        {/* LEFT */}
-        <div>
-          <h1 className="text-4xl md:text-5xl font-semibold leading-tight">
-            {copy.headline}
-          </h1>
+          {/* LEFT */}
+          <div>
+            <h1 className="text-4xl font-semibold leading-tight md:text-5xl">
+              {copy.headline}
+            </h1>
 
-          <p className="mt-4 text-white/70 text-lg">
-            {copy.sub}
-          </p>
+            <p className="mt-4 text-white/70 text-sm">
+              {copy.sub}
+            </p>
 
-          <div className="mt-6 flex gap-3">
             <button
-              onClick={() => router.push(`/en/signup`)}
-              className="bg-white text-black px-5 py-2 rounded-xl"
+              onClick={() => router.push(`/${locale}/signup`)}
+              className="mt-6 rounded-xl bg-white px-6 py-3 text-black font-medium"
             >
               {copy.cta}
             </button>
 
-            <button
-              onClick={() => router.push(`/en/signup?mode=login#login`)}
-              className="border border-white/20 px-5 py-2 rounded-xl"
-            >
-              {copy.login}
-            </button>
-          </div>
-
-          <div className="mt-4 text-xs text-white/50">
-            {copy.pricing}
-          </div>
-        </div>
-
-        {/* RIGHT */}
-        <div className="space-y-4">
-
-          {/* PROMPT */}
-          <div className="bg-[#111827] p-4 rounded-xl border border-white/10">
-            <div className="text-xs text-white/40 mb-1">Same prompt</div>
-            <div className="text-sm">{copy.prompt}</div>
-          </div>
-
-          {/* MODELS */}
-          <div className="grid grid-cols-2 gap-3">
-            {MODELS.map((m) => (
-              <ModelCard key={m.name} model={m} />
-            ))}
-          </div>
-
-          {/* TAXAIPRO */}
-          <div className="bg-emerald-500/10 border border-emerald-400/30 p-5 rounded-xl">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="relative h-5 w-5">
-                <Image src="/taxaipro-logo.png" alt="" fill />
-              </div>
-              <span className="text-emerald-300 text-sm font-medium">
-                TaxAiPro
-              </span>
+            {/* SMALL VIDEO (reintroduced, but subtle) */}
+            <div className="mt-6 rounded-2xl overflow-hidden border border-white/10">
+              <video
+                src="/demo-60s.mp4"
+                autoPlay
+                muted
+                loop
+                playsInline
+                className="w-full"
+              />
             </div>
-
-            <p className="text-sm text-emerald-100/90 leading-6 whitespace-pre-line">
-              {copy.taxaipro}
-            </p>
           </div>
 
-          {/* VIDEO (REINTRODUCED — SMALL + PREMIUM) */}
-          <div className="rounded-xl overflow-hidden border border-white/10">
-            <video className="w-full" controls playsInline>
-              <source src="/demo-60s.mp4" type="video/mp4" />
-            </video>
-          </div>
+          {/* RIGHT (INTERACTIVE DEMO) */}
+          <InteractiveDemo />
 
         </div>
       </main>
