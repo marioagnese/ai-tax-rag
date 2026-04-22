@@ -19,33 +19,52 @@ const COPY: Record<Locale, any> = {
 
 function MiniDemo() {
   return (
-    <div className="rounded-2xl border border-white/10 bg-black/50 p-4 space-y-3 text-sm">
+    <div className="rounded-2xl border border-white/10 bg-black/50 p-5 space-y-4 text-sm">
 
-      <div className="flex items-start gap-2 text-white/70">
-        <span>🤖</span>
-        <span>“Corporate tax is 34%”</span>
+      {/* AI RESPONSES */}
+      <div className="space-y-3">
+
+        <div className="flex items-start gap-2">
+          <Image src="/gpt.png" alt="gpt" width={18} height={18} />
+          <span className="text-white/70">
+            “Brazil corporate tax is 34%”
+          </span>
+        </div>
+
+        <div className="flex items-start gap-2">
+          <Image src="/claude.png" alt="claude" width={18} height={18} />
+          <span className="text-white/70">
+            “Depends on regime and company type”
+          </span>
+        </div>
+
+        <div className="flex items-start gap-2">
+          <Image src="/perplexity.png" alt="perplexity" width={18} height={18} />
+          <span className="text-white/70">
+            “Federal + state taxes may apply”
+          </span>
+        </div>
+
       </div>
 
-      <div className="flex items-start gap-2 text-white/70">
-        <span>🤖</span>
-        <span>“Depends on regime”</span>
-      </div>
-
-      <div className="flex items-start gap-2 text-white/70">
-        <span>🤖</span>
-        <span>“Multiple taxes apply”</span>
-      </div>
-
+      {/* PROBLEM */}
       <div className="text-yellow-400 text-xs">
-        Models miss key assumptions
+        Models sound right — but miss key assumptions
       </div>
 
-      <div className="rounded-xl border border-white/20 bg-white/10 p-3">
+      {/* TAXAIPRO ANSWER */}
+      <div className="rounded-xl border border-white/20 bg-white/10 p-4">
         <strong>TaxAiPro</strong>
-        <div className="text-white/80 text-xs mt-1">
-          Flags missing facts and prevents incorrect conclusions.
+        <div className="mt-1 text-white/80 text-xs space-y-1">
+          <div>• “34%” is incomplete and can mislead decisions</div>
+          <div>• Outcome depends on tax regime (Real vs Presumido)</div>
+          <div>• Missing: revenue, activity, jurisdiction</div>
+          <div className="text-white font-medium pt-1">
+            → Answer is not reliable without more facts
+          </div>
         </div>
       </div>
+
     </div>
   );
 }
@@ -75,10 +94,10 @@ export default function Page() {
       <div className="relative w-full max-w-6xl px-6">
 
         {/* HEADER */}
-        <div className="flex justify-between items-center mb-12">
+        <div className="flex justify-between items-center mb-10">
           <Image src="/taxaipro-logo.png" alt="logo" width={160} height={40} />
 
-          <div className="flex gap-3">
+          <div className="flex gap-4 items-center">
             <button
               onClick={() => router.push(`/${locale}/signup?mode=login`)}
               className="text-sm text-white/80"
@@ -88,7 +107,7 @@ export default function Page() {
 
             <button
               onClick={() => router.push(`/${locale}/signup`)}
-              className="rounded-xl bg-white px-4 py-2 text-black text-sm"
+              className="rounded-xl bg-white px-4 py-2 text-black text-sm font-medium"
             >
               {copy.cta}
             </button>
@@ -108,12 +127,17 @@ export default function Page() {
               {copy.sub}
             </p>
 
-            <button
-              onClick={() => router.push(`/${locale}/signup`)}
-              className="mt-6 rounded-xl bg-white px-6 py-3 text-black font-medium"
-            >
-              {copy.cta}
-            </button>
+            {/* VIDEO (BACK, BUT CONTROLLED) */}
+            <div className="mt-6 rounded-xl overflow-hidden border border-white/10 max-w-sm">
+              <video
+                src="/demo-60s.mp4"
+                autoPlay
+                muted
+                loop
+                playsInline
+                className="w-full"
+              />
+            </div>
           </div>
 
           {/* RIGHT */}
