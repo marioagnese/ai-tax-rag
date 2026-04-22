@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 
@@ -9,107 +9,48 @@ type Locale = "en" | "es" | "pt";
 const COPY: Record<Locale, any> = {
   en: {
     headline: "Don’t trust a single AI answer on tax questions.",
-    sub: "See what happens when models disagree — and what they miss.",
-    cta: "Run your own crosscheck →",
+    sub: "TaxAiPro is not another AI. It cross-checks multiple models to detect missing assumptions, conflicts, and risk.",
+    cta: "Start free analysis",
     login: "Log in",
-    prompt: "What are the taxes in Brazil?",
-    taxaipro: "TaxAiPro Crosscheck™",
   },
-  es: {
-    headline: "No confíes en una sola respuesta de IA.",
-    sub: "Descubre lo que los modelos no te dicen.",
-    cta: "Probar análisis →",
-    login: "Entrar",
-    prompt: "¿Cuáles son los impuestos en Brasil?",
-    taxaipro: "Análisis TaxAiPro™",
-  },
-  pt: {
-    headline: "Não confie em uma única resposta de IA.",
-    sub: "Veja o que os modelos ignoram.",
-    cta: "Testar análise →",
-    login: "Entrar",
-    prompt: "Quais são os impostos no Brasil?",
-    taxaipro: "Análise TaxAiPro™",
-  },
+  es: { headline: "No confíes en una sola respuesta de IA.", sub: "", cta: "Probar", login: "Entrar" },
+  pt: { headline: "Não confie em uma única resposta de IA.", sub: "", cta: "Testar", login: "Entrar" },
 };
 
-function InteractiveDemo() {
-  const [step, setStep] = useState(0);
-
-  const runDemo = () => {
-    setStep(0);
-    setTimeout(() => setStep(1), 800);
-    setTimeout(() => setStep(2), 2000);
-    setTimeout(() => setStep(3), 3500);
-    setTimeout(() => setStep(4), 5000);
-  };
-
+function MiniDemo() {
   return (
-    <div className="rounded-3xl border border-white/10 bg-black/50 p-6 backdrop-blur-md">
+    <div className="rounded-2xl border border-white/10 bg-black/50 p-4 space-y-3 text-sm">
 
-      {/* Input */}
-      <div className="flex gap-2">
-        <input
-          defaultValue="What are the taxes in Brazil?"
-          className="flex-1 rounded-xl bg-black/60 px-4 py-2 text-white"
-        />
-        <button
-          onClick={runDemo}
-          className="rounded-xl bg-white px-4 py-2 text-black font-medium"
-        >
-          Run
-        </button>
+      <div className="flex items-start gap-2 text-white/70">
+        <span>🤖</span>
+        <span>“Corporate tax is 34%”</span>
       </div>
 
-      {/* Flow */}
-      <div className="mt-6 space-y-3 text-sm">
-
-        {step >= 1 && (
-          <div className="rounded-xl bg-white/5 p-3 animate-fadeIn">
-            🤖 GPT: Brazil corporate tax is ~34%
-          </div>
-        )}
-
-        {step >= 2 && (
-          <div className="rounded-xl bg-white/5 p-3 animate-fadeIn">
-            🤖 Claude: Depends on tax regime and entity type
-          </div>
-        )}
-
-        {step >= 2 && (
-          <div className="rounded-xl bg-white/5 p-3 animate-fadeIn">
-            🤖 Perplexity: Federal, state, and municipal taxes apply
-          </div>
-        )}
-
-        {step >= 3 && (
-          <div className="text-yellow-300 text-xs">
-            Models miss key assumptions
-          </div>
-        )}
-
-        {step >= 4 && (
-          <div className="rounded-xl border border-white/20 bg-white/10 p-4 animate-fadeIn">
-            <strong>TaxAiPro Crosscheck™</strong>
-            <ul className="mt-2 space-y-1 text-white/80">
-              <li>• Corporate rate alone is incomplete</li>
-              <li>• Depends on regime (Real vs Presumido)</li>
-              <li>• Missing facts: revenue, activity, jurisdiction</li>
-            </ul>
-          </div>
-        )}
+      <div className="flex items-start gap-2 text-white/70">
+        <span>🤖</span>
+        <span>“Depends on regime”</span>
       </div>
 
-      {step >= 4 && (
-        <button className="mt-4 w-full rounded-xl bg-white px-4 py-2 text-black font-medium">
-          Run your own analysis →
-        </button>
-      )}
+      <div className="flex items-start gap-2 text-white/70">
+        <span>🤖</span>
+        <span>“Multiple taxes apply”</span>
+      </div>
+
+      <div className="text-yellow-400 text-xs">
+        Models miss key assumptions
+      </div>
+
+      <div className="rounded-xl border border-white/20 bg-white/10 p-3">
+        <strong>TaxAiPro</strong>
+        <div className="text-white/80 text-xs mt-1">
+          Flags missing facts and prevents incorrect conclusions.
+        </div>
+      </div>
     </div>
   );
 }
 
-export default function LandingPage() {
+export default function Page() {
   const router = useRouter();
   const params = useParams<{ locale?: string }>();
 
@@ -123,34 +64,43 @@ export default function LandingPage() {
 
   return (
     <div
-      className="relative min-h-screen text-white"
+      className="min-h-screen flex items-center justify-center text-white"
       style={{
         backgroundImage: `url("/landing-bg.png")`,
         backgroundSize: "cover",
-        backgroundPosition: "center",
       }}
     >
-      <div className="absolute inset-0 bg-black/60" />
+      <div className="absolute inset-0 bg-black/70" />
 
-      {/* HEADER */}
-      <header className="relative flex items-center justify-between px-6 pt-6">
-        <Image src="/taxaipro-logo.png" alt="logo" width={160} height={40} />
+      <div className="relative w-full max-w-6xl px-6">
 
-        <button
-          onClick={() => router.push(`/${locale}/signup?mode=login`)}
-          className="rounded-xl border border-white/20 px-4 py-2 text-sm"
-        >
-          {copy.login}
-        </button>
-      </header>
+        {/* HEADER */}
+        <div className="flex justify-between items-center mb-12">
+          <Image src="/taxaipro-logo.png" alt="logo" width={160} height={40} />
 
-      {/* HERO */}
-      <main className="relative mx-auto max-w-6xl px-6 pt-20">
-        <div className="grid gap-10 lg:grid-cols-2">
+          <div className="flex gap-3">
+            <button
+              onClick={() => router.push(`/${locale}/signup?mode=login`)}
+              className="text-sm text-white/80"
+            >
+              {copy.login}
+            </button>
+
+            <button
+              onClick={() => router.push(`/${locale}/signup`)}
+              className="rounded-xl bg-white px-4 py-2 text-black text-sm"
+            >
+              {copy.cta}
+            </button>
+          </div>
+        </div>
+
+        {/* HERO */}
+        <div className="grid lg:grid-cols-2 gap-10 items-center">
 
           {/* LEFT */}
           <div>
-            <h1 className="text-4xl font-semibold leading-tight md:text-5xl">
+            <h1 className="text-4xl font-semibold leading-tight">
               {copy.headline}
             </h1>
 
@@ -164,25 +114,13 @@ export default function LandingPage() {
             >
               {copy.cta}
             </button>
-
-            {/* SMALL VIDEO (reintroduced, but subtle) */}
-            <div className="mt-6 rounded-2xl overflow-hidden border border-white/10">
-              <video
-                src="/demo-60s.mp4"
-                autoPlay
-                muted
-                loop
-                playsInline
-                className="w-full"
-              />
-            </div>
           </div>
 
-          {/* RIGHT (INTERACTIVE DEMO) */}
-          <InteractiveDemo />
+          {/* RIGHT */}
+          <MiniDemo />
 
         </div>
-      </main>
+      </div>
     </div>
   );
 }
