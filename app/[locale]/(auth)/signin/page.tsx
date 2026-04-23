@@ -289,6 +289,12 @@ export default function Page() {
           <div className="flex items-center gap-3">
             <LanguageToggle />
             <button
+              onClick={() => router.push(`/${locale}/how-it-works`)}
+              className="rounded-xl border border-white/15 bg-white/[0.04] px-3 py-2 text-sm text-white/80 transition hover:bg-white/[0.08] hover:text-white"
+            >
+              How it works
+            </button>
+            <button
               onClick={() => router.push(`/${locale}/signup?mode=login#login`)}
               className="text-sm text-white/80 transition hover:text-white"
             >

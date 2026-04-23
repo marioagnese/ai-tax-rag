@@ -58,6 +58,27 @@ export default function HowItWorksPage() {
         </div>
 
         <div className="mt-10 grid grid-cols-1 gap-4">
+          <Card title="A multi-model adjudication engine with agentic orchestration elements">
+            <p>
+              TaxAiPro is not a standalone AI model and it is not a generic chatbot.
+              It is a controlled crosscheck system that sends a tax question to multiple
+              AI models, compares their answers, identifies disagreements and missing
+              assumptions, and produces a conservative synthesized draft.
+            </p>
+
+            <p className="mt-3">
+              Agentic orchestration elements are used where they improve review quality:
+              structuring the question, challenging conflicting outputs, surfacing missing
+              facts, and guiding follow-up analysis. The core workflow remains controlled,
+              auditable, and designed for professional tax review.
+            </p>
+
+            <p className="mt-3 font-medium text-white/85">
+              TaxAiPro does not replace professional judgment. It helps professionals
+              evaluate AI-generated tax analysis more safely.
+            </p>
+          </Card>
+
           <Card title={t("cards.whyTitle")}>
             <ul className="list-disc space-y-2 pl-5">
               <li>{t("cards.why1")}</li>
@@ -87,7 +108,7 @@ export default function HowItWorksPage() {
               <li>{t("cards.providers.grok")}</li>
               <li>{t("cards.providers.perplexity")}</li>
               <li>{t("cards.providers.deepseek")}</li>
-              <li>{t("claude")}</li>
+              <li>{t("cards.providers.claude")}</li>
             </ul>
 
             <p className="mt-3">{t("cards.parallelBody2")}</p>
