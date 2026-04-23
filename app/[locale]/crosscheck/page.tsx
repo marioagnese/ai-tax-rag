@@ -782,7 +782,18 @@ export default function CrosscheckV2Page() {
   const [followups, setFollowups] = useState<string[]>([]);
   const [disagreements, setDisagreements] = useState<string[]>([]);
   const [providers, setProviders] = useState<ProviderOutput[]>([]);
-  const [runtimeMs, setRuntimeMs] = useState<number | null>(null);
+  const DEFAULT_PROMPT = "Does a US company purchasing goods FOB from Brazil create permanent establishment risk?";
+const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
+const [hasRun, setHasRun] = useState(false);
+
+const SUGGESTED = [
+  "What are the taxes in Brazil?",
+  "Withholding tax on cross-border services?",
+  "Does this create permanent establishment risk?",
+  "Transfer pricing implications LATAM",
+];
+
+const [runtimeMs, setRuntimeMs] = useState<number | null>(null);
   const [attemptedCount, setAttemptedCount] = useState<number>(0);
   const [successCount, setSuccessCount] = useState<number>(0);
 
