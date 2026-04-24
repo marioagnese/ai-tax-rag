@@ -166,7 +166,7 @@ function AnimatedExample({
   }, []);
 
   return (
-    <section className="rounded-3xl border border-white/10 bg-black/45 p-5 backdrop-blur-md">
+    <section className="rounded-3xl border border-white/10 bg-black/45 p-4 backdrop-blur-md">
       <div className="mb-4 rounded-2xl border border-white/10 bg-[#101B30] px-4 py-3">
         <div className="mb-1 text-[11px] uppercase tracking-[0.16em] text-white/38">
           Same prompt
@@ -282,21 +282,21 @@ export default function Page() {
         </div>
       )}
 
-      <div className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6 py-6">
-        <header className="mb-8 flex items-center justify-between gap-4">
+      <div className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6 py-4">
+        <header className="mb-4 flex items-center justify-between gap-4">
           <Image src="/taxaipro-logo.png" alt="TaxAiPro" width={160} height={40} />
 
           <div className="flex items-center gap-3">
             <LanguageToggle />
             <button
               onClick={() => router.push(`/${locale}/how-it-works`)}
-              className="rounded-xl border border-white/15 bg-white/[0.04] px-3 py-2 text-sm text-white/80 transition hover:bg-white/[0.08] hover:text-white"
+              className="rounded-xl border border-cyan-400/30 bg-cyan-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-cyan-400"
             >
               How it works
             </button>
             <button
               onClick={() => router.push(`/${locale}/signup?mode=login#login`)}
-              className="text-sm text-white/80 transition hover:text-white"
+              className="rounded-xl bg-white px-3 py-2 text-sm font-medium text-black transition hover:bg-white/90"
             >
               {copy.login}
             </button>
@@ -309,13 +309,13 @@ export default function Page() {
           </div>
         </header>
 
-        <main className="grid flex-1 items-center gap-8 lg:grid-cols-[0.95fr_1.05fr]">
+        <main className="grid flex-1 items-start gap-6 lg:grid-cols-[0.9fr_1.1fr]">
           <section>
             <div className="mb-4 inline-flex items-center rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-white/72">
               {copy.founderLine}
             </div>
 
-            <h1 className="max-w-xl text-4xl font-semibold leading-tight tracking-tight lg:text-5xl">
+            <h1 className="max-w-xl text-4xl font-semibold leading-tight tracking-tight lg:text-[46px]">
               {copy.headline}
             </h1>
 
@@ -323,8 +323,8 @@ export default function Page() {
               {copy.sub}
             </p>
 
-            <div className="mt-6 w-full max-w-[240px] overflow-hidden rounded-2xl border border-white/10 bg-black/30 shadow-[0_16px_40px_rgba(0,0,0,0.28)]">
-              <div className="border-b border-white/10 px-3 py-2 text-xs font-medium text-white/72">
+            <div className="mt-4 w-full max-w-[205px] overflow-hidden rounded-2xl border border-white/10 bg-black/30 shadow-[0_16px_40px_rgba(0,0,0,0.28)]">
+              <div className="border-b border-white/10 px-3 py-1.5 text-xs font-medium text-white/72">
                 {copy.videoLabel}
               </div>
               <video
@@ -335,18 +335,18 @@ export default function Page() {
                 playsInline
                 className="aspect-square w-full object-cover"
               />
-              <div className="p-3">
+              <div className="p-2">
                 <button
                   type="button"
                   onClick={() => setGuideOpen(true)}
-                  className="w-full rounded-xl bg-cyan-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-cyan-400"
+                  className="w-full rounded-xl bg-cyan-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-cyan-400"
                 >
                   {copy.videoPeekCta}
                 </button>
               </div>
             </div>
 
-            <p className="mt-5 max-w-xl text-xs leading-6 text-white/52">
+            <p className="mt-3 max-w-xl text-xs leading-5 text-white/52">
               {copy.disclaimer}
             </p>
           </section>
