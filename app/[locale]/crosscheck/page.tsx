@@ -1876,7 +1876,7 @@ async function persistRun(args: {
                                   />
                                 </div>
                                 <div className="space-y-3">
-                                  {conversationTurns.slice(2).map((turn) => (
+                                  {conversationTurns.slice(2, Math.max(2, conversationTurns.length - 1)).map((turn) => (
                                     <div
                                       key={turn.id}
                                       className={cn(
