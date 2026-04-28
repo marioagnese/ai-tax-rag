@@ -1028,30 +1028,32 @@ const [runtimeMs, setRuntimeMs] = useState<number | null>(null);
     }
   }
 
-  function buildConversationPrompt(
-    originalQuestion: string,
-    turns: AnalysisTurn[],
-    nextUserTurn: string
-  ) {
-    const priorTurns = turns
-      .map((turn) =>
-        turn.role === "user"
-          ? `User follow-up: ${turn.text}`
-          : `Assistant answer: ${turn.text}`
-      )
-      .join("\n\n");
-
-    return [
-      `Original question:\n${originalQuestion}`,
-      priorTurns ? `Prior conversation:\n${priorTurns}` : "",
-      `New follow-up:\n${nextUserTurn}`,
-      "Answer this as a continuation of the same tax analysis, preserving context from the original question and prior answers.",
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+  
+function buildConversationPrompt(
+  originalQuestion: string,
+  turns: AnalysisTurn[],
+  nextUserTurn: string
+) {
+  let lastAnswer = "";
+  for (let i = turns.length - 1; i >= 0; i--) {
+    if (turns[i].role === "assistant") {
+      lastAnswer = turns[i].text.slice(0, 1200);
+      break;
+    }
   }
 
-  async function persistRun(args: {
+  let prompt = "Original question:\n" + originalQuestion + "\n\n";
+
+  if (lastAnswer) {
+    prompt += "Latest analysis:\n" + lastAnswer + "\n\n";
+  }
+
+  prompt += "New follow-up:\n" + nextUserTurn + "\n\n";
+  prompt += "Refine the analysis. Do NOT repeat prior sections. Be concise and conservative.";
+
+  return prompt;
+}
+async function persistRun(args: {
     runId?: string | null;
     title: string;
     question: string;
