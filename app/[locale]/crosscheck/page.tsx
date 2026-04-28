@@ -123,6 +123,9 @@ type PersistedHistoryResponse = {
 
 const LS_HISTORY_KEY = "taxaipro_v2_history";
 const MAX_DOCS = 3;
+
+const FIRST_RUN_TIMEOUT_MS = 60_000;
+const FOLLOWUP_TIMEOUT_MS = 30_000;
 const ALLOWED_DOC_TYPES = [
   "text/plain",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -1134,11 +1137,15 @@ async function persistRun(args: {
     setSuccessCount(0);
 
     try {
+      const isFirstRun = conversationTurns.length === 0;
+      const timeoutMs = isFirstRun ? FIRST_RUN_TIMEOUT_MS : FOLLOWUP_TIMEOUT_MS;
+
       let res: Response;
 
       if (attachedFiles.length > 0) {
         const form = new FormData();
         form.append("question", args.payloadQuestion);
+        form.append("timeoutMs", String(timeoutMs));
         if (args.payloadDetails?.trim()) form.append("facts", args.payloadDetails.trim());
         attachedFiles.forEach((file) => form.append("files", file));
 
@@ -1155,6 +1162,7 @@ async function persistRun(args: {
           body: JSON.stringify({
             question: args.payloadQuestion,
             facts: args.payloadDetails?.trim() || undefined,
+            timeoutMs,
           }),
         });
       }
