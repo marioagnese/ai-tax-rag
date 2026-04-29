@@ -310,6 +310,20 @@ type PipelineDecision = {
   missingIssueCount: number;
 };
 
+type LegalFreshnessScan = {
+  needed: boolean;
+  jurisdiction: string;
+  tax_area: string;
+  issue: string;
+  recent_enacted_changes: string[];
+  pending_or_proposed_changes: string[];
+  effective_dates: string[];
+  authority_guidance: string[];
+  risk_flags: string[];
+  confidence_impact: "none" | "medium" | "high";
+  provider_instruction: string;
+};
+
 function emptyConflictMatrix(): ConflictMatrix {
   return {
     common_claims: [],
@@ -945,6 +959,10 @@ function buildProviderWorkPrompt(
     "- Do not recommend consulting authorities.",
     "- Do not include penalties or scare language.",
     "- Do not invent authority or citations.",
+    "",
+    legalFreshnessBlock(input)
+      ? `RECENT LAW / LEGISLATIVE CHANGE CHECK:\n${legalFreshnessBlock(input)}`
+      : "",
     "",
     input.jurisdiction ? `Jurisdiction: ${input.jurisdiction}` : "",
     input.constraints ? `Constraints:\n${input.constraints}` : "",
@@ -1867,6 +1885,170 @@ function retryTimeoutMs(timeoutMs: number): number {
 }
 
 
+
+function normalizeLegalFreshnessScan(parsed: Partial<LegalFreshnessScan> | null): LegalFreshnessScan | null {
+  if (!parsed) return null;
+
+  const confidenceImpact = String(parsed.confidence_impact || "none").toLowerCase();
+  const normalizedImpact: LegalFreshnessScan["confidence_impact"] =
+    confidenceImpact === "high" || confidenceImpact === "medium" ? confidenceImpact : "none";
+
+  const scan: LegalFreshnessScan = {
+    needed: Boolean(parsed.needed),
+    jurisdiction: cleanMemoText(String(parsed.jurisdiction || "").trim()),
+    tax_area: cleanMemoText(String(parsed.tax_area || "").trim()),
+    issue: cleanMemoText(String(parsed.issue || "").trim()),
+    recent_enacted_changes: cleanArray(normalizeStringArray(parsed.recent_enacted_changes)),
+    pending_or_proposed_changes: cleanArray(normalizeStringArray(parsed.pending_or_proposed_changes)),
+    effective_dates: cleanArray(normalizeStringArray(parsed.effective_dates)),
+    authority_guidance: cleanArray(normalizeStringArray(parsed.authority_guidance)),
+    risk_flags: cleanArray(normalizeStringArray(parsed.risk_flags)),
+    confidence_impact: normalizedImpact,
+    provider_instruction: cleanMemoText(String(parsed.provider_instruction || "").trim()),
+  };
+
+  if (!scan.needed && !scan.provider_instruction && !scan.risk_flags.length) return null;
+  return scan;
+}
+
+function legalFreshnessQuestionLooksRelevant(input: CrosscheckInput): boolean {
+  const hay = `${input.question || ""}\n${input.facts || ""}\n${input.constraints || ""}\n${input.jurisdiction || ""}`.toLowerCase();
+
+  const taxSignals = [
+    "tax",
+    "vat",
+    "iva",
+    "gst",
+    "ieps",
+    "withholding",
+    "income tax",
+    "corporate tax",
+    "digital services",
+    "customs",
+    "import",
+    "transfer pricing",
+    "permanent establishment",
+    "treaty",
+    "reform",
+    "law",
+    "regulation",
+    "effective",
+    "enacted",
+    "proposed",
+    "bill",
+    "decree",
+    "guidance",
+    "rate",
+  ];
+
+  return taxSignals.some((x) => hay.includes(x));
+}
+
+function buildLegalFreshnessInstruction(scan: LegalFreshnessScan | null): string {
+  if (!scan) return "";
+
+  const lines: string[] = [
+    "Before answering, account for recent enacted legislation, pending/proposed changes, effective dates, and tax authority guidance that may affect the answer.",
+    "Separate current law from proposed or future-effective law.",
+    "Do not treat proposed changes as enacted.",
+    "If a recent change creates uncertainty, state the current-law answer and the change-sensitive caveat separately.",
+  ];
+
+  if (scan.jurisdiction) lines.push(`Detected jurisdiction: ${scan.jurisdiction}`);
+  if (scan.tax_area) lines.push(`Detected tax area: ${scan.tax_area}`);
+  if (scan.issue) lines.push(`Detected issue: ${scan.issue}`);
+
+  if (scan.recent_enacted_changes.length) {
+    lines.push("Recent enacted changes to consider:");
+    scan.recent_enacted_changes.forEach((x) => lines.push(`- ${x}`));
+  }
+
+  if (scan.pending_or_proposed_changes.length) {
+    lines.push("Pending or proposed changes to distinguish from current law:");
+    scan.pending_or_proposed_changes.forEach((x) => lines.push(`- ${x}`));
+  }
+
+  if (scan.effective_dates.length) {
+    lines.push("Effective dates / transition points:");
+    scan.effective_dates.forEach((x) => lines.push(`- ${x}`));
+  }
+
+  if (scan.authority_guidance.length) {
+    lines.push("Authority guidance to consider:");
+    scan.authority_guidance.forEach((x) => lines.push(`- ${x}`));
+  }
+
+  if (scan.risk_flags.length) {
+    lines.push("Freshness risk flags:");
+    scan.risk_flags.forEach((x) => lines.push(`- ${x}`));
+  }
+
+  if (scan.provider_instruction) {
+    lines.push("Specific freshness instruction:");
+    lines.push(scan.provider_instruction);
+  }
+
+  return lines.join("\n").trim();
+}
+
+function legalFreshnessBlock(input: CrosscheckInput): string {
+  return String((input as any).legalFreshnessInstruction || "").trim();
+}
+
+async function runLegalFreshnessScan(input: CrosscheckInput): Promise<LegalFreshnessScan | null> {
+  if (!legalFreshnessQuestionLooksRelevant(input)) return null;
+
+  const apiKey = env("OPENAI_API_KEY");
+  if (!apiKey) return null;
+
+  const model =
+    env("OPENAI_FRESHNESS_MODEL") ||
+    env("OPENAI_ADJUDICATOR_MODEL") ||
+    env("OPENAI_SYNTH_MODEL") ||
+    env("OPENAI_MODEL") ||
+    "gpt-4.1-mini";
+
+  const client = new OpenAI({ apiKey });
+
+  const sys = [
+    "You are a tax-law freshness scanner.",
+    "You do NOT answer the user's tax question.",
+    "Your job is to identify whether the question may be affected by recently enacted legislation, proposed bills, rate changes, effective-date changes, transition rules, or tax authority guidance.",
+    "This is jurisdiction-neutral and tax-type-neutral.",
+    "Do not invent specific authorities.",
+    "If you are not sure whether a change exists, flag the issue as freshness-sensitive rather than asserting a change.",
+    "Return STRICT JSON ONLY with keys:",
+    "needed, jurisdiction, tax_area, issue, recent_enacted_changes, pending_or_proposed_changes, effective_dates, authority_guidance, risk_flags, confidence_impact, provider_instruction.",
+  ].join("\n");
+
+  const user = [
+    input.jurisdiction ? `Jurisdiction: ${input.jurisdiction}` : "",
+    input.facts ? `Facts:\n${input.facts}` : "",
+    input.constraints ? `Constraints:\n${input.constraints}` : "",
+    `Question:\n${input.question}`,
+    "",
+    "Decide whether recent-law sensitivity should be injected into the provider prompts.",
+    "Focus on whether current law, recently enacted law, proposed changes, or effective dates could materially change the answer.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const resp = await client.chat.completions.create({
+    model,
+    temperature: 0,
+    messages: [
+      { role: "system", content: sys },
+      { role: "user", content: user },
+    ],
+    max_tokens: 900,
+  });
+
+  const raw = resp.choices?.[0]?.message?.content || "{}";
+  const parsed = safeJsonParse<Partial<LegalFreshnessScan>>(extractJsonObject(raw));
+  return normalizeLegalFreshnessScan(parsed);
+}
+
+
 export async function runCrosscheck(
   input: CrosscheckInput
 ): Promise<CrosscheckResult> {
@@ -1874,6 +2056,18 @@ export async function runCrosscheck(
   const timeoutMs = clampInt(input.timeoutMs, 8_000, 120_000, 18_000);
   const deepRun = isDeepRun(input, timeoutMs);
   const minSuccessfulProviders = minSuccessfulProviderCount(deepRun);
+
+  const legalFreshnessScan = deepRun
+    ? await runLegalFreshnessScan(input).catch(() => null)
+    : null;
+
+  const workingInput: CrosscheckInput = legalFreshnessScan
+    ? ({
+        ...input,
+        legalFreshnessScan,
+        legalFreshnessInstruction: buildLegalFreshnessInstruction(legalFreshnessScan),
+      } as CrosscheckInput)
+    : input;
 
   const attempted: ProviderCall[] = [];
 
@@ -1948,13 +2142,13 @@ export async function runCrosscheck(
 
   const openaiModel = env("OPENAI_MODEL") || "gpt-4.1-mini";
   addRunner({ provider: "openai", model: openaiModel }, async () => {
-    const result = await callOpenAI(wrapInputForRound1(input, "OpenAI"));
+    const result = await callOpenAI(wrapInputForRound1(workingInput, "OpenAI"));
     return repackageProviderOutput(result, "openai");
   });
 
   for (const m of defaultOpenRouterModels()) {
     addRunner({ provider: "openrouter", model: m }, async () => {
-      const result = await callOpenRouter(wrapInputForRound1(input, m), m);
+      const result = await callOpenRouter(wrapInputForRound1(workingInput, m), m);
       return repackageProviderOutput(result, "openrouter");
     });
   }
@@ -1962,7 +2156,7 @@ export async function runCrosscheck(
   if (geminiEnabled()) {
     const geminiModel = env("GEMINI_MODEL") || "gemini-2.5-flash";
     addRunner({ provider: "gemini", model: geminiModel }, async () => {
-      const result = await callGemini(wrapInputForRound1(input, "Gemini"));
+      const result = await callGemini(wrapInputForRound1(workingInput, "Gemini"));
       return repackageProviderOutput(result, "gemini");
     });
   }
@@ -2014,7 +2208,7 @@ export async function runCrosscheck(
 
   const round1Artifacts = buildInitialArtifacts(providers);
   const round1Assessments = round1Artifacts.map((a) =>
-    providerAssessmentForArtifact(a, input)
+    providerAssessmentForArtifact(a, workingInput)
   );
   const selectedRound1 = chooseArtifactsForReasoning(
     round1Artifacts,
@@ -2042,7 +2236,7 @@ export async function runCrosscheck(
 
   if (selectedRound1.length >= 3) {
     round1ConflictMatrix = await buildConflictMatrix({
-      input,
+      input: workingInput,
       artifacts: selectedRound1,
       assessments: selectedAssessments,
       dual: selectedRound1.length < 3 ? true : false,
@@ -2067,7 +2261,7 @@ export async function runCrosscheck(
         round2Candidates.map((artifact) =>
           runProviderRound2(
             artifact,
-            input,
+            workingInput,
             round1ConflictMatrix,
             assessmentMap.get(`${artifact.provider}::${artifact.model}`)
           ).catch(() => null)
@@ -2076,12 +2270,12 @@ export async function runCrosscheck(
 
       round2Artifacts = revised.filter(Boolean) as ProviderMemoArtifact[];
       round2Assessments = round2Artifacts.map((a) =>
-        providerAssessmentForArtifact(a, input)
+        providerAssessmentForArtifact(a, workingInput)
       );
 
       if (round2Artifacts.length >= 2) {
         round2ConflictMatrix = await buildConflictMatrix({
-          input,
+          input: workingInput,
           artifacts: round2Artifacts,
           assessments: round2Assessments,
           dual: pipelineDecision.mode === "deep",
@@ -2120,7 +2314,7 @@ export async function runCrosscheck(
   let combinedDraft: NormalizedMemo | null = null;
   if (reasoningArtifacts.length >= 2) {
     combinedDraft = await constructCombinedDraftWithOpenAI({
-      input,
+      input: workingInput,
       artifacts: reasoningArtifacts,
       assessments: reasoningAssessments,
       conflictMatrix: reasoningConflictMatrix,
@@ -2142,7 +2336,7 @@ export async function runCrosscheck(
     if (dualAdjudicatorEnabled()) {
       const [gptFinal, claudeFinal] = await Promise.all([
         adjudicateFinalWithOpenAI({
-          input,
+          input: workingInput,
           round1: selectedRound1,
           round2: reasoningArtifacts,
           combinedDraft,
@@ -2152,7 +2346,7 @@ export async function runCrosscheck(
           survivingClaims,
         }).catch(() => null),
         adjudicateFinalWithClaude({
-          input,
+          input: workingInput,
           round1: selectedRound1,
           round2: reasoningArtifacts,
           combinedDraft,
@@ -2164,7 +2358,7 @@ export async function runCrosscheck(
       ]);
 
       finalMemo = await mergeFinalMemosWithOpenAI({
-        input,
+        input: workingInput,
         gpt: gptFinal,
         claude: claudeFinal,
         combinedDraft,
@@ -2173,7 +2367,7 @@ export async function runCrosscheck(
       }).catch(() => gptFinal || claudeFinal || combinedDraft || null);
     } else {
       finalMemo = await adjudicateFinalWithOpenAI({
-        input,
+        input: workingInput,
         round1: selectedRound1,
         round2: reasoningArtifacts,
         combinedDraft,
@@ -2231,10 +2425,25 @@ export async function runCrosscheck(
           "Some controlling mechanical claims remained unresolved after the challenge-back round; those claims were excluded from final synthesis rather than narrated as fact.",
         ]
       : []),
+    ...(legalFreshnessScan?.confidence_impact === "high"
+      ? [
+          "Recent-law sensitivity was detected. The answer should distinguish current law from recently enacted, proposed, or future-effective changes.",
+        ]
+      : []),
+    ...(legalFreshnessScan?.risk_flags || []),
   ]);
 
   const followups = uniq([
     ...(finalMemo?.required_confirmations || []),
+    ...(legalFreshnessScan?.recent_enacted_changes || []).map(
+      (x) => `Confirm current enacted-law treatment and effective date: ${x}`
+    ),
+    ...(legalFreshnessScan?.pending_or_proposed_changes || []).map(
+      (x) => `Do not rely on proposed-law treatment unless enacted: ${x}`
+    ),
+    ...(legalFreshnessScan?.effective_dates || []).map(
+      (x) => `Verify effective date / transition rule: ${x}`
+    ),
     ...survivingClaims.excludedCriticalClaims.map(
       (x) => `Resolve excluded controlling issue before relying on precise treatment: ${x}`
     ),
@@ -2250,7 +2459,9 @@ export async function runCrosscheck(
 
   if (unresolvedControllingCount >= 1) confidence = "low";
   else if (selectedRound1.length < 2) confidence = "low";
-  else if (pipelineDecision.mode === "fast_consensus" && confidence === "low") {
+  else if (legalFreshnessScan?.confidence_impact === "high" && confidence === "high") {
+    confidence = "medium";
+  } else if (pipelineDecision.mode === "fast_consensus" && confidence === "low") {
     confidence = "medium";
   }
 
@@ -2259,6 +2470,7 @@ export async function runCrosscheck(
   console.log("[crosscheck] pipeline", {
     requestedMode: deepRun ? "deep" : "fast",
     minSuccessfulProviders,
+    legalFreshnessImpact: legalFreshnessScan?.confidence_impact || "none",
     mode: pipelineDecision.mode,
     reasons: pipelineDecision.reasons,
     runtime_ms,
@@ -2283,6 +2495,11 @@ export async function runCrosscheck(
             : [
                 `Fast Mode requested: target ${minSuccessfulProviders} successful providers before confidence scoring.`,
               ]),
+          ...(legalFreshnessScan
+            ? [
+                `Legal freshness scan: ${legalFreshnessScan.confidence_impact} confidence impact.`,
+              ]
+            : []),
           ...pipelineDecision.reasons,
         ],
       },
