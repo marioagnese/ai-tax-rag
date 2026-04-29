@@ -14,7 +14,7 @@ function env(name: string): string {
   return process.env[name] || "";
 }
 
-function uniq(xs: string[]) {
+function uniq(xs: string[]): string[] {
   return Array.from(new Set(xs.map((x) => String(x).trim()).filter(Boolean)));
 }
 
@@ -1832,80 +1832,175 @@ function decidePipelineMode(args: {
   };
 }
 
+
+function isDeepRun(input: CrosscheckInput, timeoutMs: number): boolean {
+  const rawMode = String((input as any).mode || (input as any).pipelineMode || "")
+    .trim()
+    .toLowerCase();
+
+  if (rawMode === "deep" || rawMode === "deep_mode") return true;
+  if (rawMode === "fast" || rawMode === "fast_mode") return false;
+
+  // Current UI already sends 60s for first run and 30s for follow-ups.
+  // So timeout is the safest backward-compatible signal without changing types.
+  return timeoutMs >= 45_000;
+}
+
+function minSuccessfulProviderCount(deep: boolean): number {
+  return deep
+    ? clampInt(env("CROSSCHECK_DEEP_MIN_SUCCESS"), 1, 10, 4)
+    : clampInt(env("CROSSCHECK_FAST_MIN_SUCCESS"), 1, 10, 2);
+}
+
+function deepRetryEnabled(): boolean {
+  const raw = (env("CROSSCHECK_DEEP_RETRY") || "true").trim().toLowerCase();
+  return raw !== "false" && raw !== "0" && raw !== "off";
+}
+
+function retryTimeoutMs(timeoutMs: number): number {
+  return clampInt(
+    env("CROSSCHECK_DEEP_RETRY_TIMEOUT_MS"),
+    8_000,
+    120_000,
+    Math.min(timeoutMs, 45_000)
+  );
+}
+
+
 export async function runCrosscheck(
   input: CrosscheckInput
 ): Promise<CrosscheckResult> {
   const t0 = Date.now();
   const timeoutMs = clampInt(input.timeoutMs, 8_000, 120_000, 18_000);
+  const deepRun = isDeepRun(input, timeoutMs);
+  const minSuccessfulProviders = minSuccessfulProviderCount(deepRun);
 
   const attempted: ProviderCall[] = [];
-  const tasks: Array<Promise<ProviderOutput>> = [];
+
+  type ProviderRunner = {
+    call: ProviderCall;
+    fn: () => Promise<ProviderOutput>;
+  };
+
+  const providerRunners: ProviderRunner[] = [];
+
+  const addRunner = (
+    call: ProviderCall,
+    fn: () => Promise<ProviderOutput>
+  ): void => {
+    providerRunners.push({ call, fn });
+  };
 
   const wrap = (
     call: ProviderCall,
-    fn: () => Promise<ProviderOutput>
+    fn: () => Promise<ProviderOutput>,
+    ms = timeoutMs
   ): Promise<ProviderOutput> => {
     attempted.push(call);
-    return withTimeout(fn(), timeoutMs).catch((e: any) => {
+    return withTimeout(fn(), ms).catch((e: any) => {
       const msg = e?.message ? String(e.message) : String(e);
       const status = msg.toLowerCase().includes("timeout") ? "timeout" : "error";
       return {
         provider: call.provider,
         model: call.model,
         status,
-        ms: timeoutMs,
+        ms,
         error: msg,
       } satisfies ProviderOutput;
     });
   };
 
+  const collectFast = async (runners: ProviderRunner[]): Promise<ProviderOutput[]> => {
+    const providers: ProviderOutput[] = [];
+    const pending = runners.map((r) =>
+      wrap(r.call, r.fn).then((out) => ({ key: `${r.call.provider}::${r.call.model}`, out }))
+    );
+
+    while (pending.length) {
+      const result = await Promise.race(pending);
+      providers.push(result.out);
+
+      const idx = pending.findIndex((p) =>
+        p.then((x) => x.key).then((key) => key === result.key)
+      );
+
+      // Promise identity is awkward after wrapping above, so remove by completed key.
+      const removeIdx = await Promise.resolve(
+        pending.findIndex(async (p) => (await p).key === result.key)
+      );
+
+      if (removeIdx >= 0) pending.splice(removeIdx, 1);
+      else break;
+
+      const successCount = providers.filter((p) => p.status === "ok").length;
+      if (successCount >= minSuccessfulProviders) break;
+    }
+
+    return providers;
+  };
+
+  const collectAll = async (
+    runners: ProviderRunner[],
+    ms = timeoutMs
+  ): Promise<ProviderOutput[]> => {
+    return Promise.all(runners.map((r) => wrap(r.call, r.fn, ms)));
+  };
+
   const openaiModel = env("OPENAI_MODEL") || "gpt-4.1-mini";
-  tasks.push(
-    wrap({ provider: "openai", model: openaiModel }, async () => {
-      const result = await callOpenAI(wrapInputForRound1(input, "OpenAI"));
-      return repackageProviderOutput(result, "openai");
-    })
-  );
+  addRunner({ provider: "openai", model: openaiModel }, async () => {
+    const result = await callOpenAI(wrapInputForRound1(input, "OpenAI"));
+    return repackageProviderOutput(result, "openai");
+  });
 
   for (const m of defaultOpenRouterModels()) {
-    tasks.push(
-      wrap({ provider: "openrouter", model: m }, async () => {
-        const result = await callOpenRouter(wrapInputForRound1(input, m), m);
-        return repackageProviderOutput(result, "openrouter");
-      })
-    );
+    addRunner({ provider: "openrouter", model: m }, async () => {
+      const result = await callOpenRouter(wrapInputForRound1(input, m), m);
+      return repackageProviderOutput(result, "openrouter");
+    });
   }
 
   if (geminiEnabled()) {
     const geminiModel = env("GEMINI_MODEL") || "gemini-2.5-flash";
-    tasks.push(
-      wrap({ provider: "gemini", model: geminiModel }, async () => {
-        const result = await callGemini(wrapInputForRound1(input, "Gemini"));
-        return repackageProviderOutput(result, "gemini");
-      })
-    );
+    addRunner({ provider: "gemini", model: geminiModel }, async () => {
+      const result = await callGemini(wrapInputForRound1(input, "Gemini"));
+      return repackageProviderOutput(result, "gemini");
+    });
   }
 
-  
-const providers: ProviderOutput[] = [];
-  const pending = [...tasks];
-  const minSuccessfulProviders = 4;
+  let providers: ProviderOutput[] = deepRun
+    ? await collectAll(providerRunners)
+    : await collectFast(providerRunners);
 
-  while (pending.length) {
-    const result = await Promise.race(
-      pending.map((p) => p.then((r) => ({ p, r })))
+  const successfulProviderKeys = new Set(
+    providers
+      .filter((p) => p.status === "ok")
+      .map((p) => `${p.provider}::${p.model}`)
+  );
+
+  if (
+    deepRun &&
+    deepRetryEnabled() &&
+    successfulProviderKeys.size < minSuccessfulProviders
+  ) {
+    const failedOrMissingRunners = providerRunners.filter(
+      (r) => !successfulProviderKeys.has(`${r.call.provider}::${r.call.model}`)
     );
 
-    providers.push(result.r);
+    const retryResults = await collectAll(failedOrMissingRunners, retryTimeoutMs(timeoutMs));
 
-    const idx = pending.indexOf(result.p);
-    if (idx >= 0) pending.splice(idx, 1);
+    const byKey = new Map<string, ProviderOutput>();
+    for (const p of providers) byKey.set(`${p.provider}::${p.model}`, p);
 
-    const successCount = providers.filter((p) => p.status === "ok").length;
+    for (const retry of retryResults) {
+      const key = `${retry.provider}::${retry.model}`;
+      const prior = byKey.get(key);
 
-    if (successCount >= minSuccessfulProviders) {
-      break;
+      if (!prior || (prior.status !== "ok" && retry.status === "ok")) {
+        byKey.set(key, retry);
+      }
     }
+
+    providers = Array.from(byKey.values());
   }
 
   const succeededCalls: ProviderCall[] = [];
@@ -2161,7 +2256,15 @@ const providers: ProviderOutput[] = [];
 
   const runtime_ms = Date.now() - t0;
 
-  console.log("[crosscheck] pipeline", { mode: pipelineDecision.mode, reasons: pipelineDecision.reasons, runtime_ms, attempted: attempted.length, succeeded: succeededCalls.length });
+  console.log("[crosscheck] pipeline", {
+    requestedMode: deepRun ? "deep" : "fast",
+    minSuccessfulProviders,
+    mode: pipelineDecision.mode,
+    reasons: pipelineDecision.reasons,
+    runtime_ms,
+    attempted: attempted.length,
+    succeeded: succeededCalls.length,
+  });
 
   return {
     ok: !!succeededCalls.length,
@@ -2172,7 +2275,16 @@ const providers: ProviderOutput[] = [];
       runtime_ms,
       pipeline: {
         mode: pipelineDecision.mode,
-        reasons: pipelineDecision.reasons,
+        reasons: [
+          ...(deepRun
+            ? [
+                `Deep Mode requested: target ${minSuccessfulProviders} successful providers before confidence scoring.`,
+              ]
+            : [
+                `Fast Mode requested: target ${minSuccessfulProviders} successful providers before confidence scoring.`,
+              ]),
+          ...pipelineDecision.reasons,
+        ],
       },
     } as CrosscheckResult["meta"] & {
       pipeline?: {
