@@ -2229,6 +2229,117 @@ async function validateLegalClaimsWithOpenAI(args: {
 }
 
 
+
+async function rewriteFinalMemoConservativelyWithOpenAI(args: {
+  input: CrosscheckInput;
+  finalMemo: NormalizedMemo | null;
+  reasoningArtifacts: ProviderMemoArtifact[];
+  assessments: ProviderAssessment[];
+  conflictMatrix: ConflictMatrix;
+  legalClaimValidation: LegalClaimValidation | null;
+  highRiskProviderConflicts: string[];
+  freshnessScan: LegalFreshnessScan | null;
+}): Promise<NormalizedMemo | null> {
+  if (!args.finalMemo) return null;
+  if (!args.highRiskProviderConflicts.length) return args.finalMemo;
+
+  const apiKey = env("OPENAI_API_KEY");
+  if (!apiKey) return args.finalMemo;
+
+  const model =
+    env("OPENAI_CONSERVATIVE_REWRITE_MODEL") ||
+    env("OPENAI_ADJUDICATOR_MODEL") ||
+    env("OPENAI_SYNTH_MODEL") ||
+    env("OPENAI_MODEL") ||
+    "gpt-4.1-mini";
+
+  const client = new OpenAI({ apiKey });
+
+  const sys = [
+    "You are a senior tax quality-control editor.",
+    "You are rewriting a final tax memo after a high-risk legal conflict was detected.",
+    "Your task is NOT to make the answer more aggressive.",
+    "Your task is to make the answer professionally conservative and reliance-safe.",
+    "",
+    "MANDATORY RULES",
+    "1. Do not assert disputed statutory articles, tax rates, effective dates, or compliance mechanisms as settled facts.",
+    "2. Convert disputed high-risk claims into required confirmations or narrow caveats.",
+    "3. Use only undisputed or well-supported claims as affirmative conclusions.",
+    "4. If providers disagree on whether an activity is inside an enumerated taxable category, say that the classification must be verified before concluding liability.",
+    "5. Separate ordinary/core activities from contingent or special activities.",
+    "6. Separate current law from recently enacted, proposed, or future-effective law if a freshness instruction is present.",
+    "7. Do not mention providers, models, or internal validation mechanics.",
+    "8. Do not invent citations or authorities.",
+    "",
+    "OUTPUT STYLE",
+    "- Professional tax memo tone.",
+    "- Conservative, clear, and decision-useful.",
+    "- Prefer 'may apply if...' over 'applies' where statutory classification is disputed.",
+    "- Prefer 'not subject merely because...' where only the taxpayer identity or digital nature is known.",
+    "",
+    "Return STRICT JSON ONLY with keys:",
+    "executive_summary, analysis, transaction_specific_treatment, required_confirmations, recommendation, confidence",
+  ].join("\n");
+
+  const user = [
+    args.input.jurisdiction ? `Jurisdiction: ${args.input.jurisdiction}` : "",
+    args.input.facts ? `Facts:\n${args.input.facts}` : "",
+    args.input.constraints ? `Constraints:\n${args.input.constraints}` : "",
+    `Question:\n${args.input.question}`,
+    "",
+    legalFreshnessBlock(args.input)
+      ? `RECENT LAW / LEGISLATIVE CHANGE CHECK:\n${legalFreshnessBlock(args.input)}`
+      : "",
+    "",
+    "High-risk provider conflicts that triggered rewrite:",
+    JSON.stringify(args.highRiskProviderConflicts, null, 2),
+    "",
+    "Legal claim validation:",
+    JSON.stringify(args.legalClaimValidation || {}, null, 2),
+    "",
+    "Conflict matrix:",
+    serializeConflictMatrix(args.conflictMatrix),
+    "",
+    "Provider assessments:",
+    serializeAssessments(args.assessments),
+    "",
+    "Provider artifacts used for reasoning:",
+    serializeProviderArtifacts(args.reasoningArtifacts),
+    "",
+    "Original final memo that must be rewritten conservatively:",
+    JSON.stringify(args.finalMemo, null, 2),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const resp = await client.chat.completions.create({
+    model,
+    temperature: 0,
+    messages: [
+      { role: "system", content: sys },
+      { role: "user", content: user },
+    ],
+    max_tokens: 1800,
+  });
+
+  const raw = resp.choices?.[0]?.message?.content || "{}";
+  const parsed = safeJsonParse<MemoJson>(extractJsonObject(raw));
+  if (!parsed) return args.finalMemo;
+
+  const rewritten = normalizeMemoJson(parsed);
+
+  return {
+    ...rewritten,
+    confidence:
+      args.legalClaimValidation?.severity === "critical"
+        ? "low"
+        : rewritten.confidence === "high"
+        ? "medium"
+        : rewritten.confidence,
+  };
+}
+
+
 function highRiskLegalText(s: string): string {
   return String(s || "").toLowerCase();
 }
@@ -2851,7 +2962,7 @@ export async function runCrosscheck(
     finalMemo = bestArtifact.memo;
   }
 
-  const legalClaimValidation = await validateLegalClaimsWithOpenAI({
+  let legalClaimValidation = await validateLegalClaimsWithOpenAI({
     input: workingInput,
     finalMemo,
     reasoningArtifacts,
@@ -2861,6 +2972,30 @@ export async function runCrosscheck(
   }).catch(() => null);
 
   const highRiskProviderConflicts = detectHighRiskProviderConflict(reasoningArtifacts);
+
+  if (highRiskProviderConflicts.length && finalMemo) {
+    finalMemo = await rewriteFinalMemoConservativelyWithOpenAI({
+      input: workingInput,
+      finalMemo,
+      reasoningArtifacts,
+      assessments: reasoningAssessments,
+      conflictMatrix: reasoningConflictMatrix,
+      legalClaimValidation,
+      highRiskProviderConflicts,
+      freshnessScan: legalFreshnessScan,
+    }).catch(() => finalMemo);
+
+    // Re-validate the rewritten memo. If the rewrite fixed the issue, the cap may loosen,
+    // but provider conflict still prevents unsupported high confidence below.
+    legalClaimValidation = await validateLegalClaimsWithOpenAI({
+      input: workingInput,
+      finalMemo,
+      reasoningArtifacts,
+      assessments: reasoningAssessments,
+      conflictMatrix: reasoningConflictMatrix,
+      freshnessScan: legalFreshnessScan,
+    }).catch(() => legalClaimValidation);
+  }
 
   const answer =
     finalMemo?.answer ||
@@ -2908,6 +3043,11 @@ export async function runCrosscheck(
     ...(legalFreshnessScan?.risk_flags || []),
     ...freshnessEnforcementCaveat(legalFreshnessScan, finalMemo),
     ...legalClaimValidationCaveats(legalClaimValidation),
+    ...(highRiskProviderConflicts.length
+      ? [
+          "A conservative rewrite pass was applied because provider outputs materially conflicted on high-risk statutory, rate, effective-date, or compliance claims.",
+        ]
+      : []),
     ...highRiskConflictCaveats(highRiskProviderConflicts),
   ]);
 
@@ -2978,6 +3118,7 @@ export async function runCrosscheck(
     legalClaimValidationSeverity: legalClaimValidation?.severity || "none",
     legalClaimConfidenceCap: legalClaimValidation?.confidence_cap || "high",
     highRiskProviderConflictCount: highRiskProviderConflicts.length,
+    conservativeRewriteApplied: highRiskProviderConflicts.length > 0,
     finalMemoStatesAggressiveHighRiskLiability: finalMemoStatesAggressiveHighRiskLiability(finalMemo),
     mode: pipelineDecision.mode,
     reasons: pipelineDecision.reasons,
@@ -3016,6 +3157,7 @@ export async function runCrosscheck(
           ...(highRiskProviderConflicts.length
             ? [
                 `High-risk provider conflict gate triggered: ${highRiskProviderConflicts.length} issue(s).`,
+                "Conservative rewrite pass applied before final delivery.",
               ]
             : []),
           ...pipelineDecision.reasons,
