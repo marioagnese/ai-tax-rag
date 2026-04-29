@@ -2228,6 +2228,86 @@ async function validateLegalClaimsWithOpenAI(args: {
   return normalizeLegalClaimValidation(parsed);
 }
 
+
+function highRiskLegalText(s: string): string {
+  return String(s || "").toLowerCase();
+}
+
+function artifactHasHighRiskPositiveLiabilityClaim(a: ProviderMemoArtifact): boolean {
+  const t = highRiskLegalText(a.memo.answer);
+  return (
+    /\bsubject to\b/.test(t) ||
+    /\btaxable\b/.test(t) ||
+    /\bliability\b/.test(t) ||
+    /\bmust register\b/.test(t) ||
+    /\bmust appoint\b/.test(t) ||
+    /\bwithhold\b/.test(t) ||
+    /\bremit\b/.test(t)
+  ) && (
+    /\barticle\b|\bart\.|\bsection\b|\btitle\b|\bfraction\b|\brate\b|\b\d+%|\beffective\b|\breform\b|\bregister\b|\bwithhold\b|\bremit\b/.test(t)
+  );
+}
+
+function artifactHasHighRiskNegativeLiabilityClaim(a: ProviderMemoArtifact): boolean {
+  const t = highRiskLegalText(a.memo.answer);
+  return (
+    /\bnot subject to\b/.test(t) ||
+    /\boutside\b.{0,80}\bscope\b/.test(t) ||
+    /\bdoes not apply\b/.test(t) ||
+    /\bno .*liability\b/.test(t) ||
+    /\bnot .*taxable\b/.test(t)
+  ) && (
+    /\barticle\b|\bart\.|\bsection\b|\btitle\b|\bfraction\b|\brate\b|\b\d+%|\beffective\b|\breform\b|\bregister\b|\bwithhold\b|\bremit\b|\benumerated\b/.test(t)
+  );
+}
+
+function detectHighRiskProviderConflict(artifacts: ProviderMemoArtifact[]): string[] {
+  const positives = artifacts.filter(artifactHasHighRiskPositiveLiabilityClaim);
+  const negatives = artifacts.filter(artifactHasHighRiskNegativeLiabilityClaim);
+
+  if (positives.length >= 1 && negatives.length >= 1) {
+    return [
+      `High-risk statutory conflict detected: ${positives.length} provider output(s) asserted possible taxability/liability using statutory, rate, effective-date, or compliance mechanics, while ${negatives.length} provider output(s) asserted non-taxability or exclusion. The final answer should not state the aggressive liability position as settled without external verification.`,
+    ];
+  }
+
+  return [];
+}
+
+function finalMemoStatesAggressiveHighRiskLiability(memo: NormalizedMemo | null): boolean {
+  if (!memo) return false;
+  const t = highRiskLegalText(memo.answer);
+
+  const assertsLiability =
+    /\bsubject to\b/.test(t) ||
+    /\btaxable\b/.test(t) ||
+    /\bliability\b/.test(t) ||
+    /\bmust register\b/.test(t) ||
+    /\bmust appoint\b/.test(t) ||
+    /\bmust .*remit\b/.test(t);
+
+  const hasHardMechanics =
+    /\barticle\b|\bart\.|\bsection\b|\btitle\b|\bfraction\b|\brate\b|\b\d+%|\beffective\b|\breform\b|\bregister\b|\bwithhold\b|\bremit\b/.test(t);
+
+  const isCautious =
+    /\brequires verification\b|\bmust be verified\b|\bconfirm\b|\bsubject to confirmation\b|\bpotential\b|\bmay\b|\bcould\b|\bfact-dependent\b/.test(t);
+
+  return assertsLiability && hasHardMechanics && !isCautious;
+}
+
+function highRiskConflictCaveats(conflicts: string[]): string[] {
+  return conflicts.map((x) => `High-risk legal conflict: ${x}`);
+}
+
+function highRiskConflictFollowups(conflicts: string[]): string[] {
+  if (!conflicts.length) return [];
+  return [
+    "Verify the statutory article, tax rate, effective date, and compliance mechanism before treating the liability conclusion as settled.",
+    "Resolve provider disagreement on whether the relevant activity is actually inside the enumerated taxable category.",
+  ];
+}
+
+
 function legalClaimValidationCaveats(validation: LegalClaimValidation | null): string[] {
   if (!validation) return [];
 
@@ -2780,6 +2860,8 @@ export async function runCrosscheck(
     freshnessScan: legalFreshnessScan,
   }).catch(() => null);
 
+  const highRiskProviderConflicts = detectHighRiskProviderConflict(reasoningArtifacts);
+
   const answer =
     finalMemo?.answer ||
     bestArtifact?.memo.answer ||
@@ -2826,6 +2908,7 @@ export async function runCrosscheck(
     ...(legalFreshnessScan?.risk_flags || []),
     ...freshnessEnforcementCaveat(legalFreshnessScan, finalMemo),
     ...legalClaimValidationCaveats(legalClaimValidation),
+    ...highRiskConflictCaveats(highRiskProviderConflicts),
   ]);
 
   const followups = uniq([
@@ -2840,6 +2923,7 @@ export async function runCrosscheck(
       (x) => `Verify effective date / transition rule: ${x}`
     ),
     ...legalClaimValidationFollowups(legalClaimValidation),
+    ...highRiskConflictFollowups(highRiskProviderConflicts),
     ...survivingClaims.excludedCriticalClaims.map(
       (x) => `Resolve excluded controlling issue before relying on precise treatment: ${x}`
     ),
@@ -2866,10 +2950,18 @@ export async function runCrosscheck(
       legalClaimValidation?.confidence_cap || "high"
     );
 
+    if (highRiskProviderConflicts.length) {
+      confidence = applyConfidenceCap(
+        confidence,
+        finalMemoStatesAggressiveHighRiskLiability(finalMemo) ? "low" : "medium"
+      );
+    }
+
     if (
       pipelineDecision.mode === "fast_consensus" &&
       confidence === "low" &&
-      legalClaimValidation?.severity !== "critical"
+      legalClaimValidation?.severity !== "critical" &&
+      !highRiskProviderConflicts.length
     ) {
       confidence = "medium";
     }
@@ -2885,6 +2977,8 @@ export async function runCrosscheck(
     freshnessConfidenceCap: freshnessConfidenceCap(legalFreshnessScan, finalMemo),
     legalClaimValidationSeverity: legalClaimValidation?.severity || "none",
     legalClaimConfidenceCap: legalClaimValidation?.confidence_cap || "high",
+    highRiskProviderConflictCount: highRiskProviderConflicts.length,
+    finalMemoStatesAggressiveHighRiskLiability: finalMemoStatesAggressiveHighRiskLiability(finalMemo),
     mode: pipelineDecision.mode,
     reasons: pipelineDecision.reasons,
     runtime_ms,
@@ -2917,6 +3011,11 @@ export async function runCrosscheck(
           ...(legalClaimValidation
             ? [
                 `Legal claim validation: ${legalClaimValidation.severity} severity; confidence cap ${legalClaimValidation.confidence_cap}.`,
+              ]
+            : []),
+          ...(highRiskProviderConflicts.length
+            ? [
+                `High-risk provider conflict gate triggered: ${highRiskProviderConflicts.length} issue(s).`,
               ]
             : []),
           ...pipelineDecision.reasons,
