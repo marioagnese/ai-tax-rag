@@ -324,6 +324,18 @@ type LegalFreshnessScan = {
   provider_instruction: string;
 };
 
+type LegalClaimValidation = {
+  valid: boolean;
+  severity: "none" | "minor" | "material" | "critical";
+  high_risk_claims: string[];
+  unsupported_or_suspect_claims: string[];
+  possible_regime_blends: string[];
+  rate_or_effective_date_risks: string[];
+  provider_positions_to_discount: string[];
+  required_corrections: string[];
+  confidence_cap: "low" | "medium" | "high";
+};
+
 function emptyConflictMatrix(): ConflictMatrix {
   return {
     common_claims: [],
@@ -2018,6 +2030,249 @@ function legalFreshnessBlock(input: CrosscheckInput): string {
 }
 
 
+
+function normalizeLegalClaimValidation(
+  parsed: Partial<LegalClaimValidation> | null
+): LegalClaimValidation | null {
+  if (!parsed) return null;
+
+  const severityRaw = String(parsed.severity || "none").toLowerCase();
+  const severity: LegalClaimValidation["severity"] =
+    severityRaw === "critical" ||
+    severityRaw === "material" ||
+    severityRaw === "minor" ||
+    severityRaw === "none"
+      ? severityRaw
+      : "none";
+
+  const capRaw = String(parsed.confidence_cap || "").toLowerCase();
+  let confidence_cap: LegalClaimValidation["confidence_cap"] =
+    capRaw === "low" || capRaw === "medium" || capRaw === "high"
+      ? capRaw
+      : severity === "critical"
+      ? "low"
+      : severity === "material"
+      ? "medium"
+      : "high";
+
+  if (severity === "critical") confidence_cap = "low";
+  if (severity === "material" && confidence_cap === "high") confidence_cap = "medium";
+
+  const out: LegalClaimValidation = {
+    valid: Boolean(parsed.valid) && severity !== "critical" && severity !== "material",
+    severity,
+    high_risk_claims: cleanArray(normalizeStringArray(parsed.high_risk_claims)),
+    unsupported_or_suspect_claims: cleanArray(
+      normalizeStringArray(parsed.unsupported_or_suspect_claims)
+    ),
+    possible_regime_blends: cleanArray(normalizeStringArray(parsed.possible_regime_blends)),
+    rate_or_effective_date_risks: cleanArray(
+      normalizeStringArray(parsed.rate_or_effective_date_risks)
+    ),
+    provider_positions_to_discount: cleanArray(
+      normalizeStringArray(parsed.provider_positions_to_discount)
+    ),
+    required_corrections: cleanArray(normalizeStringArray(parsed.required_corrections)),
+    confidence_cap,
+  };
+
+  const hasContent =
+    out.high_risk_claims.length ||
+    out.unsupported_or_suspect_claims.length ||
+    out.possible_regime_blends.length ||
+    out.rate_or_effective_date_risks.length ||
+    out.required_corrections.length;
+
+  if (!hasContent && out.severity === "none") return null;
+  return out;
+}
+
+function legalClaimValidationLooksNeeded(args: {
+  input: CrosscheckInput;
+  finalMemo: NormalizedMemo | null;
+  artifacts: ProviderMemoArtifact[];
+}): boolean {
+  const text = [
+    args.input.question,
+    args.input.facts,
+    args.input.constraints,
+    args.input.jurisdiction,
+    args.finalMemo?.answer || "",
+    ...args.artifacts.map((a) => a.memo.answer),
+  ]
+    .join("\n")
+    .toLowerCase();
+
+  const highRiskSignals = [
+    "article",
+    "art.",
+    "section",
+    "title",
+    "chapter",
+    "regulation",
+    "law",
+    "statute",
+    "code",
+    "rate",
+    "%",
+    "effective",
+    "enacted",
+    "withhold",
+    "withholding",
+    "register",
+    "registration",
+    "monthly",
+    "return",
+    "compliance",
+    "taxable",
+    "exempt",
+    "not subject",
+    "subject to",
+    "permanent establishment",
+    "foreign resident",
+    "non-resident",
+  ];
+
+  return highRiskSignals.some((x) => text.includes(x));
+}
+
+async function validateLegalClaimsWithOpenAI(args: {
+  input: CrosscheckInput;
+  finalMemo: NormalizedMemo | null;
+  reasoningArtifacts: ProviderMemoArtifact[];
+  assessments: ProviderAssessment[];
+  conflictMatrix: ConflictMatrix;
+  freshnessScan: LegalFreshnessScan | null;
+}): Promise<LegalClaimValidation | null> {
+  if (!args.finalMemo) return null;
+  if (!legalClaimValidationLooksNeeded({
+    input: args.input,
+    finalMemo: args.finalMemo,
+    artifacts: args.reasoningArtifacts,
+  })) {
+    return null;
+  }
+
+  const apiKey = env("OPENAI_API_KEY");
+  if (!apiKey) return null;
+
+  const model =
+    env("OPENAI_CLAIM_VALIDATOR_MODEL") ||
+    env("OPENAI_ADJUDICATOR_MODEL") ||
+    env("OPENAI_SYNTH_MODEL") ||
+    env("OPENAI_MODEL") ||
+    "gpt-4.1-mini";
+
+  const client = new OpenAI({ apiKey });
+
+  const sys = [
+    "You are a senior tax quality-control reviewer.",
+    "You do NOT answer the user's tax question.",
+    "Your job is to review the final memo and provider artifacts for high-risk legal/tax assertions.",
+    "",
+    "High-risk assertions include:",
+    "- statutory article or section references",
+    "- named regimes or titles",
+    "- tax rates or percentages",
+    "- effective dates or recent-law statements",
+    "- registration, withholding, filing, or payment mechanisms",
+    "- claims that a taxpayer is subject to, exempt from, or outside a tax",
+    "- claims that may blend one tax regime into another",
+    "",
+    "You must identify unsupported, internally inconsistent, overconfident, or suspicious claims.",
+    "Do not require formal citations. Instead evaluate whether the final memo has enough support from the provider artifacts and whether provider positions materially conflict.",
+    "If providers conflict on a statutory article, tax rate, effective date, named regime, or compliance mechanism, flag it.",
+    "If the final memo adopts a disputed high-risk claim without narrowing or confirmation, severity should be material or critical.",
+    "If the final memo is cautious and converts disputed high-risk claims into required confirmations, severity can be minor or none.",
+    "",
+    "Return STRICT JSON ONLY with keys:",
+    "valid, severity, high_risk_claims, unsupported_or_suspect_claims, possible_regime_blends, rate_or_effective_date_risks, provider_positions_to_discount, required_corrections, confidence_cap.",
+  ].join("\n");
+
+  const user = [
+    args.input.jurisdiction ? `Jurisdiction: ${args.input.jurisdiction}` : "",
+    args.input.facts ? `Facts:\n${args.input.facts}` : "",
+    args.input.constraints ? `Constraints:\n${args.input.constraints}` : "",
+    `Question:\n${args.input.question}`,
+    "",
+    "Legal freshness scan:",
+    JSON.stringify(args.freshnessScan || {}, null, 2),
+    "",
+    "Provider assessments:",
+    serializeAssessments(args.assessments),
+    "",
+    "Conflict matrix:",
+    serializeConflictMatrix(args.conflictMatrix),
+    "",
+    "Provider artifacts used for reasoning:",
+    serializeProviderArtifacts(args.reasoningArtifacts),
+    "",
+    "Final memo to validate:",
+    JSON.stringify(args.finalMemo, null, 2),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const resp = await client.chat.completions.create({
+    model,
+    temperature: 0,
+    messages: [
+      { role: "system", content: sys },
+      { role: "user", content: user },
+    ],
+    max_tokens: 1200,
+  });
+
+  const raw = resp.choices?.[0]?.message?.content || "{}";
+  const parsed = safeJsonParse<Partial<LegalClaimValidation>>(extractJsonObject(raw));
+  return normalizeLegalClaimValidation(parsed);
+}
+
+function legalClaimValidationCaveats(validation: LegalClaimValidation | null): string[] {
+  if (!validation) return [];
+
+  const caveats: string[] = [];
+
+  if (validation.severity === "critical") {
+    caveats.push(
+      "Critical legal-claim validation risk was detected. The answer may contain unsupported statutory, rate, effective-date, or regime-specific assertions. Confidence was capped."
+    );
+  } else if (validation.severity === "material") {
+    caveats.push(
+      "Material legal-claim validation risk was detected. Some statutory, rate, effective-date, or compliance assertions require verification before reliance."
+    );
+  } else if (validation.severity === "minor") {
+    caveats.push(
+      "Minor legal-claim validation risk was detected. Confirm the statutory basis, rate, or effective date before relying on precise treatment."
+    );
+  }
+
+  return uniq([
+    ...caveats,
+    ...validation.possible_regime_blends.map(
+      (x) => `Possible tax-regime blend to verify: ${x}`
+    ),
+    ...validation.rate_or_effective_date_risks.map(
+      (x) => `Rate/effective-date issue to verify: ${x}`
+    ),
+  ]);
+}
+
+function legalClaimValidationFollowups(validation: LegalClaimValidation | null): string[] {
+  if (!validation) return [];
+
+  return uniq([
+    ...validation.required_corrections,
+    ...validation.unsupported_or_suspect_claims.map(
+      (x) => `Verify or revise unsupported/suspect claim: ${x}`
+    ),
+    ...validation.high_risk_claims.slice(0, 5).map(
+      (x) => `Confirm statutory support for high-risk claim: ${x}`
+    ),
+  ]);
+}
+
+
 function finalMemoAddressesFreshness(
   memo: NormalizedMemo | null,
   scan: LegalFreshnessScan | null
@@ -2516,6 +2771,15 @@ export async function runCrosscheck(
     finalMemo = bestArtifact.memo;
   }
 
+  const legalClaimValidation = await validateLegalClaimsWithOpenAI({
+    input: workingInput,
+    finalMemo,
+    reasoningArtifacts,
+    assessments: reasoningAssessments,
+    conflictMatrix: reasoningConflictMatrix,
+    freshnessScan: legalFreshnessScan,
+  }).catch(() => null);
+
   const answer =
     finalMemo?.answer ||
     bestArtifact?.memo.answer ||
@@ -2561,6 +2825,7 @@ export async function runCrosscheck(
       : []),
     ...(legalFreshnessScan?.risk_flags || []),
     ...freshnessEnforcementCaveat(legalFreshnessScan, finalMemo),
+    ...legalClaimValidationCaveats(legalClaimValidation),
   ]);
 
   const followups = uniq([
@@ -2574,6 +2839,7 @@ export async function runCrosscheck(
     ...(legalFreshnessScan?.effective_dates || []).map(
       (x) => `Verify effective date / transition rule: ${x}`
     ),
+    ...legalClaimValidationFollowups(legalClaimValidation),
     ...survivingClaims.excludedCriticalClaims.map(
       (x) => `Resolve excluded controlling issue before relying on precise treatment: ${x}`
     ),
@@ -2595,7 +2861,16 @@ export async function runCrosscheck(
       freshnessConfidenceCap(legalFreshnessScan, finalMemo)
     );
 
-    if (pipelineDecision.mode === "fast_consensus" && confidence === "low") {
+    confidence = applyConfidenceCap(
+      confidence,
+      legalClaimValidation?.confidence_cap || "high"
+    );
+
+    if (
+      pipelineDecision.mode === "fast_consensus" &&
+      confidence === "low" &&
+      legalClaimValidation?.severity !== "critical"
+    ) {
       confidence = "medium";
     }
   }
@@ -2608,6 +2883,8 @@ export async function runCrosscheck(
     legalFreshnessImpact: legalFreshnessScan?.confidence_impact || "none",
     finalMemoAddressesFreshness: finalMemoAddressesFreshness(finalMemo, legalFreshnessScan),
     freshnessConfidenceCap: freshnessConfidenceCap(legalFreshnessScan, finalMemo),
+    legalClaimValidationSeverity: legalClaimValidation?.severity || "none",
+    legalClaimConfidenceCap: legalClaimValidation?.confidence_cap || "high",
     mode: pipelineDecision.mode,
     reasons: pipelineDecision.reasons,
     runtime_ms,
@@ -2635,6 +2912,11 @@ export async function runCrosscheck(
           ...(legalFreshnessScan
             ? [
                 `Legal freshness scan: ${legalFreshnessScan.confidence_impact} confidence impact.`,
+              ]
+            : []),
+          ...(legalClaimValidation
+            ? [
+                `Legal claim validation: ${legalClaimValidation.severity} severity; confidence cap ${legalClaimValidation.confidence_cap}.`,
               ]
             : []),
           ...pipelineDecision.reasons,
