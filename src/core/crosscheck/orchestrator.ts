@@ -995,6 +995,9 @@ function buildChallengePrompt(args: {
     "IMPORTANT",
     "Do not assume repetition across models means correctness.",
     "If a claim collapses a conditional distinction, revise or withdraw it.",
+    legalFreshnessBlock(args.input)
+      ? `RECENT LAW / LEGISLATIVE CHANGE CHECK:\n${legalFreshnessBlock(args.input)}`
+      : "",
     "",
     "STRICT JSON OUTPUT",
     "{",
@@ -1488,6 +1491,10 @@ async function constructCombinedDraftWithOpenAI(args: {
     args.input.constraints ? `Constraints:\n${args.input.constraints}` : "",
     `Question:\n${args.input.question}`,
     "",
+    legalFreshnessBlock(args.input)
+      ? `RECENT LAW / LEGISLATIVE CHANGE CHECK:\n${legalFreshnessBlock(args.input)}`
+      : "",
+    "",
     "Provider assessments:",
     serializeAssessments(args.assessments),
     "",
@@ -1558,6 +1565,7 @@ async function adjudicateFinalWithOpenAI(args: {
     "5. NEVER state excluded critical claims as fact.",
     "6. If a disputed claim is numeric, directional, scope-defining, or branch-defining and remains unstable, convert it into a missing confirmation or narrow caveat instead of asserting it.",
     "7. Repetition across providers is not correctness if structural completeness is weaker.",
+    "8. If a recent-law instruction is provided, explicitly distinguish current law from recently enacted, proposed, or future-effective law where material.",
     "",
     "OUTPUT RULES",
     "- Write a concise internal memo.",
@@ -1575,6 +1583,10 @@ async function adjudicateFinalWithOpenAI(args: {
     args.input.facts ? `Facts:\n${args.input.facts}` : "",
     args.input.constraints ? `Constraints:\n${args.input.constraints}` : "",
     `Question:\n${args.input.question}`,
+    "",
+    legalFreshnessBlock(args.input)
+      ? `RECENT LAW / LEGISLATIVE CHANGE CHECK:\n${legalFreshnessBlock(args.input)}`
+      : "",
     "",
     "Provider assessments:",
     serializeAssessments(args.assessments),
@@ -1636,6 +1648,10 @@ async function adjudicateFinalWithClaude(args: {
     args.input.constraints ? `Constraints:\n${args.input.constraints}` : "",
     `Question:\n${args.input.question}`,
     "",
+    legalFreshnessBlock(args.input)
+      ? `RECENT LAW / LEGISLATIVE CHANGE CHECK:\n${legalFreshnessBlock(args.input)}`
+      : "",
+    "",
     "Provider assessments:",
     serializeAssessments(args.assessments),
     "",
@@ -1667,6 +1683,7 @@ async function adjudicateFinalWithClaude(args: {
     "Use the combined draft as a candidate, not as unquestioned truth.",
     "Never state excluded critical claims as fact.",
     "If a disputed claim is numeric, directional, scope-defining, or branch-defining and remains unstable, convert it into a missing confirmation or narrow caveat instead of asserting it.",
+    "If a recent-law instruction is provided, explicitly distinguish current law from recently enacted, proposed, or future-effective law where material.",
     "Prefer legal precision over generic completeness.",
     "Do not recommend contacting tax authorities.",
     "Do not invent citations.",
@@ -1717,6 +1734,7 @@ async function mergeFinalMemosWithOpenAI(args: {
     "Prefer the more legally precise memo where they differ.",
     "Never state excluded critical claims as fact.",
     "Use the combined draft and the round 2 conflict matrix only as support.",
+    "If a recent-law instruction is provided, explicitly distinguish current law from recently enacted, proposed, or future-effective law where material.",
     "Do not invent citations or authorities.",
     "Return STRICT JSON ONLY with keys:",
     "executive_summary, analysis, transaction_specific_treatment, required_confirmations, recommendation, confidence",
@@ -1726,6 +1744,10 @@ async function mergeFinalMemosWithOpenAI(args: {
     args.input.jurisdiction ? `Jurisdiction: ${args.input.jurisdiction}` : "",
     args.input.facts ? `Facts:\n${args.input.facts}` : "",
     `Question:\n${args.input.question}`,
+    "",
+    legalFreshnessBlock(args.input)
+      ? `RECENT LAW / LEGISLATIVE CHANGE CHECK:\n${legalFreshnessBlock(args.input)}`
+      : "",
     "",
     "Combined draft:",
     JSON.stringify(args.combinedDraft || {}, null, 2),
@@ -1994,6 +2016,113 @@ function buildLegalFreshnessInstruction(scan: LegalFreshnessScan | null): string
 function legalFreshnessBlock(input: CrosscheckInput): string {
   return String((input as any).legalFreshnessInstruction || "").trim();
 }
+
+
+function finalMemoAddressesFreshness(
+  memo: NormalizedMemo | null,
+  scan: LegalFreshnessScan | null
+): boolean {
+  if (!memo || !scan) return true;
+
+  const text = [
+    memo.executive_summary,
+    memo.analysis,
+    memo.transaction_specific_treatment.join("\n"),
+    memo.required_confirmations.join("\n"),
+    memo.recommendation,
+  ]
+    .join("\n")
+    .toLowerCase();
+
+  const structuralSignals = [
+    "current law",
+    "current-law",
+    "recent",
+    "recently enacted",
+    "enacted",
+    "proposed",
+    "pending",
+    "effective date",
+    "effective-date",
+    "transition",
+    "transitional",
+    "legislative",
+    "reform",
+    "law change",
+    "rate change",
+    "guidance",
+  ];
+
+  const hasStructuralSignal = structuralSignals.some((x) => text.includes(x));
+
+  const scanTerms = [
+    scan.tax_area,
+    scan.issue,
+    ...scan.recent_enacted_changes,
+    ...scan.pending_or_proposed_changes,
+    ...scan.effective_dates,
+    ...scan.authority_guidance,
+    ...scan.risk_flags,
+  ]
+    .map((x) => String(x || "").toLowerCase())
+    .flatMap((x) => x.split(/[^a-z0-9áéíóúüñ]+/i))
+    .map((x) => x.trim())
+    .filter((x) => x.length >= 5);
+
+  const uniqueScanTerms = uniq(scanTerms);
+  const matchedScanTerms = uniqueScanTerms.filter((term) => text.includes(term));
+
+  // General rule:
+  // - The final memo must visibly address legal freshness using structural language.
+  // - If the scan identified concrete terms, at least some must appear in the memo.
+  if (!hasStructuralSignal) return false;
+  if (uniqueScanTerms.length >= 4 && matchedScanTerms.length < 2) return false;
+
+  return true;
+}
+
+function freshnessConfidenceCap(
+  scan: LegalFreshnessScan | null,
+  memo: NormalizedMemo | null
+): "low" | "medium" | "high" {
+  if (!scan) return "high";
+
+  const addressed = finalMemoAddressesFreshness(memo, scan);
+
+  if (scan.confidence_impact === "high" && !addressed) return "low";
+  if (scan.confidence_impact === "medium" && !addressed) return "medium";
+  if (scan.confidence_impact === "high" && addressed) return "medium";
+
+  return "high";
+}
+
+function applyConfidenceCap(
+  confidence: "low" | "medium" | "high",
+  cap: "low" | "medium" | "high"
+): "low" | "medium" | "high" {
+  const rank = { low: 0, medium: 1, high: 2 } as const;
+  if (rank[confidence] <= rank[cap]) return confidence;
+  return cap;
+}
+
+function freshnessEnforcementCaveat(
+  scan: LegalFreshnessScan | null,
+  memo: NormalizedMemo | null
+): string[] {
+  if (!scan) return [];
+
+  const addressed = finalMemoAddressesFreshness(memo, scan);
+  if (addressed) {
+    return [
+      "Recent-law sensitivity was reviewed and reflected in the final synthesis.",
+    ];
+  }
+
+  return [
+    "Recent-law sensitivity was detected, but the final synthesis did not clearly distinguish current law from recently enacted, proposed, or future-effective changes. Confidence was capped accordingly.",
+  ];
+}
+
 
 async function runLegalFreshnessScan(input: CrosscheckInput): Promise<LegalFreshnessScan | null> {
   if (!legalFreshnessQuestionLooksRelevant(input)) return null;
@@ -2431,6 +2560,7 @@ export async function runCrosscheck(
         ]
       : []),
     ...(legalFreshnessScan?.risk_flags || []),
+    ...freshnessEnforcementCaveat(legalFreshnessScan, finalMemo),
   ]);
 
   const followups = uniq([
@@ -2459,10 +2589,15 @@ export async function runCrosscheck(
 
   if (unresolvedControllingCount >= 1) confidence = "low";
   else if (selectedRound1.length < 2) confidence = "low";
-  else if (legalFreshnessScan?.confidence_impact === "high" && confidence === "high") {
-    confidence = "medium";
-  } else if (pipelineDecision.mode === "fast_consensus" && confidence === "low") {
-    confidence = "medium";
+  else {
+    confidence = applyConfidenceCap(
+      confidence,
+      freshnessConfidenceCap(legalFreshnessScan, finalMemo)
+    );
+
+    if (pipelineDecision.mode === "fast_consensus" && confidence === "low") {
+      confidence = "medium";
+    }
   }
 
   const runtime_ms = Date.now() - t0;
@@ -2471,6 +2606,8 @@ export async function runCrosscheck(
     requestedMode: deepRun ? "deep" : "fast",
     minSuccessfulProviders,
     legalFreshnessImpact: legalFreshnessScan?.confidence_impact || "none",
+    finalMemoAddressesFreshness: finalMemoAddressesFreshness(finalMemo, legalFreshnessScan),
+    freshnessConfidenceCap: freshnessConfidenceCap(legalFreshnessScan, finalMemo),
     mode: pipelineDecision.mode,
     reasons: pipelineDecision.reasons,
     runtime_ms,
