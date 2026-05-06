@@ -155,8 +155,9 @@ export async function POST(req: NextRequest) {
       .filter(Boolean);
 
     const failureMessage =
-      result.consensus?.answer ||
       providerErrors[0] ||
+      result.consensus?.caveats?.[0] ||
+      result.consensus?.answer ||
       "All providers failed.";
 
     const res = NextResponse.json(

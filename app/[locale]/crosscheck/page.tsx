@@ -1246,9 +1246,10 @@ async function persistRun(args: {
           .join("\n");
 
         const errorMessage =
-          data?.consensus?.answer ||
-          data?.error ||
           providerErrors ||
+          data?.error ||
+          data?.consensus?.caveats?.[0] ||
+          data?.consensus?.answer ||
           tv2("analysisFailedFallback");
 
         throw new Error(errorMessage);

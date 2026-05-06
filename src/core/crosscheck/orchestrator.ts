@@ -2652,6 +2652,59 @@ async function runLegalFreshnessScan(input: CrosscheckInput): Promise<LegalFresh
 
 
 
+
+async function runFinalMemoSynthesisWithOpenRouter(args: {
+  input: CrosscheckInput;
+  prompt: string;
+}): Promise<{ memo: NormalizedMemo; provider: ProviderOutput } | null> {
+  const model = defaultOpenRouterModels()[0] || "anthropic/claude-sonnet-4.6";
+  const started = Date.now();
+
+  const result = await callOpenRouter(
+    {
+      ...args.input,
+      question: args.prompt,
+      maxTokens: clampInt(args.input.maxTokens, 1600, 5000, 2800),
+    },
+    model
+  ).catch((e: any) => ({
+    provider: "openrouter" as const,
+    model,
+    status: "error" as const,
+    ms: Date.now() - started,
+    error: e?.message ? String(e.message) : String(e),
+  }));
+
+  if (result.status !== "ok" || !result.text) {
+    return {
+      memo: normalizeMemoJson({
+        executive_summary: "Final answer could not be prepared by the OpenRouter fallback.",
+        analysis: result.error || "Unknown OpenRouter finalization error.",
+        transaction_specific_treatment: [],
+        required_confirmations: [],
+        recommendation: "Retry finalization or reduce the analysis thread.",
+        confidence: "low",
+      }),
+      provider: result,
+    };
+  }
+
+  const parsed = safeJsonParse<MemoJson>(extractJsonObject(result.text));
+  const memo = parsed ? normalizeMemoJson(parsed) : parseProviderMemo(result.text);
+
+  return {
+    memo,
+    provider: {
+      provider: "openrouter",
+      model,
+      status: "ok",
+      ms: result.ms,
+      text: result.text,
+    },
+  };
+}
+
+
 async function runFinalMemoSynthesis(input: CrosscheckInput): Promise<CrosscheckResult> {
   const t0 = Date.now();
   const apiKey = env("OPENAI_API_KEY");
@@ -2794,7 +2847,7 @@ async function runFinalMemoSynthesis(input: CrosscheckInput): Promise<Crosscheck
     };
   } catch (e: any) {
     const msg = e?.message ? String(e.message) : String(e);
-    const provider: ProviderOutput = {
+    const openaiProvider: ProviderOutput = {
       provider: "openai",
       model,
       status: msg.toLowerCase().includes("timeout") ? "timeout" : "error",
@@ -2802,22 +2855,94 @@ async function runFinalMemoSynthesis(input: CrosscheckInput): Promise<Crosscheck
       error: msg,
     };
 
+    // Finalization should not depend on a single direct provider.
+    // If OpenAI final memo synthesis fails, fall back to the first configured OpenRouter model.
+    const fallbackPrompt = [
+      "Prepare one final consolidated executive tax memo from the following source material.",
+      "Do not answer only the last follow-up.",
+      "Do not copy/paste prior answers.",
+      "Synthesize the full thread into one clean final answer.",
+      "Use clear sections: Executive summary, Analysis, Transaction-specific treatment, Required confirmations, Recommendation.",
+      "Return STRICT JSON ONLY with keys: executive_summary, analysis, transaction_specific_treatment, required_confirmations, recommendation, confidence.",
+      "",
+      input.question,
+    ].join("\n");
+
+    const fallback = await runFinalMemoSynthesisWithOpenRouter({
+      input,
+      prompt: fallbackPrompt,
+    }).catch(() => null);
+
+    if (fallback?.provider?.status === "ok") {
+      const fallbackAttempt: ProviderCall = {
+        provider: "openrouter",
+        model: fallback.provider.model,
+      };
+
+      return {
+        ok: true,
+        meta: {
+          attempted: [...attempted, fallbackAttempt],
+          succeeded: [fallbackAttempt],
+          failed: attempted,
+          runtime_ms: Date.now() - t0,
+        },
+        consensus: {
+          answer: fallback.memo.answer,
+          caveats: uniq([
+            "Prepared by fallback final memo synthesis after the primary finalizer failed.",
+            `Primary finalizer error: ${msg}`,
+            ...(fallback.memo.required_confirmations.length
+              ? ["The conclusion remains conditional on the listed confirmations."]
+              : []),
+          ]),
+          followups: fallback.memo.required_confirmations,
+          confidence: fallback.memo.confidence === "high" ? "medium" : fallback.memo.confidence,
+          disagreements: [],
+        },
+        providers: [openaiProvider, fallback.provider],
+      };
+    }
+
+    const fallbackError = fallback?.provider?.error || "OpenRouter fallback did not return a successful final memo.";
+
     return {
       ok: false,
       meta: {
-        attempted,
+        attempted: [
+          ...attempted,
+          {
+            provider: "openrouter",
+            model: fallback?.provider?.model || defaultOpenRouterModels()[0] || "unknown",
+          },
+        ],
         succeeded: [],
-        failed: attempted,
+        failed: [
+          ...attempted,
+          {
+            provider: "openrouter",
+            model: fallback?.provider?.model || defaultOpenRouterModels()[0] || "unknown",
+          },
+        ],
         runtime_ms: Date.now() - t0,
       },
       consensus: {
         answer: "Final answer could not be prepared. Please try again or shorten the analysis thread.",
-        caveats: [msg],
+        caveats: [msg, fallbackError],
         followups: [],
         confidence: "low",
         disagreements: [],
       },
-      providers: [provider],
+      providers: [
+        openaiProvider,
+        fallback?.provider || {
+          provider: "openrouter",
+          model: defaultOpenRouterModels()[0] || "unknown",
+          status: "error",
+          ms: Date.now() - t0,
+          error: fallbackError,
+        },
+      ],
     };
   }
 }
