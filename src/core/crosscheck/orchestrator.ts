@@ -2653,6 +2653,28 @@ async function runLegalFreshnessScan(input: CrosscheckInput): Promise<LegalFresh
 
 
 
+
+function plainFinalMemoToNormalizedMemo(raw: string): NormalizedMemo {
+  const cleaned = normalizeText(raw)
+    .replace(/^```(?:json|markdown|md)?\s*/i, "")
+    .replace(/```$/i, "")
+    .trim();
+
+  const lines = cleaned.split(/\n+/).map((x) => x.trim()).filter(Boolean);
+  const executive_summary = lines.slice(0, 3).join(" ");
+
+  return {
+    executive_summary: cleanMemoText(executive_summary),
+    analysis: cleaned,
+    transaction_specific_treatment: [],
+    required_confirmations: [],
+    recommendation: "",
+    confidence: "medium",
+    claims: heuristicClaimExtraction(cleaned),
+    answer: cleaned,
+  };
+}
+
 async function runFinalMemoSynthesisWithOpenRouter(args: {
   input: CrosscheckInput;
   prompt: string;
@@ -2689,8 +2711,7 @@ async function runFinalMemoSynthesisWithOpenRouter(args: {
     };
   }
 
-  const parsed = safeJsonParse<MemoJson>(extractJsonObject(result.text));
-  const memo = parsed ? normalizeMemoJson(parsed) : parseProviderMemo(result.text);
+  const memo = plainFinalMemoToNormalizedMemo(result.text);
 
   return {
     memo,
@@ -2862,8 +2883,11 @@ async function runFinalMemoSynthesis(input: CrosscheckInput): Promise<Crosscheck
       "Do not answer only the last follow-up.",
       "Do not copy/paste prior answers.",
       "Synthesize the full thread into one clean final answer.",
-      "Use clear sections: Executive summary, Analysis, Transaction-specific treatment, Required confirmations, Recommendation.",
-      "Return STRICT JSON ONLY with keys: executive_summary, analysis, transaction_specific_treatment, required_confirmations, recommendation, confidence.",
+      "Return PLAIN TEXT ONLY.",
+      "Do not return JSON.",
+      "Do not use markdown code fences.",
+      "Do not include provider names or conversation labels.",
+      "Use clear sections: Executive summary, Facts and assumptions, Recommended structure, U.S. federal income tax treatment, Forms and filings, Numerical illustration, Texas and state considerations, Remaining confirmations, Recommended next steps, Confidence explanation.",
       "",
       input.question,
     ].join("\n");
