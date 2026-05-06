@@ -101,6 +101,33 @@ function normalizeText(s: string): string {
     .trim();
 }
 
+function memoFieldToText(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => memoFieldToText(item))
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, val]) => {
+        const body = memoFieldToText(val);
+        if (!body) return "";
+        const label = key.replace(/_/g, " ");
+        return `${label}: ${body}`;
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  return String(value || "");
+}
+
 function truncate(s: string, max = 1200): string {
   const v = String(s || "").trim();
   if (v.length <= max) return v;
@@ -126,7 +153,7 @@ function splitIntoSnippets(text: string): string[] {
 
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
-  return uniq(value.map(String));
+  return uniq(value.map(memoFieldToText));
 }
 
 function confidenceOrLow(value: unknown): "low" | "medium" | "high" {
@@ -481,15 +508,15 @@ function heuristicClaimExtraction(text: string): NormalizedClaim[] {
 
 function normalizeMemoJson(parsed: ProviderMemoJson): NormalizedMemo {
   const memoNoAnswer = {
-    executive_summary: cleanMemoText(String(parsed?.executive_summary || "").trim()),
-    analysis: cleanMemoText(String(parsed?.analysis || "").trim()),
+    executive_summary: cleanMemoText(memoFieldToText(parsed?.executive_summary).trim()),
+    analysis: cleanMemoText(memoFieldToText(parsed?.analysis).trim()),
     transaction_specific_treatment: cleanArray(
       normalizeStringArray(parsed?.transaction_specific_treatment)
     ),
     required_confirmations: cleanArray(
       normalizeStringArray(parsed?.required_confirmations)
     ),
-    recommendation: cleanMemoText(String(parsed?.recommendation || "").trim()),
+    recommendation: cleanMemoText(memoFieldToText(parsed?.recommendation).trim()),
     confidence: confidenceOrLow(parsed?.confidence),
     claims: normalizeClaims(parsed?.claims),
   };
