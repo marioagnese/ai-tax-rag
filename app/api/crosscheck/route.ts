@@ -13,7 +13,7 @@ function requireEnv(name: string) {
 /**
  * POST /api/crosscheck
  * Header: x-crosscheck-key: <CROSSCHECK_KEY>
- * Body: { question, jurisdiction?, facts?, constraints?, timeoutMs?, maxTokens? }
+ * Body: { question, jurisdiction?, facts?, constraints?, timeoutMs?, maxTokens?, runIntent? }
  */
 export async function POST(req: Request) {
   try {
@@ -40,6 +40,15 @@ export async function POST(req: Request) {
     const timeoutMs = body?.timeoutMs ? Number(body.timeoutMs) : undefined;
     const maxTokens = body?.maxTokens ? Number(body.maxTokens) : undefined;
 
+    const rawRunIntent = body?.runIntent ? String(body.runIntent).toLowerCase() : undefined;
+    const runIntent =
+      rawRunIntent === "preliminary" ||
+      rawRunIntent === "followup" ||
+      rawRunIntent === "refine" ||
+      rawRunIntent === "finalize"
+        ? rawRunIntent
+        : undefined;
+
     const result = await runCrosscheck({
       question,
       jurisdiction,
@@ -47,6 +56,7 @@ export async function POST(req: Request) {
       constraints,
       timeoutMs,
       maxTokens,
+      runIntent,
     });
 
     return NextResponse.json(result);

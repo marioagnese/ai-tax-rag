@@ -13,6 +13,7 @@ export type CrosscheckInput = {
   constraints?: string;
   maxTokens?: number;
   timeoutMs?: number;
+  runIntent?: "preliminary" | "followup" | "refine" | "finalize";
 };
 
 export type ProviderCall = {

@@ -19,6 +19,7 @@ type CrosscheckUiBody = {
   question?: string;
   timeoutMs?: number;
   maxTokens?: number;
+  runIntent?: "preliminary" | "followup" | "refine" | "finalize";
   [k: string]: unknown;
 };
 
@@ -31,6 +32,17 @@ function sanitizeBody(raw: unknown): CrosscheckUiBody {
   const constraints = typeof b.constraints === "string" ? b.constraints : undefined;
   const question =
     typeof b.question === "string" ? b.question.trim() : undefined;
+
+  const rawRunIntent =
+    typeof b.runIntent === "string" ? b.runIntent.trim().toLowerCase() : undefined;
+
+  const runIntent =
+    rawRunIntent === "preliminary" ||
+    rawRunIntent === "followup" ||
+    rawRunIntent === "refine" ||
+    rawRunIntent === "finalize"
+      ? rawRunIntent
+      : undefined;
 
   const timeoutMs =
     typeof b.timeoutMs === "number" && Number.isFinite(b.timeoutMs)
@@ -49,6 +61,7 @@ function sanitizeBody(raw: unknown): CrosscheckUiBody {
     question: question || undefined,
     timeoutMs,
     maxTokens,
+    runIntent,
   };
 }
 
@@ -64,6 +77,7 @@ async function parseRequestBody(req: NextRequest): Promise<CrosscheckUiBody> {
     const jurisdictionValue = form.get("jurisdiction");
     const timeoutMsValue = form.get("timeoutMs");
     const maxTokensValue = form.get("maxTokens");
+    const runIntentValue = form.get("runIntent");
 
     return sanitizeBody({
       question: typeof questionValue === "string" ? questionValue : undefined,
@@ -79,6 +93,7 @@ async function parseRequestBody(req: NextRequest): Promise<CrosscheckUiBody> {
         typeof maxTokensValue === "string" && maxTokensValue.trim()
           ? Number(maxTokensValue)
           : undefined,
+      runIntent: typeof runIntentValue === "string" ? runIntentValue : undefined,
     });
   }
 
@@ -130,6 +145,7 @@ export async function POST(req: NextRequest) {
       constraints: body.constraints,
       timeoutMs: body.timeoutMs,
       maxTokens: body.maxTokens,
+      runIntent: body.runIntent,
     });
 
     const status = result.ok ? 200 : 502;

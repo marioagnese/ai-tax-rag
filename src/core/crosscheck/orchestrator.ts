@@ -2651,9 +2651,185 @@ async function runLegalFreshnessScan(input: CrosscheckInput): Promise<LegalFresh
 }
 
 
+
+async function runFinalMemoSynthesis(input: CrosscheckInput): Promise<CrosscheckResult> {
+  const t0 = Date.now();
+  const apiKey = env("OPENAI_API_KEY");
+
+  const attempted: ProviderCall[] = [];
+  const providers: ProviderOutput[] = [];
+
+  const model =
+    env("OPENAI_FINAL_MEMO_MODEL") ||
+    env("OPENAI_MERGER_MODEL") ||
+    env("OPENAI_ADJUDICATOR_MODEL") ||
+    env("OPENAI_SYNTH_MODEL") ||
+    env("OPENAI_MODEL") ||
+    "gpt-4.1-mini";
+
+  attempted.push({ provider: "openai", model });
+
+  if (!apiKey) {
+    return {
+      ok: false,
+      meta: {
+        attempted,
+        succeeded: [],
+        failed: attempted,
+        runtime_ms: Date.now() - t0,
+      },
+      consensus: {
+        answer: "Final answer could not be prepared because OPENAI_API_KEY is not configured.",
+        caveats: ["Final synthesis requires a final memo model configuration."],
+        followups: [],
+        confidence: "low",
+        disagreements: [],
+      },
+      providers: [
+        {
+          provider: "openai",
+          model,
+          status: "error",
+          ms: Date.now() - t0,
+          error: "OPENAI_API_KEY is not configured.",
+        },
+      ],
+    };
+  }
+
+  const client = new OpenAI({ apiKey });
+
+  const sys = [
+    "You are TaxAiPro's final executive tax memo writer.",
+    "You are NOT performing a new preliminary crosscheck.",
+    "You are NOT answering only the last follow-up.",
+    "You are preparing the FINAL ANSWER from an already-developed analysis thread.",
+    "",
+    "Your job:",
+    "1. Read the original question, all follow-ups, numerical assumptions, prior preliminary answers, caveats, and open confirmations contained in the user prompt.",
+    "2. Produce one clean, consolidated, printable executive tax memo.",
+    "3. Incorporate all follow-up facts into the final conclusion.",
+    "4. Resolve contradictions where possible.",
+    "5. If a point remains uncertain, state it as a confirmation item, not as a settled conclusion.",
+    "6. Correct loose tax terminology when needed.",
+    "7. Do not mention providers, models, prior answers, the thread, or the fact that this is a chat.",
+    "8. Do not copy/paste prior answers.",
+    "9. Do not invent citations, statutory references, forms, rates, or treaty benefits.",
+    "10. If the prompt asks for a numerical illustration, show the calculation clearly.",
+    "",
+    "Important professional constraints:",
+    "- Prefer U.S. trade or business / effectively connected income terminology over permanent establishment unless a treaty analysis is actually relevant.",
+    "- Do not say a registered agent is the same as a resident owner, director, or legal representative.",
+    "- If no income tax treaty exists or treaty applicability is unclear, say so cautiously and require confirmation.",
+    "- Keep the answer conservative and audit-ready.",
+    "",
+    "Return STRICT JSON ONLY with keys:",
+    "executive_summary, analysis, transaction_specific_treatment, required_confirmations, recommendation, confidence.",
+    "",
+    "Each field must be a string or string array only.",
+    "The analysis field must be one plain string, not an object.",
+  ].join("\n");
+
+  const user = [
+    input.jurisdiction ? `Jurisdiction:\n${input.jurisdiction}` : "",
+    input.facts ? `Additional facts:\n${input.facts}` : "",
+    input.constraints ? `Constraints:\n${input.constraints}` : "",
+    "Finalization source material:",
+    input.question,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  try {
+    const resp = await withTimeout(
+      client.chat.completions.create({
+        model,
+        temperature: 0,
+        messages: [
+          { role: "system", content: sys },
+          { role: "user", content: user },
+        ],
+        max_tokens: clampInt(input.maxTokens, 1600, 5000, 2800),
+      }),
+      clampInt(input.timeoutMs, 15_000, 120_000, 60_000)
+    );
+
+    const raw = resp.choices?.[0]?.message?.content || "{}";
+    const parsed = safeJsonParse<MemoJson>(extractJsonObject(raw));
+    const memo = parsed ? normalizeMemoJson(parsed) : parseProviderMemo(raw);
+
+    const provider: ProviderOutput = {
+      provider: "openai",
+      model,
+      status: "ok",
+      ms: Date.now() - t0,
+      text: raw,
+    };
+
+    providers.push(provider);
+
+    const caveats = uniq([
+      "Prepared as a final consolidated answer from the analysis thread; remaining factual confirmations should be verified before implementation.",
+      ...(memo.required_confirmations.length
+        ? ["The conclusion remains conditional on the listed confirmations."]
+        : []),
+    ]);
+
+    return {
+      ok: true,
+      meta: {
+        attempted,
+        succeeded: attempted,
+        failed: [],
+        runtime_ms: Date.now() - t0,
+      },
+      consensus: {
+        answer: memo.answer,
+        caveats,
+        followups: memo.required_confirmations,
+        confidence: memo.confidence || "medium",
+        disagreements: [],
+      },
+      providers,
+    };
+  } catch (e: any) {
+    const msg = e?.message ? String(e.message) : String(e);
+    const provider: ProviderOutput = {
+      provider: "openai",
+      model,
+      status: msg.toLowerCase().includes("timeout") ? "timeout" : "error",
+      ms: Date.now() - t0,
+      error: msg,
+    };
+
+    return {
+      ok: false,
+      meta: {
+        attempted,
+        succeeded: [],
+        failed: attempted,
+        runtime_ms: Date.now() - t0,
+      },
+      consensus: {
+        answer: "Final answer could not be prepared. Please try again or shorten the analysis thread.",
+        caveats: [msg],
+        followups: [],
+        confidence: "low",
+        disagreements: [],
+      },
+      providers: [provider],
+    };
+  }
+}
+
+
 export async function runCrosscheck(
   input: CrosscheckInput
 ): Promise<CrosscheckResult> {
+  if (input.runIntent === "finalize") {
+    return runFinalMemoSynthesis(input);
+  }
+
   const t0 = Date.now();
   const timeoutMs = clampInt(input.timeoutMs, 8_000, 120_000, 18_000);
   const deepRun = isDeepRun(input, timeoutMs);
