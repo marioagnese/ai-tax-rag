@@ -150,13 +150,22 @@ export async function POST(req: NextRequest) {
 
     const status = result.ok ? 200 : 502;
 
+    const providerErrors = (result.providers || [])
+      .map((p) => p.error)
+      .filter(Boolean);
+
+    const failureMessage =
+      result.consensus?.answer ||
+      providerErrors[0] ||
+      "All providers failed.";
+
     const res = NextResponse.json(
       {
         ok: result.ok,
         meta: result.meta,
         consensus: result.consensus,
         providers: result.providers,
-        error: result.ok ? undefined : "All providers failed.",
+        error: result.ok ? undefined : failureMessage,
       },
       { status }
     );

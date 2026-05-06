@@ -1176,21 +1176,28 @@ async function persistRun(args: {
 
     const runIntent = args.runIntent || "preliminary";
 
+    const preserveExistingResult = runIntent !== "preliminary";
+
     setLoading(true);
     setActiveRunIntent(runIntent);
     setAnalysisStartedAt(Date.now());
     setElapsedMs(0);
     setRequestError("");
-    setAnswer("");
-    setAnswerKind("preliminary");
-    setConfidence("");
-    setCaveats([]);
-    setFollowups([]);
-    setDisagreements([]);
-    setProviders([]);
-    setRuntimeMs(null);
-    setAttemptedCount(0);
-    setSuccessCount(0);
+
+    // Keep the current analysis visible during follow-up/refine/finalize.
+    // This prevents a failed finalization from wiping the working analysis.
+    if (!preserveExistingResult) {
+      setAnswer("");
+      setAnswerKind("preliminary");
+      setConfidence("");
+      setCaveats([]);
+      setFollowups([]);
+      setDisagreements([]);
+      setProviders([]);
+      setRuntimeMs(null);
+      setAttemptedCount(0);
+      setSuccessCount(0);
+    }
 
     try {
       const isFirstRun = conversationTurns.length === 0;
@@ -1207,7 +1214,6 @@ async function persistRun(args: {
         const form = new FormData();
         form.append("question", args.payloadQuestion);
         form.append("timeoutMs", String(timeoutMs));
-        form.append("runIntent", runIntent);
         form.append("runIntent", runIntent);
         if (args.payloadDetails?.trim()) form.append("facts", args.payloadDetails.trim());
         attachedFiles.forEach((file) => form.append("files", file));
@@ -1234,7 +1240,18 @@ async function persistRun(args: {
       const data = (await res.json()) as CrosscheckResponse;
 
       if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || tv2("analysisFailedFallback"));
+        const providerErrors = (data?.providers || [])
+          .map((p) => p.error)
+          .filter(Boolean)
+          .join("\n");
+
+        const errorMessage =
+          data?.consensus?.answer ||
+          data?.error ||
+          providerErrors ||
+          tv2("analysisFailedFallback");
+
+        throw new Error(errorMessage);
       }
 
       const nextAnswer = data?.consensus?.answer || tv2("noAnswerReturned");
