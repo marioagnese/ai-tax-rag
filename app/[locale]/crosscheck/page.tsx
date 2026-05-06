@@ -72,6 +72,9 @@ type AnalysisTurn = {
   createdAt?: number;
 };
 
+type AnswerKind = "preliminary" | "final";
+type RunIntent = "preliminary" | "followup" | "refine" | "finalize";
+
 type SavedDocument = {
   id: string;
   name: string;
@@ -132,7 +135,7 @@ const ALLOWED_DOC_TYPES = [
 ];
 
 function cn(...xs: Array<string | false | null | undefined>) {
-  return xs.filter(Boolean).join(" ");
+  return xs.filter(Boolean).join("\n\n");
 }
 
 function formatTimeAgo(ts: number, locale?: string) {
@@ -778,6 +781,7 @@ export default function CrosscheckV2Page() {
   const [uploadError, setUploadError] = useState("");
 
   const [answer, setAnswer] = useState("");
+  const [answerKind, setAnswerKind] = useState<AnswerKind>("preliminary");
   const [confidence, setConfidence] = useState<"low" | "medium" | "high" | "">(
     ""
   );
@@ -969,6 +973,7 @@ const [runtimeMs, setRuntimeMs] = useState<number | null>(null);
     setRequestError("");
     setUploadError("");
     setAnswer("");
+    setAnswerKind("preliminary");
     setConfidence("");
     setCaveats([]);
     setFollowups([]);
@@ -1056,6 +1061,50 @@ function buildConversationPrompt(
 
   return prompt;
 }
+
+function buildFinalizationPrompt(originalQuestion: string, turns: AnalysisTurn[]) {
+  const compactThread = turns
+    .map((turn, index) => {
+      const label =
+        turn.role === "user"
+          ? index === 0
+            ? "Original question"
+            : "User follow-up / added facts"
+          : "Prior TaxAiPro analysis";
+
+      const max = turn.role === "assistant" ? 2200 : 1400;
+      const body =
+        turn.text.length > max ? `${turn.text.slice(0, max).trim()}...` : turn.text;
+
+      return `${label}:\n${body}`;
+    })
+    .join("\n\n---\n\n");
+
+  return [
+    "Prepare a FINAL CONSOLIDATED DRAFT based on the full analysis thread below.",
+    "",
+    "Do not merely answer the last follow-up.",
+    "Synthesize the original question, prior preliminary analyses, follow-up facts, caveats, and unresolved confirmations.",
+    "Do not repeat every prior section mechanically.",
+    "State a bottom-line conclusion where supportable.",
+    "If material facts remain missing, keep the answer conditional and identify exactly what must be confirmed.",
+    "Do not overstate confidence.",
+    "",
+    "Use this structure:",
+    "1. Bottom-line conclusion",
+    "2. Assumptions relied upon",
+    "3. Analysis by issue / transaction stream",
+    "4. Remaining confirmations",
+    "5. Recommended position",
+    "6. Confidence explanation",
+    "",
+    `Original question:\n${originalQuestion}`,
+    "",
+    "Full analysis thread:",
+    compactThread,
+  ].join("\n");
+}
+
 async function persistRun(args: {
     runId?: string | null;
     title: string;
@@ -1119,6 +1168,7 @@ async function persistRun(args: {
   async function executeAnalysis(args: {
     payloadQuestion: string;
     payloadDetails?: string;
+    runIntent?: RunIntent;
   }) {
     if (!args.payloadQuestion.trim() || loading) return null;
 
@@ -1127,6 +1177,7 @@ async function persistRun(args: {
     setElapsedMs(0);
     setRequestError("");
     setAnswer("");
+    setAnswerKind("preliminary");
     setConfidence("");
     setCaveats([]);
     setFollowups([]);
@@ -1137,8 +1188,14 @@ async function persistRun(args: {
     setSuccessCount(0);
 
     try {
+      const runIntent = args.runIntent || "preliminary";
       const isFirstRun = conversationTurns.length === 0;
-      const timeoutMs = isFirstRun ? FIRST_RUN_TIMEOUT_MS : FOLLOWUP_TIMEOUT_MS;
+      const timeoutMs =
+        runIntent === "finalize"
+          ? FIRST_RUN_TIMEOUT_MS
+          : isFirstRun
+          ? FIRST_RUN_TIMEOUT_MS
+          : FOLLOWUP_TIMEOUT_MS;
 
       let res: Response;
 
@@ -1146,6 +1203,8 @@ async function persistRun(args: {
         const form = new FormData();
         form.append("question", args.payloadQuestion);
         form.append("timeoutMs", String(timeoutMs));
+        form.append("runIntent", runIntent);
+        form.append("runIntent", runIntent);
         if (args.payloadDetails?.trim()) form.append("facts", args.payloadDetails.trim());
         attachedFiles.forEach((file) => form.append("files", file));
 
@@ -1163,6 +1222,7 @@ async function persistRun(args: {
             question: args.payloadQuestion,
             facts: args.payloadDetails?.trim() || undefined,
             timeoutMs,
+            runIntent,
           }),
         });
       }
@@ -1176,6 +1236,7 @@ async function persistRun(args: {
       const nextAnswer = data?.consensus?.answer || tv2("noAnswerReturned");
 
       setAnswer(nextAnswer);
+      setAnswerKind(runIntent === "finalize" ? "final" : "preliminary");
       setConfidence(data?.consensus?.confidence || "");
       setCaveats(data?.consensus?.caveats || []);
       setFollowups(data?.consensus?.followups || []);
@@ -1287,6 +1348,7 @@ async function persistRun(args: {
     const result = await executeAnalysis({
       payloadQuestion: trimmed,
       payloadDetails: details,
+      runIntent: "preliminary",
     });
 
     if (!result) return;
@@ -1334,6 +1396,7 @@ async function persistRun(args: {
     const result = await executeAnalysis({
       payloadQuestion: refinePrompt,
       payloadDetails: details,
+      runIntent: "refine",
     });
 
     if (!result) return;
@@ -1358,6 +1421,51 @@ async function persistRun(args: {
 
     await saveAnalysisRecord({
       title: `${baseQuestion} — ${tv2("refineAnswer")}`,
+      questionText: baseQuestion,
+      answerText: result.nextAnswer,
+      confidenceValue: result.data?.consensus?.confidence || "",
+      caveatsValue: result.data?.consensus?.caveats || [],
+      followupsValue: result.data?.consensus?.followups || [],
+      disagreementsValue: result.data?.consensus?.disagreements || [],
+      threadValue: nextThread,
+    });
+  }
+
+
+  async function handleFinalizeAnalysis() {
+    if (!baseQuestion.trim() || !answer.trim() || loading) return;
+
+    const finalizeInstruction = "Finalize analysis into a final consolidated draft.";
+    const payloadQuestion = buildFinalizationPrompt(baseQuestion, conversationTurns);
+
+    const result = await executeAnalysis({
+      payloadQuestion,
+      payloadDetails: details,
+      runIntent: "finalize",
+    });
+
+    if (!result) return;
+
+    const nextThread: AnalysisTurn[] = [
+      ...conversationTurns,
+      {
+        id: crypto.randomUUID(),
+        role: "user",
+        text: finalizeInstruction,
+        createdAt: Date.now(),
+      },
+      {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        text: result.nextAnswer,
+        createdAt: Date.now(),
+      },
+    ];
+
+    setConversationTurns(nextThread);
+
+    await saveAnalysisRecord({
+      title: `${baseQuestion} — Final consolidated draft`,
       questionText: baseQuestion,
       answerText: result.nextAnswer,
       confidenceValue: result.data?.consensus?.confidence || "",
@@ -1398,6 +1506,7 @@ async function persistRun(args: {
     const result = await executeAnalysis({
       payloadQuestion,
       payloadDetails: details,
+      runIntent: "followup",
     });
 
     if (!result) return;
@@ -1442,6 +1551,7 @@ async function persistRun(args: {
     setLoading(false);
     setRequestError("");
     setAnswer(item.answer || "");
+    setAnswerKind("preliminary");
     setConfidence(item.confidence || "");
     setCaveats(item.caveats || []);
     setFollowups(item.followups || []);
@@ -1816,7 +1926,7 @@ async function persistRun(args: {
                           <div className="flex items-center gap-2">
                             <CheckCircle2 size={18} className="text-white/72" />
                             <h2 className="text-base font-semibold text-white/90">
-                              {tv2("preliminaryAnswer")}
+                              {answerKind === "final" ? "Final consolidated draft" : tv2("preliminaryAnswer")}
                             </h2>
                           </div>
 
@@ -1861,12 +1971,17 @@ async function persistRun(args: {
                             {conversationTurns.length > 2 ? (
                               <div className="mb-4 rounded-2xl border border-white/10 bg-[#0F172A] px-4 py-3">
                                 <div className="mb-3 flex items-center justify-between gap-3">
-                                  <div className="text-xs font-medium uppercase tracking-[0.16em] text-white/40">
-                                    {tv2("conversation")}
+                                  <div>
+                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-white/40">
+                                      Prior analysis thread
+                                    </div>
+                                    <div className="mt-1 text-xs text-white/38">
+                                      Earlier answers are preserved here. The latest answer remains below.
+                                    </div>
                                   </div>
                                   <CopyButton
                                     text={conversationTurns
-                                      .slice(2)
+                                      .slice(1, Math.max(1, conversationTurns.length - 1))
                                       .map((turn) =>
                                         `${
                                           turn.role === "user"
@@ -1884,24 +1999,26 @@ async function persistRun(args: {
                                   />
                                 </div>
                                 <div className="space-y-3">
-                                  {conversationTurns.slice(2, Math.max(2, conversationTurns.length - 1)).map((turn) => (
-                                    <div
-                                      key={turn.id}
-                                      className={cn(
-                                        "rounded-xl px-3 py-2 text-sm leading-6",
-                                        turn.role === "user"
-                                          ? "border border-white/10 bg-white/[0.04] text-white/84"
-                                          : "bg-transparent text-white/70"
-                                      )}
-                                    >
-                                      <div className="mb-1 text-[11px] uppercase tracking-[0.16em] text-white/38">
-                                        {turn.role === "user"
-                                          ? tv2("followUpLabel")
-                                          : tv2("answerLabel")}
+                                  {conversationTurns
+                                    .slice(1, Math.max(1, conversationTurns.length - 1))
+                                    .map((turn) => (
+                                      <div
+                                        key={turn.id}
+                                        className={cn(
+                                          "rounded-xl px-3 py-2 text-sm leading-6",
+                                          turn.role === "user"
+                                            ? "border border-white/10 bg-white/[0.04] text-white/84"
+                                            : "bg-transparent text-white/70"
+                                        )}
+                                      >
+                                        <div className="mb-1 text-[11px] uppercase tracking-[0.16em] text-white/38">
+                                          {turn.role === "user"
+                                            ? tv2("followUpLabel")
+                                            : tv2("answerLabel")}
+                                        </div>
+                                        <div className="whitespace-pre-wrap">{turn.text}</div>
                                       </div>
-                                      <div className="whitespace-pre-wrap">{turn.text}</div>
-                                    </div>
-                                  ))}
+                                    ))}
                                 </div>
                               </div>
                             ) : null}
@@ -1929,7 +2046,23 @@ async function persistRun(args: {
                                 <PlusCircle size={14} />
                                 <span>{tv2("addMissingFacts")}</span>
                               </button>
+
+                              <button
+                                type="button"
+                                onClick={handleFinalizeAnalysis}
+                                disabled={loading || !answer.trim()}
+                                className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-100 transition hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                <BookOpenText size={14} />
+                                <span>Finalize analysis</span>
+                              </button>
                             </div>
+
+                            {answerKind !== "final" ? (
+                              <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-white/48">
+                                Finalize analysis creates a consolidated draft using the original question, follow-up facts, and prior analysis. It remains a draft for professional review.
+                              </div>
+                            ) : null}
 
                             <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                               {runtimeMs !== null ? (
