@@ -782,6 +782,7 @@ export default function CrosscheckV2Page() {
 
   const [answer, setAnswer] = useState("");
   const [answerKind, setAnswerKind] = useState<AnswerKind>("preliminary");
+  const [activeRunIntent, setActiveRunIntent] = useState<RunIntent | null>(null);
   const [confidence, setConfidence] = useState<"low" | "medium" | "high" | "">(
     ""
   );
@@ -974,6 +975,7 @@ const [runtimeMs, setRuntimeMs] = useState<number | null>(null);
     setUploadError("");
     setAnswer("");
     setAnswerKind("preliminary");
+    setActiveRunIntent(null);
     setConfidence("");
     setCaveats([]);
     setFollowups([]);
@@ -1081,7 +1083,7 @@ function buildFinalizationPrompt(originalQuestion: string, turns: AnalysisTurn[]
     .join("\n\n---\n\n");
 
   return [
-    "Prepare a FINAL CONSOLIDATED DRAFT based on the full analysis thread below.",
+    "Prepare a FINAL CONSOLIDATED ANSWER based on the full analysis thread below.",
     "",
     "Do not merely answer the last follow-up.",
     "Synthesize the original question, prior preliminary analyses, follow-up facts, caveats, and unresolved confirmations.",
@@ -1172,7 +1174,10 @@ async function persistRun(args: {
   }) {
     if (!args.payloadQuestion.trim() || loading) return null;
 
+    const runIntent = args.runIntent || "preliminary";
+
     setLoading(true);
+    setActiveRunIntent(runIntent);
     setAnalysisStartedAt(Date.now());
     setElapsedMs(0);
     setRequestError("");
@@ -1188,7 +1193,6 @@ async function persistRun(args: {
     setSuccessCount(0);
 
     try {
-      const runIntent = args.runIntent || "preliminary";
       const isFirstRun = conversationTurns.length === 0;
       const timeoutMs =
         runIntent === "finalize"
@@ -1259,6 +1263,7 @@ async function persistRun(args: {
       return null;
     } finally {
       setLoading(false);
+      setActiveRunIntent(null);
       setAnalysisStartedAt(null);
     }
   }
@@ -1435,7 +1440,7 @@ async function persistRun(args: {
   async function handleFinalizeAnalysis() {
     if (!baseQuestion.trim() || !answer.trim() || loading) return;
 
-    const finalizeInstruction = "Finalize analysis into a final consolidated draft.";
+    const finalizeInstruction = "Prepare final consolidated answer.";
     const payloadQuestion = buildFinalizationPrompt(baseQuestion, conversationTurns);
 
     const result = await executeAnalysis({
@@ -1465,7 +1470,7 @@ async function persistRun(args: {
     setConversationTurns(nextThread);
 
     await saveAnalysisRecord({
-      title: `${baseQuestion} — Final consolidated draft`,
+      title: `${baseQuestion} — Final answer`,
       questionText: baseQuestion,
       answerText: result.nextAnswer,
       confidenceValue: result.data?.consensus?.confidence || "",
@@ -1552,6 +1557,7 @@ async function persistRun(args: {
     setRequestError("");
     setAnswer(item.answer || "");
     setAnswerKind("preliminary");
+    setActiveRunIntent(null);
     setConfidence(item.confidence || "");
     setCaveats(item.caveats || []);
     setFollowups(item.followups || []);
@@ -1926,7 +1932,11 @@ async function persistRun(args: {
                           <div className="flex items-center gap-2">
                             <CheckCircle2 size={18} className="text-white/72" />
                             <h2 className="text-base font-semibold text-white/90">
-                              {answerKind === "final" ? "Final consolidated draft" : tv2("preliminaryAnswer")}
+                              {activeRunIntent === "finalize"
+                                ? "Preparing final answer"
+                                : answerKind === "final"
+                                ? "Final answer"
+                                : tv2("preliminaryAnswer")}
                             </h2>
                           </div>
 
@@ -1949,11 +1959,18 @@ async function persistRun(args: {
                         </div>
 
                         {loading ? (
-                          <div className="space-y-3">
-                            <div className="h-4 w-full animate-pulse rounded bg-white/10" />
-                            <div className="h-4 w-[94%] animate-pulse rounded bg-white/10" />
-                            <div className="h-4 w-[86%] animate-pulse rounded bg-white/10" />
-                            <div className="h-4 w-[70%] animate-pulse rounded bg-white/10" />
+                          <div className="space-y-4">
+                            {activeRunIntent === "finalize" ? (
+                              <div className="rounded-2xl border border-emerald-400/15 bg-emerald-400/10 px-4 py-3 text-sm leading-6 text-emerald-100/90">
+                                Preparing a final consolidated answer from the original question, follow-up facts, and prior analysis.
+                              </div>
+                            ) : null}
+                            <div className="space-y-3">
+                              <div className="h-4 w-full animate-pulse rounded bg-white/10" />
+                              <div className="h-4 w-[94%] animate-pulse rounded bg-white/10" />
+                              <div className="h-4 w-[86%] animate-pulse rounded bg-white/10" />
+                              <div className="h-4 w-[70%] animate-pulse rounded bg-white/10" />
+                            </div>
                           </div>
                         ) : (
                           <>
@@ -1968,7 +1985,7 @@ async function persistRun(args: {
                               </div>
                             ) : null}
 
-                            {conversationTurns.length > 2 ? (
+                            {answerKind !== "final" && conversationTurns.length > 2 ? (
                               <div className="mb-4 rounded-2xl border border-white/10 bg-[#0F172A] px-4 py-3">
                                 <div className="mb-3 flex items-center justify-between gap-3">
                                   <div>
@@ -2027,6 +2044,44 @@ async function persistRun(args: {
                               {answer}
                             </div>
 
+                            {answerKind === "final" && conversationTurns.length > 2 ? (
+                              <details className="mt-5 rounded-2xl border border-white/10 bg-[#0F172A]">
+                                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 marker:content-none">
+                                  <div>
+                                    <div className="text-sm font-medium text-white/82">
+                                      Supporting prior analysis thread
+                                    </div>
+                                    <div className="mt-1 text-xs text-white/40">
+                                      Original preliminary answers and follow-ups used to build this final answer.
+                                    </div>
+                                  </div>
+                                  <ChevronRight className="h-4 w-4 shrink-0 text-white/35" />
+                                </summary>
+                                <div className="space-y-3 border-t border-white/10 px-4 py-4">
+                                  {conversationTurns
+                                    .slice(1, Math.max(1, conversationTurns.length - 1))
+                                    .map((turn) => (
+                                      <div
+                                        key={turn.id}
+                                        className={cn(
+                                          "rounded-xl px-3 py-2 text-sm leading-6",
+                                          turn.role === "user"
+                                            ? "border border-white/10 bg-white/[0.04] text-white/84"
+                                            : "bg-transparent text-white/70"
+                                        )}
+                                      >
+                                        <div className="mb-1 text-[11px] uppercase tracking-[0.16em] text-white/38">
+                                          {turn.role === "user"
+                                            ? tv2("followUpLabel")
+                                            : tv2("answerLabel")}
+                                        </div>
+                                        <div className="whitespace-pre-wrap">{turn.text}</div>
+                                      </div>
+                                    ))}
+                                </div>
+                              </details>
+                            ) : null}
+
                             <div className="mt-4 flex flex-wrap gap-2 border-t border-white/10 pt-4">
                               <button
                                 type="button"
@@ -2054,13 +2109,13 @@ async function persistRun(args: {
                                 className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-100 transition hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 <BookOpenText size={14} />
-                                <span>Finalize analysis</span>
+                                <span>Prepare final answer</span>
                               </button>
                             </div>
 
                             {answerKind !== "final" ? (
                               <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-white/48">
-                                Finalize analysis creates a consolidated draft using the original question, follow-up facts, and prior analysis. It remains a draft for professional review.
+                                Prepare final answer creates a consolidated executive memo using the original question, follow-up facts, and prior analysis. It is designed to be copied, printed, or shared for professional review.
                               </div>
                             ) : null}
 
