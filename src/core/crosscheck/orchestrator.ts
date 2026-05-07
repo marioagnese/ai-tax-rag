@@ -3093,9 +3093,16 @@ export async function runCrosscheck(
     });
   }
 
-  let providers: ProviderOutput[] = deepRun
-    ? await collectAll(providerRunners)
-    : await collectFast(providerRunners);
+  const substantiveRunIntent = input.runIntent || "preliminary";
+  const shouldRunFullProviderPanel =
+    substantiveRunIntent === "preliminary" ||
+    substantiveRunIntent === "followup" ||
+    substantiveRunIntent === "refine";
+
+  let providers: ProviderOutput[] =
+    shouldRunFullProviderPanel || deepRun
+      ? await collectAll(providerRunners)
+      : await collectFast(providerRunners);
 
   const successfulProviderKeys = new Set(
     providers
