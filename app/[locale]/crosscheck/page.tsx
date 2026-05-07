@@ -783,6 +783,7 @@ export default function CrosscheckV2Page() {
   const [answer, setAnswer] = useState("");
   const [answerKind, setAnswerKind] = useState<AnswerKind>("preliminary");
   const [activeRunIntent, setActiveRunIntent] = useState<RunIntent | null>(null);
+  const isFinalAnswer = answerKind === "final";
   const [confidence, setConfidence] = useState<"low" | "medium" | "high" | "">(
     ""
   );
@@ -1952,7 +1953,7 @@ async function persistRun(args: {
                             <h2 className="text-base font-semibold text-white/90">
                               {activeRunIntent === "finalize"
                                 ? "Preparing final answer"
-                                : answerKind === "final"
+                                : isFinalAnswer
                                 ? "Final answer"
                                 : tv2("preliminaryAnswer")}
                             </h2>
@@ -2003,7 +2004,7 @@ async function persistRun(args: {
                               </div>
                             ) : null}
 
-                            {answerKind !== "final" && conversationTurns.length > 2 ? (
+                            {!isFinalAnswer && conversationTurns.length > 2 ? (
                               <div className="mb-4 rounded-2xl border border-white/10 bg-[#0F172A] px-4 py-3">
                                 <div className="mb-3 flex items-center justify-between gap-3">
                                   <div>
@@ -2062,7 +2063,7 @@ async function persistRun(args: {
                               {answer}
                             </div>
 
-                            {answerKind === "final" && conversationTurns.length > 2 ? (
+                            {isFinalAnswer && conversationTurns.length > 2 ? (
                               <details className="mt-5 rounded-2xl border border-white/10 bg-[#0F172A]">
                                 <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 marker:content-none">
                                   <div>
@@ -2100,232 +2101,238 @@ async function persistRun(args: {
                               </details>
                             ) : null}
 
-                            <div className="mt-4 flex flex-wrap gap-2 border-t border-white/10 pt-4">
-                              <button
-                                type="button"
-                                onClick={handleRefineAnswer}
-                                disabled={loading || !answer.trim()}
-                                className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/78 transition hover:bg-white/[0.08] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                <Sparkles size={14} />
-                                <span>{tv2("refineAnswer")}</span>
-                              </button>
+                            {!isFinalAnswer ? (
+                              <>
+                                <div className="mt-4 flex flex-wrap gap-2 border-t border-white/10 pt-4">
+                                  <button
+                                    type="button"
+                                    onClick={handleRefineAnswer}
+                                    disabled={loading || !answer.trim()}
+                                    className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/78 transition hover:bg-white/[0.08] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    <Sparkles size={14} />
+                                    <span>{tv2("refineAnswer")}</span>
+                                  </button>
 
-                              <button
-                                type="button"
-                                onClick={handleAddMissingFacts}
-                                className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/78 transition hover:bg-white/[0.08] hover:text-white"
-                              >
-                                <PlusCircle size={14} />
-                                <span>{tv2("addMissingFacts")}</span>
-                              </button>
+                                  <button
+                                    type="button"
+                                    onClick={handleAddMissingFacts}
+                                    className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/78 transition hover:bg-white/[0.08] hover:text-white"
+                                  >
+                                    <PlusCircle size={14} />
+                                    <span>{tv2("addMissingFacts")}</span>
+                                  </button>
 
+                                  <button
+                                    type="button"
+                                    onClick={handleFinalizeAnalysis}
+                                    disabled={loading || !answer.trim()}
+                                    className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-100 transition hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    <BookOpenText size={14} />
+                                    <span>Prepare final answer</span>
+                                  </button>
+                                </div>
+
+                                <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-white/48">
+                                  Prepare final answer creates a consolidated executive memo using the original question, follow-up facts, and prior analysis. It is designed to be copied, printed, or shared for professional review.
+                                </div>
+
+                                <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                                  {runtimeMs !== null ? (
+                                    <Metric
+                                      icon={<Clock3 size={14} />}
+                                      label={tv2("runtime")}
+                                      value={`${runtimeMs} ms`}
+                                    />
+                                  ) : null}
+
+                                  {attemptedCount > 0 ? (
+                                    <Metric
+                                      icon={<Bot size={14} />}
+                                      label={tv2("modelsAttempted")}
+                                      value={`${attemptedCount}`}
+                                    />
+                                  ) : null}
+
+                                  {successCount > 0 ? (
+                                    <Metric
+                                      icon={<CheckCircle2 size={14} />}
+                                      label={tv2("modelsSucceeded")}
+                                      value={`${successCount}`}
+                                    />
+                                  ) : null}
+                                </div>
+                              </>
+                            ) : null}
+                          </>
+                        )}
+                      </div>
+
+                      {!isFinalAnswer ? (
+                        <>
+                          <div className="rounded-2xl border border-white/10 bg-[#111827] p-4">
+                            <div className="mb-3 text-sm font-medium text-white/86">
+                              {tv2("continueThisAnalysis")}
+                            </div>
+                            <textarea
+                              value={followupDraft}
+                              onChange={(e) => setFollowupDraft(e.target.value)}
+                              placeholder={tv2("followupPlaceholder")}
+                              className="min-h-[90px] w-full resize-none rounded-xl border border-white/10 bg-[#0F172A] px-3 py-3 text-sm leading-6 text-white/82 outline-none placeholder:text-white/28"
+                            />
+                            <div className="mt-3 flex justify-end">
                               <button
                                 type="button"
-                                onClick={handleFinalizeAnalysis}
-                                disabled={loading || !answer.trim()}
-                                className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-100 transition hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:opacity-50"
+                                onClick={handleSubmitFollowup}
+                                disabled={!canSubmitFollowup}
+                                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-medium text-[#0B1220] transition-colors hover:bg-white/92 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                               >
-                                <BookOpenText size={14} />
-                                <span>Prepare final answer</span>
+                                {loading ? (
+                                  <>
+                                    <Clock3 size={16} />
+                                    <span>{tv2("running")}</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span>{tv2("sendFollowup")}</span>
+                                    <ArrowUp size={16} />
+                                  </>
+                                )}
                               </button>
                             </div>
+                          </div>
 
-                            {answerKind !== "final" ? (
-                              <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-white/48">
-                                Prepare final answer creates a consolidated executive memo using the original question, follow-up facts, and prior analysis. It is designed to be copied, printed, or shared for professional review.
+                          <DetailSection
+                            title={tv2("keyCaveats")}
+                            subtitle={tv2("keyCaveatsSubtitle")}
+                            items={caveats}
+                            empty={tv2("noCaveats")}
+                            copyLabel="Copy"
+                            copiedLabel="Copied"
+                            copyKey="caveats"
+                            copiedKey={copiedKey}
+                            onCopy={handleCopy}
+                          />
+
+                          <div className="rounded-2xl border border-white/10 bg-[#111827]">
+                            <div className="border-b border-white/10 px-4 py-3.5">
+                              <div className="text-sm font-medium text-white/86">
+                                {tv2("followupQuestions")}
                               </div>
-                            ) : null}
+                              <div className="mt-1 text-xs text-white/42">
+                                {tv2("followupQuestionsSubtitle")}
+                              </div>
+                            </div>
 
-                            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                              {runtimeMs !== null ? (
+                            <div className="px-4 py-4">
+                              {followups.length ? (
+                                <>
+                                  <div className="mb-3 flex justify-end">
+                                    <CopyButton
+                                      text={followups.map((f) => `• ${f}`).join("\n")}
+                                      label="Copy"
+                                      copiedLabel="Copied"
+                                      copyKey="followups"
+                                      copiedKey={copiedKey}
+                                      onCopy={handleCopy}
+                                    />
+                                  </div>
+
+                                  <div className="space-y-2">
+                                    {followups.map((followup, i) => (
+                                      <button
+                                        key={`${followup}-${i}`}
+                                        type="button"
+                                        onClick={() => handleUseFollowup(followup)}
+                                        className="flex w-full items-start justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-left text-sm text-white/72 transition hover:bg-white/[0.08] hover:text-white"
+                                      >
+                                        <span>{followup}</span>
+                                        <CornerDownRight
+                                          size={14}
+                                          className="mt-0.5 shrink-0 text-white/35"
+                                        />
+                                      </button>
+                                    ))}
+                                  </div>
+                                </>
+                              ) : (
+                                <div className="text-sm leading-6 text-white/50">
+                                  {tv2("noFollowups")}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <DetailSection
+                            title={tv2("modelDisagreements")}
+                            subtitle={tv2("modelDisagreementsSubtitle")}
+                            items={disagreements}
+                            empty={tv2("noDisagreements")}
+                            copyLabel="Copy"
+                            copiedLabel="Copied"
+                            copyKey="disagreements"
+                            copiedKey={copiedKey}
+                            onCopy={handleCopy}
+                          />
+
+                          <div
+                            ref={diagnosticsRef}
+                            className="rounded-2xl border border-white/10 bg-[#111827]"
+                          >
+                            <div className="border-b border-white/10 px-4 py-3.5">
+                              <div className="flex items-center gap-2 text-sm font-medium text-white/86">
+                                <Wrench size={15} />
+                                <span>{t("nav.diagnostics")}</span>
+                              </div>
+                              <div className="mt-1 text-xs text-white/42">
+                                {tv2("diagnosticsSubtitle")}
+                              </div>
+                            </div>
+
+                            <div className="space-y-4 px-4 py-4">
+                              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                                 <Metric
                                   icon={<Clock3 size={14} />}
                                   label={tv2("runtime")}
-                                  value={`${runtimeMs} ms`}
+                                  value={runtimeMs !== null ? `${runtimeMs} ms` : "—"}
                                 />
-                              ) : null}
-
-                              {attemptedCount > 0 ? (
                                 <Metric
                                   icon={<Bot size={14} />}
                                   label={tv2("modelsAttempted")}
                                   value={`${attemptedCount}`}
                                 />
-                              ) : null}
-
-                              {successCount > 0 ? (
                                 <Metric
                                   icon={<CheckCircle2 size={14} />}
                                   label={tv2("modelsSucceeded")}
                                   value={`${successCount}`}
                                 />
-                              ) : null}
-                            </div>
-                          </>
-                        )}
-                      </div>
-
-                      <div className="rounded-2xl border border-white/10 bg-[#111827] p-4">
-                        <div className="mb-3 text-sm font-medium text-white/86">
-                          {tv2("continueThisAnalysis")}
-                        </div>
-                        <textarea
-                          value={followupDraft}
-                          onChange={(e) => setFollowupDraft(e.target.value)}
-                          placeholder={tv2("followupPlaceholder")}
-                          className="min-h-[90px] w-full resize-none rounded-xl border border-white/10 bg-[#0F172A] px-3 py-3 text-sm leading-6 text-white/82 outline-none placeholder:text-white/28"
-                        />
-                        <div className="mt-3 flex justify-end">
-                          <button
-                            type="button"
-                            onClick={handleSubmitFollowup}
-                            disabled={!canSubmitFollowup}
-                            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-medium text-[#0B1220] transition-colors hover:bg-white/92 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
-                          >
-                            {loading ? (
-                              <>
-                                <Clock3 size={16} />
-                                <span>{tv2("running")}</span>
-                              </>
-                            ) : (
-                              <>
-                                <span>{tv2("sendFollowup")}</span>
-                                <ArrowUp size={16} />
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      </div>
-
-                      <DetailSection
-                        title={tv2("keyCaveats")}
-                        subtitle={tv2("keyCaveatsSubtitle")}
-                        items={caveats}
-                        empty={tv2("noCaveats")}
-                        copyLabel="Copy"
-                        copiedLabel="Copied"
-                        copyKey="caveats"
-                        copiedKey={copiedKey}
-                        onCopy={handleCopy}
-                      />
-
-                      <div className="rounded-2xl border border-white/10 bg-[#111827]">
-                        <div className="border-b border-white/10 px-4 py-3.5">
-                          <div className="text-sm font-medium text-white/86">
-                            {tv2("followupQuestions")}
-                          </div>
-                          <div className="mt-1 text-xs text-white/42">
-                            {tv2("followupQuestionsSubtitle")}
-                          </div>
-                        </div>
-
-                        <div className="px-4 py-4">
-                          {followups.length ? (
-                            <>
-                              <div className="mb-3 flex justify-end">
-                                <CopyButton
-                                  text={followups.map((f) => `• ${f}`).join("\n")}
-                                  label="Copy"
-                                  copiedLabel="Copied"
-                                  copyKey="followups"
-                                  copiedKey={copiedKey}
-                                  onCopy={handleCopy}
-                                />
                               </div>
 
-                              <div className="space-y-2">
-                                {followups.map((followup, i) => (
-                                  <button
-                                    key={`${followup}-${i}`}
-                                    type="button"
-                                    onClick={() => handleUseFollowup(followup)}
-                                    className="flex w-full items-start justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-left text-sm text-white/72 transition hover:bg-white/[0.08] hover:text-white"
-                                  >
-                                    <span>{followup}</span>
-                                    <CornerDownRight
-                                      size={14}
-                                      className="mt-0.5 shrink-0 text-white/35"
+                              {providers.length ? (
+                                <div className="grid gap-4">
+                                  {providers.map((provider, index) => (
+                                    <ProviderCard
+                                      key={`${provider.provider}-${provider.model}-${index}`}
+                                      provider={provider}
+                                      emptyText={tv2("noProviderOutputReturned")}
+                                      copyLabel="Copy"
+                                      copiedLabel="Copied"
+                                      copyKey={`provider-${provider.provider}-${provider.model}-${index}`}
+                                      copiedKey={copiedKey}
+                                      onCopy={handleCopy}
                                     />
-                                  </button>
-                                ))}
-                              </div>
-                            </>
-                          ) : (
-                            <div className="text-sm leading-6 text-white/50">
-                              {tv2("noFollowups")}
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="text-sm leading-6 text-white/50">
+                                  {tv2("noProviderDiagnostics")}
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <DetailSection
-                        title={tv2("modelDisagreements")}
-                        subtitle={tv2("modelDisagreementsSubtitle")}
-                        items={disagreements}
-                        empty={tv2("noDisagreements")}
-                        copyLabel="Copy"
-                        copiedLabel="Copied"
-                        copyKey="disagreements"
-                        copiedKey={copiedKey}
-                        onCopy={handleCopy}
-                      />
-
-                      <div
-                        ref={diagnosticsRef}
-                        className="rounded-2xl border border-white/10 bg-[#111827]"
-                      >
-                        <div className="border-b border-white/10 px-4 py-3.5">
-                          <div className="flex items-center gap-2 text-sm font-medium text-white/86">
-                            <Wrench size={15} />
-                            <span>{t("nav.diagnostics")}</span>
                           </div>
-                          <div className="mt-1 text-xs text-white/42">
-                            {tv2("diagnosticsSubtitle")}
-                          </div>
-                        </div>
-
-                        <div className="space-y-4 px-4 py-4">
-                          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                            <Metric
-                              icon={<Clock3 size={14} />}
-                              label={tv2("runtime")}
-                              value={runtimeMs !== null ? `${runtimeMs} ms` : "—"}
-                            />
-                            <Metric
-                              icon={<Bot size={14} />}
-                              label={tv2("modelsAttempted")}
-                              value={`${attemptedCount}`}
-                            />
-                            <Metric
-                              icon={<CheckCircle2 size={14} />}
-                              label={tv2("modelsSucceeded")}
-                              value={`${successCount}`}
-                            />
-                          </div>
-
-                          {providers.length ? (
-                            <div className="grid gap-4">
-                              {providers.map((provider, index) => (
-                                <ProviderCard
-                                  key={`${provider.provider}-${provider.model}-${index}`}
-                                  provider={provider}
-                                  emptyText={tv2("noProviderOutputReturned")}
-                                  copyLabel="Copy"
-                                  copiedLabel="Copied"
-                                  copyKey={`provider-${provider.provider}-${provider.model}-${index}`}
-                                  copiedKey={copiedKey}
-                                  onCopy={handleCopy}
-                                />
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="text-sm leading-6 text-white/50">
-                              {tv2("noProviderDiagnostics")}
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                        </>
+                      ) : null}
                     </div>
                   )}
                 </div>

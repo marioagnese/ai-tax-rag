@@ -2815,6 +2815,11 @@ async function runFinalMemoSynthesis(input: CrosscheckInput): Promise<Crosscheck
     .join("\n\n");
 
   try {
+    const finalMaxTokens = clampInt(input.maxTokens, 1600, 5000, 2800);
+    const finalTokenParam = model.startsWith("gpt-5")
+      ? { max_completion_tokens: finalMaxTokens }
+      : { max_tokens: finalMaxTokens };
+
     const resp = await withTimeout(
       client.chat.completions.create({
         model,
@@ -2823,8 +2828,8 @@ async function runFinalMemoSynthesis(input: CrosscheckInput): Promise<Crosscheck
           { role: "system", content: sys },
           { role: "user", content: user },
         ],
-        max_tokens: clampInt(input.maxTokens, 1600, 5000, 2800),
-      }),
+        ...finalTokenParam,
+      } as any),
       clampInt(input.timeoutMs, 15_000, 120_000, 60_000)
     );
 
