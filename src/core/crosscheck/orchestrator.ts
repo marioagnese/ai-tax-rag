@@ -18,6 +18,45 @@ function uniq(xs: string[]): string[] {
   return Array.from(new Set(xs.map((x) => String(x).trim()).filter(Boolean)));
 }
 
+
+function inferResponseLanguage(input: CrosscheckInput): string {
+  const explicit = String(input.responseLanguage || "").trim();
+  if (explicit) return explicit;
+
+  const sample = `${input.question || ""}\n${input.facts || ""}`.toLowerCase();
+
+  const portugueseSignals = [
+    "ção", "ções", "não", "você", "vocês", "qual", "quais", "empresa",
+    "brasil", "brasileira", "tributário", "imposto", "receita federal",
+    "fiscal", "jurídico", "ltda", "eua", "prestação", "serviços"
+  ];
+
+  const spanishSignals = [
+    "ción", "ciones", "qué", "cuál", "cuáles", "empresa",
+    "impuesto", "tributario", "españa", "méxico", "servicios",
+    "jurídico", "fiscal", "ee.uu"
+  ];
+
+  const ptScore = portugueseSignals.filter((s) => sample.includes(s)).length;
+  const esScore = spanishSignals.filter((s) => sample.includes(s)).length;
+
+  if (ptScore >= 2 && ptScore >= esScore) return "Portuguese";
+  if (esScore >= 2 && esScore > ptScore) return "Spanish";
+
+  return "English";
+}
+
+function responseLanguageInstruction(input: CrosscheckInput): string {
+  const language = inferResponseLanguage(input);
+  return [
+    `Response language requirement: write the entire answer in ${language}.`,
+    "Use the same language as the user's original question unless an explicit response language is provided.",
+    "Do not switch to English merely because tax terms, statutes, forms, or provider outputs are in English.",
+    "Keep official form names, statute names, entity names, and proper nouns in their official language where appropriate, but explain them in the response language.",
+  ].join("\\n");
+}
+
+
 function clampInt(n: unknown, min: number, max: number, fallback: number) {
   const v =
     typeof n === "number" && Number.isFinite(n) ? Math.floor(n) : fallback;
@@ -2775,6 +2814,8 @@ async function runFinalMemoSynthesis(input: CrosscheckInput): Promise<Crosscheck
 
   const sys = [
     "You are TaxAiPro's final executive tax memo writer.",
+    responseLanguageInstruction(input),
+    "",
     "You are NOT performing a new preliminary crosscheck.",
     "You are NOT answering only the last follow-up.",
     "You are preparing the FINAL ANSWER from an already-developed analysis thread.",
@@ -2885,6 +2926,8 @@ async function runFinalMemoSynthesis(input: CrosscheckInput): Promise<Crosscheck
     // If OpenAI final memo synthesis fails, fall back to the first configured OpenRouter model.
     const fallbackPrompt = [
       "Prepare one final consolidated executive tax memo from the following source material.",
+      responseLanguageInstruction(input),
+      "",
       "Do not answer only the last follow-up.",
       "Do not copy/paste prior answers.",
       "Synthesize the full thread into one clean final answer.",

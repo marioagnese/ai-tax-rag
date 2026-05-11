@@ -20,6 +20,7 @@ type CrosscheckUiBody = {
   timeoutMs?: number;
   maxTokens?: number;
   runIntent?: "preliminary" | "followup" | "refine" | "finalize";
+  responseLanguage?: string;
   [k: string]: unknown;
 };
 
@@ -32,6 +33,9 @@ function sanitizeBody(raw: unknown): CrosscheckUiBody {
   const constraints = typeof b.constraints === "string" ? b.constraints : undefined;
   const question =
     typeof b.question === "string" ? b.question.trim() : undefined;
+
+  const responseLanguage =
+    typeof b.responseLanguage === "string" ? b.responseLanguage.trim() : undefined;
 
   const rawRunIntent =
     typeof b.runIntent === "string" ? b.runIntent.trim().toLowerCase() : undefined;
@@ -62,6 +66,7 @@ function sanitizeBody(raw: unknown): CrosscheckUiBody {
     timeoutMs,
     maxTokens,
     runIntent,
+    responseLanguage: responseLanguage || undefined,
   };
 }
 
@@ -78,6 +83,7 @@ async function parseRequestBody(req: NextRequest): Promise<CrosscheckUiBody> {
     const timeoutMsValue = form.get("timeoutMs");
     const maxTokensValue = form.get("maxTokens");
     const runIntentValue = form.get("runIntent");
+    const responseLanguageValue = form.get("responseLanguage");
 
     return sanitizeBody({
       question: typeof questionValue === "string" ? questionValue : undefined,
@@ -94,6 +100,10 @@ async function parseRequestBody(req: NextRequest): Promise<CrosscheckUiBody> {
           ? Number(maxTokensValue)
           : undefined,
       runIntent: typeof runIntentValue === "string" ? runIntentValue : undefined,
+      responseLanguage:
+        typeof responseLanguageValue === "string"
+          ? responseLanguageValue
+          : undefined,
     });
   }
 
@@ -146,6 +156,7 @@ export async function POST(req: NextRequest) {
       timeoutMs: body.timeoutMs,
       maxTokens: body.maxTokens,
       runIntent: body.runIntent,
+      responseLanguage: body.responseLanguage,
     });
 
     const status = result.ok ? 200 : 502;

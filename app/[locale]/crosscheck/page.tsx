@@ -1216,6 +1216,7 @@ async function persistRun(args: {
         form.append("question", args.payloadQuestion);
         form.append("timeoutMs", String(timeoutMs));
         form.append("runIntent", runIntent);
+        form.append("responseLanguage", locale === "pt" ? "Portuguese" : locale === "es" ? "Spanish" : "English");
         if (args.payloadDetails?.trim()) form.append("facts", args.payloadDetails.trim());
         attachedFiles.forEach((file) => form.append("files", file));
 
@@ -1234,6 +1235,7 @@ async function persistRun(args: {
             facts: args.payloadDetails?.trim() || undefined,
             timeoutMs,
             runIntent,
+            responseLanguage: locale === "pt" ? "Portuguese" : locale === "es" ? "Spanish" : "English",
           }),
         });
       }

@@ -14,6 +14,7 @@ export type CrosscheckInput = {
   maxTokens?: number;
   timeoutMs?: number;
   runIntent?: "preliminary" | "followup" | "refine" | "finalize";
+  responseLanguage?: string;
 };
 
 export type ProviderCall = {
