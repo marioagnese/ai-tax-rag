@@ -1371,6 +1371,8 @@ async function extractConflictMatrixWithOpenAI(args: {
     "Provider assessments:",
     serializeAssessments(args.assessments),
     "",
+    responseLanguageInstruction(args.input),
+    "",
     "Provider memo artifacts:",
     serializeProviderArtifacts(args.artifacts),
   ]
@@ -1404,6 +1406,8 @@ async function extractConflictMatrixWithClaude(args: {
     "",
     "Provider assessments:",
     serializeAssessments(args.assessments),
+    "",
+    responseLanguageInstruction(args.input),
     "",
     "Provider memo artifacts:",
     serializeProviderArtifacts(args.artifacts),
@@ -1575,6 +1579,8 @@ async function constructCombinedDraftWithOpenAI(args: {
     "",
     "Provider assessments:",
     serializeAssessments(args.assessments),
+    "",
+    responseLanguageInstruction(args.input),
     "",
     "Filtered revised provider artifacts:",
     serializeProviderArtifacts(args.artifacts),
@@ -1879,7 +1885,11 @@ function wrapInputForRound1(
 ): CrosscheckInput {
   return {
     ...input,
-    question: buildProviderWorkPrompt(input, providerLabel),
+    question: [
+      responseLanguageInstruction(input),
+      "",
+      buildProviderWorkPrompt(input, providerLabel),
+    ].join("\n"),
     maxTokens: clampInt(input.maxTokens, 800, 4000, 1800),
   };
 }
@@ -2849,6 +2859,8 @@ async function runFinalMemoSynthesis(input: CrosscheckInput): Promise<Crosscheck
     input.jurisdiction ? `Jurisdiction:\n${input.jurisdiction}` : "",
     input.facts ? `Additional facts:\n${input.facts}` : "",
     input.constraints ? `Constraints:\n${input.constraints}` : "",
+    responseLanguageInstruction(input),
+    "",
     "Finalization source material:",
     input.question,
   ]
