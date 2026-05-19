@@ -150,6 +150,54 @@ function formatTimeAgo(ts: number, locale?: string) {
   return new Date(ts).toLocaleDateString(locale);
 }
 
+function historyRunKind(item: SavedAnalysis): "final" | "preliminary" {
+  const haystack = [
+    item.title || "",
+    item.answer || "",
+    ...(item.thread || []).map((turn) => turn.text || ""),
+  ]
+    .join("\n")
+    .toLowerCase();
+
+  if (
+    haystack.includes("final answer") ||
+    haystack.includes("revised final") ||
+    haystack.includes("final consolidated") ||
+    haystack.includes("final consolidated executive") ||
+    haystack.includes("memo executivo final") ||
+    haystack.includes("respuesta final")
+  ) {
+    return "final";
+  }
+
+  return "preliminary";
+}
+
+function historySearchText(item: SavedAnalysis): string {
+  return [
+    item.title,
+    item.question,
+    item.answer,
+    item.confidence,
+    historyRunKind(item),
+    ...(item.caveats || []),
+    ...(item.followups || []),
+    ...(item.disagreements || []),
+    ...(item.thread || []).map((turn) => turn.text),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function historyDisplayTitle(item: SavedAnalysis): string {
+  const title = (item.title || "").trim();
+  if (title) return title.replace(/\s+—\s+(Final answer|Revised final answer)$/i, "");
+
+  const q = (item.question || "").replace(/\s+/g, " ").trim();
+  return q.length > 80 ? `${q.slice(0, 80)}…` : q || "Untitled analysis";
+}
+
 function normalizeDisplayName(raw: unknown, email?: unknown) {
   const bad = new Set(["contact", "admin", "support", "info", "sales", "hello", "team"]);
 
@@ -607,6 +655,22 @@ function SidebarContent({
   };
   sessionDisplayName: string;
 }) {
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [historyFilter, setHistoryFilter] = useState<"all" | "final" | "preliminary">("all");
+
+  const visibleHistory = useMemo(() => {
+    const q = historyQuery.trim().toLowerCase();
+
+    return history
+      .filter((item) => {
+        const kind = historyRunKind(item);
+        if (historyFilter !== "all" && kind !== historyFilter) return false;
+        if (!q) return true;
+        return historySearchText(item).includes(q);
+      })
+      .slice(0, 30);
+  }, [history, historyQuery, historyFilter]);
+
   return (
     <div className="flex h-full flex-col justify-between">
       <div className="min-h-0 overflow-y-auto pr-1">
@@ -657,24 +721,62 @@ function SidebarContent({
           />
 
           {showHistory ? (
-            <div className="mt-2 space-y-1 pl-2">
-              {history.length ? (
-                history.map((item) => (
-                  <HistoryItem
-                    key={item.id}
-                    item={item}
-                    selected={selectedHistoryId === item.id}
-                    onClick={() => loadHistoryItem(item)}
-                    confidenceLabel={labels.confidenceWord}
-                    draftLabel={labels.draft}
-                    locale={locale}
-                  />
-                ))
+            <div className="mt-2 space-y-2 pl-2">
+              <input
+                value={historyQuery}
+                onChange={(e) => setHistoryQuery(e.target.value)}
+                placeholder="Search history..."
+                className="w-full rounded-xl border border-white/10 bg-[#0F172A] px-3 py-2 text-xs text-white/78 outline-none placeholder:text-white/30"
+              />
+
+              <div className="flex gap-1">
+                {(["all", "final", "preliminary"] as const).map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    onClick={() => setHistoryFilter(filter)}
+                    className={cn(
+                      "rounded-full border px-2.5 py-1 text-[11px] capitalize transition",
+                      historyFilter === filter
+                        ? "border-white/25 bg-white/12 text-white"
+                        : "border-white/10 bg-white/[0.03] text-white/48 hover:bg-white/[0.07] hover:text-white/72"
+                    )}
+                  >
+                    {filter === "all" ? "All" : filter === "final" ? "Final" : "Prelim"}
+                  </button>
+                ))}
+              </div>
+
+              {visibleHistory.length ? (
+                <div className="space-y-1">
+                  {visibleHistory.map((item) => (
+                    <HistoryItem
+                      key={item.id}
+                      item={{
+                        ...item,
+                        title: historyDisplayTitle(item),
+                      }}
+                      selected={selectedHistoryId === item.id}
+                      onClick={() => loadHistoryItem(item)}
+                      confidenceLabel={labels.confidenceWord}
+                      draftLabel={
+                        historyRunKind(item) === "final" ? "Final" : labels.draft
+                      }
+                      locale={locale}
+                    />
+                  ))}
+                </div>
               ) : (
                 <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-3 py-4 text-sm leading-6 text-white/46">
-                  {labels.emptyHistory}
+                  {history.length ? "No matching analyses found." : labels.emptyHistory}
                 </div>
               )}
+
+              {history.length > visibleHistory.length ? (
+                <div className="px-2 pt-1 text-[11px] leading-5 text-white/35">
+                  Showing {visibleHistory.length} of {history.length}. Use search to narrow results.
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -879,7 +981,7 @@ const [runtimeMs, setRuntimeMs] = useState<number | null>(null);
       } catch {}
 
       try {
-        const res = await fetch("/api/runs/history?limit=20", {
+        const res = await fetch("/api/runs/history?limit=100", {
           method: "GET",
           cache: "no-store",
         });
