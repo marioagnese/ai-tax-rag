@@ -2868,7 +2868,7 @@ async function runFinalMemoSynthesis(input: CrosscheckInput): Promise<Crosscheck
     .join("\n\n");
 
   try {
-    const finalMaxTokens = clampInt(input.maxTokens, 1600, 5000, 2800);
+    const finalMaxTokens = clampInt(input.maxTokens, 3000, 9000, 6500);
     const finalTokenParam = model.startsWith("gpt-5")
       ? { max_completion_tokens: finalMaxTokens }
       : { max_tokens: finalMaxTokens };

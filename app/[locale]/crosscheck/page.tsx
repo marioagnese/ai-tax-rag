@@ -815,6 +815,7 @@ const [runtimeMs, setRuntimeMs] = useState<number | null>(null);
 
   const [baseQuestion, setBaseQuestion] = useState("");
   const [followupDraft, setFollowupDraft] = useState("");
+  const [finalEditDraft, setFinalEditDraft] = useState("");
   const [conversationTurns, setConversationTurns] = useState<AnalysisTurn[]>([]);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -1209,12 +1210,16 @@ async function persistRun(args: {
           ? FIRST_RUN_TIMEOUT_MS
           : FOLLOWUP_TIMEOUT_MS;
 
+      const maxTokens =
+        runIntent === "finalize" ? 6500 : undefined;
+
       let res: Response;
 
       if (attachedFiles.length > 0) {
         const form = new FormData();
         form.append("question", args.payloadQuestion);
         form.append("timeoutMs", String(timeoutMs));
+        if (maxTokens) form.append("maxTokens", String(maxTokens));
         form.append("runIntent", runIntent);
         form.append("responseLanguage", locale === "pt" ? "Portuguese" : locale === "es" ? "Spanish" : "English");
         if (args.payloadDetails?.trim()) form.append("facts", args.payloadDetails.trim());
@@ -1234,6 +1239,7 @@ async function persistRun(args: {
             question: args.payloadQuestion,
             facts: args.payloadDetails?.trim() || undefined,
             timeoutMs,
+            maxTokens,
             runIntent,
             responseLanguage: locale === "pt" ? "Portuguese" : locale === "es" ? "Spanish" : "English",
           }),
@@ -1517,6 +1523,67 @@ async function persistRun(args: {
 
   function handleUseFollowup(followup: string) {
     setFollowupDraft(followup);
+  }
+
+  async function handleReviseFinalAnswer() {
+    const editRequest = finalEditDraft.trim();
+    if (!baseQuestion.trim() || !answer.trim() || !editRequest || loading) return;
+
+    const payloadQuestion = [
+      "Revise the existing final consolidated answer based on the user's requested edits.",
+      "",
+      "Original question:",
+      baseQuestion,
+      "",
+      "Existing final answer:",
+      answer,
+      "",
+      "User requested edits:",
+      editRequest,
+      "",
+      "Instructions:",
+      "- Preserve the same professional memo style.",
+      "- Do not restart the analysis from scratch.",
+      "- Do not omit material sections unless the user specifically asks.",
+      "- Produce a complete revised final answer, not a partial patch.",
+    ].join("\n");
+
+    const result = await executeAnalysis({
+      payloadQuestion,
+      payloadDetails: details,
+      runIntent: "finalize",
+    });
+
+    if (!result) return;
+
+    const nextThread: AnalysisTurn[] = [
+      ...conversationTurns,
+      {
+        id: crypto.randomUUID(),
+        role: "user",
+        text: `Requested edits to final answer:\n${editRequest}`,
+        createdAt: Date.now(),
+      },
+      {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        text: result.nextAnswer,
+        createdAt: Date.now(),
+      },
+    ];
+
+    setConversationTurns(nextThread);
+    setFinalEditDraft("");
+    await persistRun({
+      question: baseQuestion,
+      answer: result.nextAnswer,
+      confidence: result.data?.consensus?.confidence || "",
+      caveats: result.data?.consensus?.caveats || [],
+      followups: result.data?.consensus?.followups || [],
+      disagreements: result.data?.consensus?.disagreements || [],
+      thread: nextThread,
+      title: `${baseQuestion} — Revised final answer`,
+    });
   }
 
   async function handleSubmitFollowup() {
@@ -2064,6 +2131,43 @@ async function persistRun(args: {
                             <div className="whitespace-pre-wrap text-[15px] leading-7 text-white/82">
                               {answer}
                             </div>
+
+                            {isFinalAnswer ? (
+                              <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                                <div className="mb-2 text-sm font-medium text-white/86">
+                                  Request edits to final answer
+                                </div>
+                                <div className="mb-3 text-xs leading-5 text-white/45">
+                                  Ask TaxAiPro to revise, expand, shorten, reformat, or add missing sections to this final memo.
+                                </div>
+                                <textarea
+                                  value={finalEditDraft}
+                                  onChange={(e) => setFinalEditDraft(e.target.value)}
+                                  placeholder="Example: Expand the withholding tax section, add a numerical table, and keep the answer in executive memo format."
+                                  className="min-h-[90px] w-full resize-none rounded-xl border border-white/10 bg-[#0F172A] px-3 py-3 text-sm leading-6 text-white/82 outline-none placeholder:text-white/28"
+                                />
+                                <div className="mt-3 flex justify-end">
+                                  <button
+                                    type="button"
+                                    onClick={handleReviseFinalAnswer}
+                                    disabled={loading || !finalEditDraft.trim()}
+                                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-medium text-[#0B1220] transition-colors hover:bg-white/92 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                                  >
+                                    {loading ? (
+                                      <>
+                                        <Clock3 size={16} />
+                                        <span>{tv2("running")}</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span>Revise final answer</span>
+                                        <ArrowUp size={16} />
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : null}
 
                             {isFinalAnswer && conversationTurns.length > 2 ? (
                               <details className="mt-5 rounded-2xl border border-white/10 bg-[#0F172A]">
