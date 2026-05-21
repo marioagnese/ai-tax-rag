@@ -57,6 +57,19 @@ function responseLanguageInstruction(input: CrosscheckInput): string {
 }
 
 
+
+function treatyReliabilityInstruction(): string {
+  return [
+    "Treaty reliability requirement:",
+    "- Do not state, assume, name, cite, or apply an income tax treaty unless treaty existence is expressly supplied in the user facts, attached documents, or verified source material available in the prompt.",
+    "- Do not invent treaty names, signature dates, entry-into-force dates, treaty articles, limitation-on-benefits rules, permanent establishment protections, or reduced withholding rates.",
+    "- If treaty availability is relevant but not verified, state that treaty applicability must be confirmed and analyze the domestic-law position first.",
+    "- If providers disagree on treaty availability, treat the treaty position as unresolved and do not use it as a settled conclusion.",
+    "- Prefer conservative domestic-law analysis unless treaty support is verified.",
+  ].join("\n");
+}
+
+
 function clampInt(n: unknown, min: number, max: number, fallback: number) {
   const v =
     typeof n === "number" && Number.isFinite(n) ? Math.floor(n) : fallback;
@@ -1563,6 +1576,7 @@ async function constructCombinedDraftWithOpenAI(args: {
     "You MUST exclude claims listed as excluded critical claims.",
     "Do not smooth over unresolved controlling conflicts.",
     "Do not invent citations or authorities.",
+    treatyReliabilityInstruction(),
     "Return STRICT JSON ONLY with keys:",
     "executive_summary, analysis, transaction_specific_treatment, required_confirmations, recommendation, confidence",
   ].join("\n");
@@ -1771,6 +1785,7 @@ async function adjudicateFinalWithClaude(args: {
     "Prefer legal precision over generic completeness.",
     "Do not recommend contacting tax authorities.",
     "Do not invent citations.",
+    treatyReliabilityInstruction(),
     "Return STRICT JSON ONLY with keys:",
     "executive_summary, analysis, transaction_specific_treatment, required_confirmations, recommendation, confidence",
   ]
@@ -1820,6 +1835,7 @@ async function mergeFinalMemosWithOpenAI(args: {
     "Use the combined draft and the round 2 conflict matrix only as support.",
     "If a recent-law instruction is provided, explicitly distinguish current law from recently enacted, proposed, or future-effective law where material.",
     "Do not invent citations or authorities.",
+    treatyReliabilityInstruction(),
     "Return STRICT JSON ONLY with keys:",
     "executive_summary, analysis, transaction_specific_treatment, required_confirmations, recommendation, confidence",
   ].join("\n");
@@ -1887,6 +1903,8 @@ function wrapInputForRound1(
     ...input,
     question: [
       responseLanguageInstruction(input),
+      "",
+      treatyReliabilityInstruction(),
       "",
       buildProviderWorkPrompt(input, providerLabel),
     ].join("\n"),
@@ -2826,6 +2844,8 @@ async function runFinalMemoSynthesis(input: CrosscheckInput): Promise<Crosscheck
     "You are TaxAiPro's final executive tax memo writer.",
     responseLanguageInstruction(input),
     "",
+    treatyReliabilityInstruction(),
+    "",
     "You are NOT performing a new preliminary crosscheck.",
     "You are NOT answering only the last follow-up.",
     "You are preparing the FINAL ANSWER from an already-developed analysis thread.",
@@ -2939,6 +2959,8 @@ async function runFinalMemoSynthesis(input: CrosscheckInput): Promise<Crosscheck
     const fallbackPrompt = [
       "Prepare one final consolidated executive tax memo from the following source material.",
       responseLanguageInstruction(input),
+      "",
+      treatyReliabilityInstruction(),
       "",
       "Do not answer only the last follow-up.",
       "Do not copy/paste prior answers.",
