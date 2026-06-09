@@ -13,7 +13,9 @@ export type Tier = "0" | "1" | "2";
  */
 const BETA_UNLIMITED_EMAILS = [
   "ma_mesquita@yahoo.com",
+  "amb@allinko.com.br",
   "contact@taxaipro.com",
+  "agnese.mario@gmail.com",
   "xcordova@msn.com",
 ];
 
