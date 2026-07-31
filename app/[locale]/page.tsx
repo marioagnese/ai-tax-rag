@@ -416,7 +416,7 @@ export default async function Home({
           <div className="mt-9 flex flex-col gap-3 sm:flex-row">
             <a
               href={`${base}/analyze`}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-300 px-5 py-3.5 text-sm font-semibold text-[#06101b] transition hover:bg-cyan-200"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-300 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-cyan-200"
             >
               {c.primaryCta}
               <ArrowRight size={17} />
@@ -608,7 +608,7 @@ export default async function Home({
 
           <a
             href={`${base}/analyze`}
-            className="mt-8 inline-flex items-center gap-2 rounded-xl bg-cyan-300 px-5 py-3.5 text-sm font-semibold text-[#06101b] transition hover:bg-cyan-200"
+            className="mt-8 inline-flex items-center gap-2 rounded-xl bg-cyan-300 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-cyan-200"
           >
             {c.finalCta}
             <ArrowRight size={17} />

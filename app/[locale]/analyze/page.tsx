@@ -326,7 +326,7 @@ export default function PublicAnalyzePage() {
             type="button"
   
             onClick={runAnalysis}
-            className="mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-300 px-5 py-3.5 text-sm font-semibold text-[#06101b] transition hover:bg-cyan-200"
+            className="mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-300 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-cyan-200"
           >
             {loading ? (
               <>
