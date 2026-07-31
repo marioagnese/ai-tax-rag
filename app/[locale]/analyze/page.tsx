@@ -324,9 +324,9 @@ export default function PublicAnalyzePage() {
 
           <button
             type="button"
-            disabled={!canSubmit}
+  
             onClick={runAnalysis}
-            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-300 px-5 py-3.5 text-sm font-semibold text-white shadow-[0_0_24px_rgba(103,232,249,0.28)] transition hover:bg-cyan-200 hover:shadow-[0_0_34px_rgba(103,232,249,0.42)] disabled:cursor-not-allowed disabled:bg-cyan-300 disabled:text-white disabled:opacity-60 disabled:shadow-[0_0_20px_rgba(103,232,249,0.18)]"
+            className="mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-300 px-5 py-3.5 text-sm font-semibold text-[#06101b] transition hover:bg-cyan-200"
           >
             {loading ? (
               <>
