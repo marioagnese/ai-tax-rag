@@ -1,10 +1,10 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
-  ArrowLeft,
   ArrowRight,
   Check,
   CheckCircle2,
@@ -39,11 +39,11 @@ type AnalyzeResponse = {
 
 const COPY = {
   en: {
-    back: "Back to homepage",
-    eyebrow: "One free public analysis",
-    title: "What tax issue are you researching?",
+    back: "TaxAiPro",
+    eyebrow: "One complimentary consensus preview",
+    title: "Ask your tax question.",
     subtitle:
-      "Ask one tax question and receive a limited TaxAiPro consensus preview. No registration is required.",
+      "TaxAiPro will challenge multiple AI models and prepare one conservative consensus. No registration required.",
     placeholder:
       "Example: Does a U.S. company purchasing goods FOB from Brazil create permanent establishment risk?",
     examples: [
@@ -51,7 +51,7 @@ const COPY = {
       "What are the VAT consequences of exporting goods from Mexico?",
       "How are Brazilian CFC earnings treated for U.S. tax purposes?",
     ],
-    submit: "Run free analysis",
+    submit: "Analyze my question",
     loading: "Building consensus",
     loadingBody:
       "TaxAiPro is comparing independent model positions and preparing a conservative preliminary synthesis.",
@@ -73,11 +73,11 @@ const COPY = {
   },
 
   es: {
-    back: "Volver al inicio",
-    eyebrow: "Un análisis público gratuito",
-    title: "¿Qué asunto tributario estás investigando?",
+    back: "TaxAiPro",
+    eyebrow: "Una vista previa de consenso gratuita",
+    title: "Haz tu pregunta tributaria.",
     subtitle:
-      "Formula una pregunta tributaria y recibe una vista previa limitada del consenso TaxAiPro. No se requiere registro.",
+      "TaxAiPro comparará múltiples modelos de IA y preparará un consenso conservador. No se requiere registro.",
     placeholder:
       "Ejemplo: ¿Una empresa estadounidense que compra bienes FOB de Brasil crea riesgo de establecimiento permanente?",
     examples: [
@@ -85,7 +85,7 @@ const COPY = {
       "¿Cuáles son las consecuencias de IVA al exportar bienes desde México?",
       "¿Cómo se tratan las utilidades CFC brasileñas para fines fiscales de EE. UU.?",
     ],
-    submit: "Ejecutar análisis gratuito",
+    submit: "Analizar mi pregunta",
     loading: "Construyendo consenso",
     loadingBody:
       "TaxAiPro está comparando posiciones independientes y preparando una síntesis preliminar conservadora.",
@@ -107,11 +107,11 @@ const COPY = {
   },
 
   pt: {
-    back: "Voltar à página inicial",
-    eyebrow: "Uma análise pública gratuita",
-    title: "Qual questão tributária você está pesquisando?",
+    back: "TaxAiPro",
+    eyebrow: "Uma prévia gratuita de consenso",
+    title: "Faça sua pergunta tributária.",
     subtitle:
-      "Faça uma pergunta tributária e receba uma prévia limitada do consenso TaxAiPro. Nenhum cadastro é necessário.",
+      "O TaxAiPro desafiará vários modelos de IA e preparará um consenso conservador. Nenhum cadastro é necessário.",
     placeholder:
       "Exemplo: Uma empresa americana que compra mercadorias FOB do Brasil cria risco de estabelecimento permanente?",
     examples: [
@@ -119,7 +119,7 @@ const COPY = {
       "Quais são as consequências de IVA na exportação de mercadorias do México?",
       "Como os lucros de uma CFC brasileira são tratados para fins fiscais nos EUA?",
     ],
-    submit: "Executar análise gratuita",
+    submit: "Analisar minha pergunta",
     loading: "Construindo consenso",
     loadingBody:
       "O TaxAiPro está comparando posições independentes e preparando uma síntese preliminar conservadora.",
@@ -273,10 +273,25 @@ export default function PublicAnalyzePage() {
       <div className="relative mx-auto max-w-5xl px-5 py-6 sm:py-8">
         <Link
           href={`/${locale}`}
-          className="inline-flex items-center gap-2 text-sm text-white/52 transition hover:text-white"
+          className="inline-flex items-center gap-3 rounded-xl transition hover:opacity-90"
+          aria-label="TaxAiPro homepage"
         >
-          <ArrowLeft size={16} />
-          {c.back}
+          <Image
+            src="/taxaipro-logo.png"
+            alt="TaxAiPro"
+            width={42}
+            height={42}
+            className="rounded-xl border border-white/10"
+            priority
+          />
+          <div>
+            <div className="text-base font-semibold tracking-tight text-white">
+              {c.back}
+            </div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-cyan-300/70">
+              AI Tax Workbench
+            </div>
+          </div>
         </Link>
 
         <section className="mx-auto mt-8 max-w-3xl text-center">
@@ -311,7 +326,7 @@ export default function PublicAnalyzePage() {
             type="button"
             disabled={!canSubmit}
             onClick={runAnalysis}
-            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-300 px-5 py-3.5 text-sm font-semibold text-[#06101b] transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-45"
+            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-300 px-5 py-3.5 text-sm font-semibold text-[#06101b] shadow-[0_12px_35px_rgba(103,232,249,0.12)] transition hover:bg-cyan-200 hover:shadow-[0_14px_40px_rgba(103,232,249,0.18)] disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
           >
             {loading ? (
               <>
@@ -325,6 +340,25 @@ export default function PublicAnalyzePage() {
               </>
             )}
           </button>
+
+          <div className="mt-4 border-t border-white/8 pt-4">
+            <div className="mb-3 text-center text-[10px] font-medium uppercase tracking-[0.18em] text-white/28">
+              Independent model review
+            </div>
+
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {["OpenAI", "Claude", "Gemini", "Grok", "DeepSeek"].map(
+                (model) => (
+                  <span
+                    key={model}
+                    className="rounded-full border border-white/8 bg-white/[0.025] px-3 py-1 text-[11px] text-white/38"
+                  >
+                    {model}
+                  </span>
+                )
+              )}
+            </div>
+          </div>
         </section>
 
         {loading ? (
