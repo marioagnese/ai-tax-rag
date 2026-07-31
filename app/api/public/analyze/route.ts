@@ -1,93 +1,39 @@
-import { Redis } from "@upstash/redis";
 import { NextResponse, type NextRequest } from "next/server";
 import { runCrosscheck } from "../../../../src/core/crosscheck/orchestrator";
-import { getClientId } from "../../../../src/lib/usage/ratelimit";
+import {
+  assertWithinDailyLimit,
+  getClientId,
+  type RateLimitMeta,
+} from "../../../../src/lib/usage/ratelimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_QUESTION_LENGTH = 2_000;
-const PUBLIC_DAILY_LIMIT = 1;
 
 type PublicAnalyzeBody = {
   question?: string;
   responseLanguage?: string;
 };
 
-type PublicLimitMeta = {
-  limit: number;
-  used: number;
-  remaining: number;
-  resetAt: string;
-};
-
-function getRedis() {
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-
-  if (!url || !token) {
-    throw new Error("Public analysis rate limiting is not configured.");
-  }
-
-  return new Redis({ url, token });
-}
-
-function utcDayKey(now = new Date()) {
-  const year = now.getUTCFullYear();
-  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(now.getUTCDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
-}
-
-function endOfUtcDay(now = new Date()) {
-  return new Date(
-    Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate() + 1,
-      0,
-      0,
-      0
-    )
-  );
-}
-
-async function applyPublicLimit(req: NextRequest): Promise<PublicLimitMeta> {
-  const clientId = getClientId(req as unknown as Request);
-  const resetAt = endOfUtcDay();
-  const key = `taxaipro:public-preview:${utcDayKey()}:${clientId}`;
-
-  const redis = getRedis();
-  const used = await redis.incr(key);
-
-  const ttlSeconds = Math.max(
-    60,
-    Math.floor((resetAt.getTime() - Date.now()) / 1_000)
-  );
-
-  await redis.expire(key, ttlSeconds);
-
-  return {
-    limit: PUBLIC_DAILY_LIMIT,
-    used,
-    remaining: Math.max(0, PUBLIC_DAILY_LIMIT - used),
-    resetAt: resetAt.toISOString(),
-  };
-}
-
-function addLimitHeaders(response: NextResponse, meta?: PublicLimitMeta) {
+function applyRateLimitHeaders(
+  headers: Headers,
+  meta?: RateLimitMeta
+) {
   if (!meta) return;
 
-  response.headers.set("x-ratelimit-limit", String(meta.limit));
-  response.headers.set("x-ratelimit-used", String(meta.used));
-  response.headers.set("x-ratelimit-remaining", String(meta.remaining));
-  response.headers.set("x-ratelimit-reset", meta.resetAt);
+  headers.set("x-taxaipro-tier", String(meta.tier));
+  headers.set("x-ratelimit-limit", String(meta.limit));
+  headers.set("x-ratelimit-used", String(meta.used));
+  headers.set("x-ratelimit-remaining", String(meta.remaining));
+  headers.set("x-ratelimit-reset", meta.resetAt);
 }
 
-function responseLanguage(value: unknown) {
+function normalizeLanguage(value: unknown) {
   const language =
-    typeof value === "string" ? value.trim().toLowerCase() : "";
+    typeof value === "string"
+      ? value.trim().toLowerCase()
+      : "";
 
   if (language === "portuguese") return "Portuguese";
   if (language === "spanish") return "Spanish";
@@ -96,15 +42,17 @@ function responseLanguage(value: unknown) {
 }
 
 export async function POST(req: NextRequest) {
-  let limitMeta: PublicLimitMeta | undefined;
+  let rateLimitMeta: RateLimitMeta | undefined;
 
   try {
-    const raw = (await req.json().catch(() => null)) as
+    const body = (await req.json().catch(() => null)) as
       | PublicAnalyzeBody
       | null;
 
     const question =
-      typeof raw?.question === "string" ? raw.question.trim() : "";
+      typeof body?.question === "string"
+        ? body.question.trim()
+        : "";
 
     if (!question) {
       return NextResponse.json(
@@ -126,26 +74,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    limitMeta = await applyPublicLimit(req);
+    const clientId = getClientId(
+      req as unknown as Request
+    );
 
-    if (limitMeta.used > PUBLIC_DAILY_LIMIT) {
-      const response = NextResponse.json(
-        {
-          ok: false,
-          error: "Your free public analysis has already been used today.",
-          code: "PUBLIC_LIMIT_REACHED",
-          meta: limitMeta,
-        },
-        { status: 429 }
-      );
+    // Reuse the existing Tier 0 limiter.
+    // This currently permits up to 5 daily requests.
+    rateLimitMeta = await assertWithinDailyLimit({
+      req: req as unknown as Request,
+      tier: 0,
+      clientId,
+    });
 
-      addLimitHeaders(response, limitMeta);
-      response.headers.set("cache-control", "no-store, max-age=0");
-
-      return response;
-    }
-
-    const language = responseLanguage(raw?.responseLanguage);
+    const language = normalizeLanguage(
+      body?.responseLanguage
+    );
 
     const previewQuestion = [
       "PUBLIC PREVIEW REQUEST",
@@ -176,7 +119,9 @@ export async function POST(req: NextRequest) {
     });
 
     if (!result.ok) {
-      const providerErrors = (result.providers || [])
+      const providerErrors = (
+        result.providers || []
+      )
         .map((provider) => provider.error)
         .filter(Boolean);
 
@@ -194,18 +139,28 @@ export async function POST(req: NextRequest) {
         { status: 502 }
       );
 
-      addLimitHeaders(response, limitMeta);
-      response.headers.set("cache-control", "no-store, max-age=0");
+      applyRateLimitHeaders(
+        response.headers,
+        rateLimitMeta
+      );
+      response.headers.set(
+        "cache-control",
+        "no-store, max-age=0"
+      );
 
       return response;
     }
 
     const attempted =
-      result.meta?.attempted?.length || result.providers?.length || 0;
+      result.meta?.attempted?.length ||
+      result.providers?.length ||
+      0;
 
     const succeeded =
       result.meta?.succeeded?.length ||
-      result.providers?.filter((provider) => provider.status === "ok").length ||
+      result.providers?.filter(
+        (provider) => provider.status === "ok"
+      ).length ||
       0;
 
     const response = NextResponse.json(
@@ -214,30 +169,72 @@ export async function POST(req: NextRequest) {
         preview: true,
         consensus: {
           answer: result.consensus?.answer || "",
-          confidence: result.consensus?.confidence || "low",
-          caveats: (result.consensus?.caveats || []).slice(0, 4),
-          missingFacts: (result.consensus?.followups || []).slice(0, 4),
-          disagreements: (result.consensus?.disagreements || []).slice(0, 3),
+          confidence:
+            result.consensus?.confidence || "low",
+          caveats: (
+            result.consensus?.caveats || []
+          ).slice(0, 4),
+          missingFacts: (
+            result.consensus?.followups || []
+          ).slice(0, 4),
+          disagreements: (
+            result.consensus?.disagreements || []
+          ).slice(0, 3),
         },
         meta: {
           attempted,
           succeeded,
-          runtimeMs: result.meta?.runtime_ms || null,
+          runtimeMs:
+            result.meta?.runtime_ms || null,
         },
-        limits: limitMeta,
       },
       { status: 200 }
     );
 
-    addLimitHeaders(response, limitMeta);
-    response.headers.set("cache-control", "no-store, max-age=0");
+    applyRateLimitHeaders(
+      response.headers,
+      rateLimitMeta
+    );
+    response.headers.set(
+      "cache-control",
+      "no-store, max-age=0"
+    );
 
     return response;
-  } catch (error: unknown) {
+  } catch (error: any) {
+    if (error?.message === "RATE_LIMIT") {
+      const meta =
+        (error?.meta as RateLimitMeta | undefined) ||
+        rateLimitMeta;
+
+      const response = NextResponse.json(
+        {
+          ok: false,
+          code: "PUBLIC_LIMIT_REACHED",
+          error:
+            "The public daily analysis limit has been reached.",
+        },
+        { status: 429 }
+      );
+
+      applyRateLimitHeaders(response.headers, meta);
+      response.headers.set(
+        "cache-control",
+        "no-store, max-age=0"
+      );
+
+      return response;
+    }
+
     const message =
       error instanceof Error
         ? error.message
         : "The public analysis could not be completed.";
+
+    console.error(
+      "Public TaxAiPro analysis failed:",
+      error
+    );
 
     const response = NextResponse.json(
       {
@@ -247,8 +244,14 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
 
-    addLimitHeaders(response, limitMeta);
-    response.headers.set("cache-control", "no-store, max-age=0");
+    applyRateLimitHeaders(
+      response.headers,
+      rateLimitMeta
+    );
+    response.headers.set(
+      "cache-control",
+      "no-store, max-age=0"
+    );
 
     return response;
   }
