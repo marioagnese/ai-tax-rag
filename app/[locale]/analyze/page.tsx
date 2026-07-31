@@ -270,7 +270,7 @@ export default function PublicAnalyzePage() {
     <main className="min-h-screen bg-[#07101d] text-white">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(34,211,238,0.12),transparent_36%)]" />
 
-      <div className="relative mx-auto max-w-5xl px-5 py-8 sm:py-12">
+      <div className="relative mx-auto max-w-5xl px-5 py-6 sm:py-8">
         <Link
           href={`/${locale}`}
           className="inline-flex items-center gap-2 text-sm text-white/52 transition hover:text-white"
@@ -279,52 +279,39 @@ export default function PublicAnalyzePage() {
           {c.back}
         </Link>
 
-        <section className="mx-auto mt-14 max-w-3xl text-center">
+        <section className="mx-auto mt-8 max-w-3xl text-center">
           <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/8 px-3 py-1.5 text-xs font-medium text-cyan-200">
             <Sparkles size={14} />
             {c.eyebrow}
           </div>
 
-          <h1 className="mt-6 text-4xl font-semibold tracking-[-0.04em] sm:text-6xl">
+          <h1 className="mt-5 text-4xl font-semibold tracking-[-0.04em] sm:text-6xl">
             {c.title}
           </h1>
 
-          <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-white/56 sm:text-lg">
+          <p className="mx-auto mt-4 max-w-2xl text-base leading-7 text-white/56 sm:text-lg">
             {c.subtitle}
           </p>
         </section>
 
-        <section className="mx-auto mt-10 max-w-3xl rounded-[28px] border border-white/12 bg-[#0a1626] p-4 shadow-2xl shadow-black/30 sm:p-6">
+        <section className="mx-auto mt-7 max-w-3xl rounded-[28px] border border-white/12 bg-[#0a1626] p-4 shadow-2xl shadow-black/30 sm:p-5">
           <textarea
             value={question}
             onChange={(event) => setQuestion(event.target.value)}
             placeholder={c.placeholder}
             maxLength={2_000}
-            className="min-h-[180px] w-full resize-none rounded-2xl border border-white/8 bg-[#07101d] p-4 text-sm leading-7 text-white/88 outline-none placeholder:text-white/28 focus:border-cyan-300/30 sm:text-base"
+            className="min-h-[145px] w-full resize-none rounded-2xl border border-white/8 bg-[#07101d] p-4 text-sm leading-7 text-white/88 outline-none placeholder:text-white/28 focus:border-cyan-300/30 sm:text-base"
           />
 
           <div className="mt-3 flex justify-end text-xs text-white/30">
             {question.length}/2000
           </div>
 
-          <div className="mt-4 flex flex-wrap gap-2">
-            {c.examples.map((example) => (
-              <button
-                key={example}
-                type="button"
-                onClick={() => setQuestion(example)}
-                className="rounded-full border border-white/9 bg-white/[0.03] px-3 py-2 text-left text-xs text-white/52 transition hover:bg-white/[0.07] hover:text-white/78"
-              >
-                {example}
-              </button>
-            ))}
-          </div>
-
           <button
             type="button"
             disabled={!canSubmit}
             onClick={runAnalysis}
-            className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-300 px-5 py-3.5 text-sm font-semibold text-[#06101b] transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-45"
+            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-300 px-5 py-3.5 text-sm font-semibold text-[#06101b] transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-45"
           >
             {loading ? (
               <>
