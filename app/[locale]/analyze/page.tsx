@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -191,6 +191,22 @@ export default function PublicAnalyzePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<AnalyzeResponse | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
+
+  useEffect(() => {
+    if (!loading) {
+      setElapsedMs(0);
+      return;
+    }
+
+    const startedAt = Date.now();
+
+    const timer = window.setInterval(() => {
+      setElapsedMs(Date.now() - startedAt);
+    }, 100);
+
+    return () => window.clearInterval(timer);
+  }, [loading]);
 
   const canSubmit = useMemo(
     () => question.trim().length > 0 && !loading,
@@ -325,40 +341,85 @@ export default function PublicAnalyzePage() {
         </section>
 
         {loading ? (
-          <section className="mx-auto mt-6 max-w-3xl rounded-2xl border border-white/10 bg-[#0a1626] p-5">
-            <div className="flex items-start gap-4">
-              <LoaderCircle className="mt-1 animate-spin text-cyan-300" />
-              <div>
-                <div className="font-semibold text-white/88">
-                  {c.loading}
-                </div>
-                <div className="mt-2 text-sm leading-6 text-white/50">
-                  {c.loadingBody}
+          <section className="mx-auto mt-6 max-w-3xl rounded-2xl border border-cyan-300/15 bg-[#0a1626] p-5 shadow-xl shadow-black/20">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-4">
+                <LoaderCircle className="mt-1 shrink-0 animate-spin text-cyan-300" />
+                <div>
+                  <div className="font-semibold text-white/88">
+                    {c.loading}
+                  </div>
+                  <div className="mt-2 text-sm leading-6 text-white/50">
+                    {c.loadingBody}
+                  </div>
                 </div>
               </div>
+
+              <div className="shrink-0 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-white/60">
+                {(elapsedMs / 1000).toFixed(1)}s
+              </div>
+            </div>
+
+            <div className="mt-6 h-1.5 overflow-hidden rounded-full bg-white/8">
+              <div
+                className="h-full rounded-full bg-cyan-300 transition-all duration-700"
+                style={{
+                  width:
+                    elapsedMs < 5000
+                      ? "28%"
+                      : elapsedMs < 12000
+                      ? "62%"
+                      : "88%",
+                }}
+              />
             </div>
 
             <div className="mt-5 grid gap-2 sm:grid-cols-3">
               {[
-                "Independent review",
-                "Model comparison",
-                "Consensus synthesis",
-              ].map((label, index) => (
+                {
+                  label: "Independent model review",
+                  active: elapsedMs < 5000,
+                  complete: elapsedMs >= 5000,
+                },
+                {
+                  label: "Comparing model positions",
+                  active: elapsedMs >= 5000 && elapsedMs < 12000,
+                  complete: elapsedMs >= 12000,
+                },
+                {
+                  label: "Building TaxAiPro consensus",
+                  active: elapsedMs >= 12000,
+                  complete: false,
+                },
+              ].map((stage) => (
                 <div
-                  key={label}
-                  className="flex items-center gap-2 rounded-xl border border-white/8 bg-[#07101d] px-3 py-3 text-xs text-white/55"
+                  key={stage.label}
+                  className="flex items-center gap-2 rounded-xl border border-white/8 bg-[#07101d] px-3 py-3 text-xs text-white/60"
                 >
-                  {index === 0 ? (
+                  {stage.complete ? (
+                    <Check
+                      size={14}
+                      className="shrink-0 text-emerald-300"
+                    />
+                  ) : stage.active ? (
                     <LoaderCircle
                       size={14}
-                      className="animate-spin text-cyan-300"
+                      className="shrink-0 animate-spin text-cyan-300"
                     />
                   ) : (
-                    <Clock3 size={14} />
+                    <Clock3
+                      size={14}
+                      className="shrink-0 text-white/32"
+                    />
                   )}
-                  {label}
+
+                  {stage.label}
                 </div>
               ))}
+            </div>
+
+            <div className="mt-4 text-center text-xs text-white/32">
+              Complex cross-model analysis may take up to one minute.
             </div>
           </section>
         ) : null}
@@ -401,6 +462,15 @@ export default function PublicAnalyzePage() {
                       {result.meta?.attempted || 0}
                     </span>
                   </div>
+
+                  {result.meta?.runtimeMs ? (
+                    <div className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-white/65">
+                      Runtime:{" "}
+                      <span className="font-semibold text-white">
+                        {(result.meta.runtimeMs / 1000).toFixed(1)}s
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
