@@ -326,7 +326,7 @@ export default function PublicAnalyzePage() {
             type="button"
             disabled={!canSubmit}
             onClick={runAnalysis}
-            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-300 px-5 py-3.5 text-sm font-semibold text-[#06101b] shadow-[0_12px_35px_rgba(103,232,249,0.12)] transition hover:bg-cyan-200 hover:shadow-[0_14px_40px_rgba(103,232,249,0.18)] disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
+            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-300 px-5 py-3.5 text-sm font-semibold text-white shadow-[0_12px_35px_rgba(103,232,249,0.12)] transition hover:bg-cyan-200 hover:shadow-[0_14px_40px_rgba(103,232,249,0.18)] disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
           >
             {loading ? (
               <>
@@ -554,7 +554,7 @@ export default function PublicAnalyzePage() {
               <div className="mt-7 flex flex-col gap-3 sm:flex-row">
                 <Link
                   href={`/${locale}/signup`}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-300 px-5 py-3.5 text-sm font-semibold text-[#06101b] transition hover:bg-cyan-200"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-300 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-cyan-200"
                 >
                   {c.signup}
                   <ArrowRight size={17} />
