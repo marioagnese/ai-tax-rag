@@ -45,6 +45,11 @@ function publicCaveats(values: unknown) {
           (pattern) => value.includes(pattern)
         )
     )
+    .map((value) =>
+      value.startsWith("High-risk legal conflict:")
+        ? "The models reached conflicting conclusions on a material legal issue. Confirm the controlling statutory treatment before relying on this preliminary result."
+        : value
+    )
     .slice(0, 2);
 }
 
