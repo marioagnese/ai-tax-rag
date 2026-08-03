@@ -23,6 +23,31 @@ function normalizeLanguage(value: unknown) {
   return "English";
 }
 
+const INTERNAL_PUBLIC_CAVEAT_PATTERNS = [
+  "Strong initial cross-model convergence was detected",
+  "A conservative rewrite pass was applied",
+];
+
+function publicCaveats(values: unknown) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  return values
+    .filter(
+      (value): value is string =>
+        typeof value === "string" &&
+        value.trim().length > 0
+    )
+    .filter(
+      (value) =>
+        !INTERNAL_PUBLIC_CAVEAT_PATTERNS.some(
+          (pattern) => value.includes(pattern)
+        )
+    )
+    .slice(0, 2);
+}
+
 function extractExecutiveSummary(value: unknown) {
   if (typeof value !== "string") {
     return "";
@@ -200,9 +225,9 @@ export async function POST(req: NextRequest) {
           ),
           confidence:
             result.consensus?.confidence || "low",
-          caveats: (
-            result.consensus?.caveats || []
-          ).slice(0, 2),
+          caveats: publicCaveats(
+            result.consensus?.caveats
+          ),
           missingFacts: (
             result.consensus?.followups || []
           ).slice(0, 3),
