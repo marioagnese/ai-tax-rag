@@ -1,4 +1,5 @@
-import { redis } from "./redis";
+import { FieldValue } from "firebase-admin/firestore";
+import { getAdminDb } from "../firebase/admin";
 
 type PublicPreviewLimitMeta = {
   limit: number;
@@ -13,10 +14,14 @@ function sha1Like(input: string) {
   let h = 0;
 
   for (let i = 0; i < input.length; i++) {
-    h = (h * 31 + input.charCodeAt(i)) >>> 0;
+    h =
+      (h * 31 + input.charCodeAt(i)) >>>
+      0;
   }
 
-  return h.toString(16).padStart(8, "0");
+  return h
+    .toString(16)
+    .padStart(8, "0");
 }
 
 export function getPublicPreviewClientId(
@@ -27,13 +32,17 @@ export function getPublicPreviewClientId(
       .get("x-forwarded-for")
       ?.split(",")[0]
       ?.trim() ||
-    req.headers.get("x-real-ip")?.trim() ||
+    req.headers
+      .get("x-real-ip")
+      ?.trim() ||
     "0.0.0.0";
 
   const userAgent =
     req.headers.get("user-agent") || "";
 
-  return `public:${ip}:${sha1Like(userAgent)}`;
+  return `public:${ip}:${sha1Like(
+    userAgent
+  )}`;
 }
 
 function utcDayKey(now = new Date()) {
@@ -69,37 +78,62 @@ export async function assertPublicPreviewAvailable(
     getPublicPreviewClientId(req);
   const reset = endOfUtcDay();
   const day = utcDayKey();
+  const key = `${day}:${clientId}`;
 
-  const key =
-    `taxaipro:public-preview:${day}:${clientId}`;
+  const db = getAdminDb();
+  const ref = db
+    .collection("publicPreviewUsage")
+    .doc(sha1Like(key));
 
-  const used = await redis.incr(key);
+  const meta =
+    await db.runTransaction(
+      async (transaction) => {
+        const snapshot =
+          await transaction.get(ref);
 
-  const ttlSeconds = Math.max(
-    60,
-    Math.floor(
-      (reset.getTime() - Date.now()) /
-        1000
-    )
-  );
+        const currentUsed =
+          snapshot.exists
+            ? Number(
+                snapshot.data()?.used || 0
+              )
+            : 0;
 
-  await redis.expire(key, ttlSeconds);
+        const used = currentUsed + 1;
+        const remaining = Math.max(
+          0,
+          limit - used
+        );
 
-  const remaining = Math.max(
-    0,
-    limit - used
-  );
+        const result: PublicPreviewLimitMeta =
+          {
+            limit,
+            used,
+            remaining,
+            resetAt:
+              reset.toISOString(),
+            key,
+            clientId,
+          };
 
-  const meta: PublicPreviewLimitMeta = {
-    limit,
-    used,
-    remaining,
-    resetAt: reset.toISOString(),
-    key,
-    clientId,
-  };
+        transaction.set(
+          ref,
+          {
+            used,
+            clientId,
+            day,
+            resetAt:
+              reset.toISOString(),
+            updatedAt:
+              FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
 
-  if (used > limit) {
+        return result;
+      }
+    );
+
+  if (meta.used > limit) {
     const error = new Error(
       "PUBLIC_LIMIT_REACHED"
     ) as Error & {
