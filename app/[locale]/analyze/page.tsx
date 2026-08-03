@@ -269,7 +269,7 @@ export default function PublicAnalyzePage() {
 
   return (
     <main className="min-h-screen bg-[#07101d] text-white">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(34,211,238,0.12),transparent_36%)]" />
+      <div className="pointer-events-none fixed inset-x-0 top-0 h-[760px] bg-[radial-gradient(circle_at_20%_10%,rgba(24,172,196,0.18),transparent_34%),radial-gradient(circle_at_78%_12%,rgba(31,91,160,0.22),transparent_36%)]" />
 
       <div className="relative mx-auto max-w-5xl px-5 py-6 sm:py-8">
         <Link
