@@ -102,10 +102,29 @@ export async function POST(req: NextRequest) {
     | undefined;
 
   try {
-    rateLimitMeta =
-      await assertPublicPreviewAvailable(
-        req as unknown as Request
+    try {
+      rateLimitMeta =
+        await assertPublicPreviewAvailable(
+          req as unknown as Request
+        );
+    } catch (rateLimitError: unknown) {
+      const rateLimitMessage =
+        rateLimitError instanceof Error
+          ? rateLimitError.message
+          : "";
+
+      if (
+        rateLimitMessage ===
+        "PUBLIC_LIMIT_REACHED"
+      ) {
+        throw rateLimitError;
+      }
+
+      console.error(
+        "[public-analyze] rate limiter unavailable; continuing without enforcement",
+        rateLimitError
       );
+    }
     const body = (await req.json().catch(() => null)) as
       | PublicAnalyzeBody
       | null;
