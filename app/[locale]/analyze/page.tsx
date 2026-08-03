@@ -29,7 +29,6 @@ type AnalyzeResponse = {
     confidence?: "low" | "medium" | "high";
     caveats?: string[];
     missingFacts?: string[];
-    disagreements?: string[];
   };
   meta?: {
     attempted?: number;
@@ -68,7 +67,6 @@ const COPY = {
     models: "Models completed",
     caveats: "Important caveats",
     missingFacts: "Facts that should be confirmed",
-    disagreements: "Areas requiring review",
     unlockTitle: "Continue in the full TaxAiPro Workbench",
     unlockBody:
       "Create a free account to access complete CrossCheck analysis, individual model outputs, follow-up questions, history, document upload, and professional memo generation.",
@@ -109,7 +107,6 @@ const COPY = {
     models: "Modelos completados",
     caveats: "Salvedades importantes",
     missingFacts: "Hechos que deben confirmarse",
-    disagreements: "Áreas que requieren revisión",
     unlockTitle: "Continúa en el TaxAiPro Workbench completo",
     unlockBody:
       "Crea una cuenta gratuita para acceder a CrossCheck completo, respuestas individuales, preguntas de seguimiento, historial, carga de documentos y memorandos profesionales.",
@@ -150,7 +147,6 @@ const COPY = {
     models: "Modelos concluídos",
     caveats: "Ressalvas importantes",
     missingFacts: "Fatos que devem ser confirmados",
-    disagreements: "Áreas que exigem revisão",
     unlockTitle: "Continue no TaxAiPro Workbench completo",
     unlockBody:
       "Crie uma conta gratuita para acessar CrossCheck completo, respostas individuais, perguntas de acompanhamento, histórico, documentos e memorandos profissionais.",
@@ -577,13 +573,7 @@ export default function PublicAnalyzePage() {
                 title={c.missingFacts}
                 items={result.consensus.missingFacts}
               />
-
-              <DetailList
-                title={c.disagreements}
-                items={result.consensus.disagreements}
-                warning
-              />
-            </div>
+</div>
 
             <div className="mt-6 rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_90%_0%,rgba(34,211,238,0.12),transparent_35%),#0a1626] p-6 sm:p-8">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-cyan-300/10 text-cyan-200">
