@@ -1,5 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { runCrosscheck } from "../../../../src/core/crosscheck/orchestrator";
+import {
+  assertPublicPreviewAvailable,
+  type PublicPreviewLimitMeta,
+} from "../../../../src/lib/usage/publicPreviewLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -93,7 +97,15 @@ function extractExecutiveSummary(value: unknown) {
 export async function POST(req: NextRequest) {
   console.log("[public-analyze] request received");
 
+  let rateLimitMeta:
+    | PublicPreviewLimitMeta
+    | undefined;
+
   try {
+    rateLimitMeta =
+      await assertPublicPreviewAvailable(
+        req as unknown as Request
+      );
     const body = (await req.json().catch(() => null)) as
       | PublicAnalyzeBody
       | null;
@@ -256,6 +268,30 @@ export async function POST(req: NextRequest) {
       error instanceof Error
         ? error.message
         : "The public analysis could not be completed.";
+
+    if (message === "PUBLIC_LIMIT_REACHED") {
+      const meta =
+        typeof error === "object" &&
+        error !== null &&
+        "meta" in error
+          ? (
+              error as {
+                meta?: PublicPreviewLimitMeta;
+              }
+            ).meta
+          : rateLimitMeta;
+
+      return NextResponse.json(
+        {
+          ok: false,
+          code: "PUBLIC_LIMIT_REACHED",
+          error:
+            "Your free public analysis has already been used today. Create an account to continue.",
+          meta,
+        },
+        { status: 429 }
+      );
+    }
 
     return NextResponse.json(
       {
