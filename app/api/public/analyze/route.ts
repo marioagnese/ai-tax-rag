@@ -23,6 +23,43 @@ function normalizeLanguage(value: unknown) {
   return "English";
 }
 
+function extractExecutiveSummary(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const answer = value.trim();
+
+  const sectionMarkers = [
+    "\n\nAnalysis",
+    "\n\nDetailed Analysis",
+    "\n\nTransaction-specific treatment",
+    "\n\nRequired confirmations",
+    "\n\nRecommendation",
+  ];
+
+  let endIndex = answer.length;
+
+  for (const sectionMarker of sectionMarkers) {
+    const index = answer.indexOf(sectionMarker);
+
+    if (index > 0 && index < endIndex) {
+      endIndex = index;
+    }
+  }
+
+  const summary = answer
+    .slice(0, endIndex)
+    .replace(/^Executive summary\s*/i, "")
+    .trim();
+
+  if (summary.length <= 2_600) {
+    return summary;
+  }
+
+  return `${summary.slice(0, 2_600).trimEnd()}…`;
+}
+
 export async function POST(req: NextRequest) {
   console.log("[public-analyze] request received");
 
@@ -158,7 +195,9 @@ export async function POST(req: NextRequest) {
         ok: true,
         preview: true,
         consensus: {
-          answer: result.consensus?.answer || "",
+          answer: extractExecutiveSummary(
+            result.consensus?.answer
+          ),
           confidence:
             result.consensus?.confidence || "low",
           caveats: (
