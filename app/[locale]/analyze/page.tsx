@@ -40,6 +40,13 @@ type AnalyzeResponse = {
 
 const COPY = {
   en: {
+    nav: {
+      platform: "Platform",
+      how: "How it works",
+      pricing: "Pricing",
+      enterprise: "Enterprise",
+      signIn: "Sign in",
+    },
     back: "TaxAiPro",
     eyebrow: "One complimentary consensus preview",
     title: "Ask your tax question.",
@@ -74,6 +81,13 @@ const COPY = {
   },
 
   es: {
+    nav: {
+      platform: "Plataforma",
+      how: "Cómo funciona",
+      pricing: "Precios",
+      enterprise: "Empresas",
+      signIn: "Ingresar",
+    },
     back: "TaxAiPro",
     eyebrow: "Una vista previa de consenso gratuita",
     title: "Haz tu pregunta tributaria.",
@@ -108,6 +122,13 @@ const COPY = {
   },
 
   pt: {
+    nav: {
+      platform: "Plataforma",
+      how: "Como funciona",
+      pricing: "Planos",
+      enterprise: "Empresas",
+      signIn: "Entrar",
+    },
     back: "TaxAiPro",
     eyebrow: "Uma prévia gratuita de consenso",
     title: "Faça sua pergunta tributária.",
@@ -271,30 +292,74 @@ export default function PublicAnalyzePage() {
     <main className="min-h-screen bg-[#07101d] text-white">
       <div className="pointer-events-none fixed inset-x-0 top-0 h-[760px] bg-[radial-gradient(circle_at_20%_10%,rgba(24,172,196,0.18),transparent_34%),radial-gradient(circle_at_78%_12%,rgba(31,91,160,0.22),transparent_36%)]" />
 
-      <div className="relative mx-auto max-w-5xl px-5 py-6 sm:py-8">
-        <Link
-          href={`/${locale}`}
-          className="inline-flex items-center gap-3 rounded-xl transition hover:opacity-90"
-          aria-label="TaxAiPro homepage"
-        >
-          <Image
-            src="/taxaipro-logo.png"
-            alt="TaxAiPro"
-            width={42}
-            height={42}
-            className="rounded-xl border border-white/10"
-            priority
-          />
-          <div>
-            <div className="text-base font-semibold tracking-tight text-white">
-              {c.back}
-            </div>
-            <div className="text-[10px] uppercase tracking-[0.2em] text-cyan-300/70">
-              AI Tax Workbench
-            </div>
-          </div>
-        </Link>
+      <header className="relative z-20 border-b border-white/8 bg-[#07101d]/75 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 lg:px-8">
+          <Link
+            href={`/${locale}`}
+            className="flex items-center gap-3"
+            aria-label="TaxAiPro home"
+          >
+            <Image
+              src="/taxaipro-logo.png"
+              alt="TaxAiPro"
+              width={42}
+              height={42}
+              className="rounded-xl"
+              priority
+            />
 
+            <div>
+              <div className="text-lg font-semibold tracking-tight">
+                TaxAiPro
+              </div>
+              <div className="text-[10px] uppercase tracking-[0.2em] text-cyan-300/70">
+                AI Tax Workbench
+              </div>
+            </div>
+          </Link>
+
+          <nav className="hidden items-center gap-7 text-sm text-white/68 lg:flex">
+            <Link
+              href={`/${locale}#platform`}
+              className="transition hover:text-white"
+            >
+              {c.nav.platform}
+            </Link>
+
+            <Link
+              href={`/${locale}/how-it-works`}
+              className="transition hover:text-white"
+            >
+              {c.nav.how}
+            </Link>
+
+            <Link
+              href={`/${locale}/plans`}
+              className="transition hover:text-white"
+            >
+              {c.nav.pricing}
+            </Link>
+
+            <Link
+              href={`/${locale}/corporate`}
+              className="transition hover:text-white"
+            >
+              {c.nav.enterprise}
+            </Link>
+          </nav>
+
+          <div className="flex items-center gap-2">
+            <Link
+              href={`/${locale}/signin`}
+              className="rounded-xl border border-white/12 px-4 py-2.5 text-sm font-medium text-white/85 transition hover:bg-white/8 hover:text-white"
+            >
+              {c.nav.signIn}
+            </Link>
+          </div>
+        </div>
+      </header>
+
+      <div className="relative mx-auto max-w-5xl px-5 py-8 sm:py-10">
         <section className="mx-auto mt-8 max-w-3xl text-center">
           <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/8 px-3 py-1.5 text-xs font-medium text-cyan-200">
             <Sparkles size={14} />
