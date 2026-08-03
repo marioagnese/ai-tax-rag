@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import PrimaryButton from "../../../components/ui/PrimaryButton";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -322,11 +323,11 @@ export default function PublicAnalyzePage() {
             {question.length}/2000
           </div>
 
-          <button
+          <PrimaryButton
             type="button"
-  
             onClick={runAnalysis}
-            className="mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-300 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-cyan-200"
+            disabled={!canSubmit}
+            className="mt-4 w-full"
           >
             {loading ? (
               <>
@@ -339,7 +340,7 @@ export default function PublicAnalyzePage() {
                 <ArrowRight size={17} />
               </>
             )}
-          </button>
+          </PrimaryButton>
 
           <div className="mt-4 border-t border-white/8 pt-4">
             <div className="mb-3 text-center text-[10px] font-medium uppercase tracking-[0.18em] text-white/28">
@@ -552,13 +553,10 @@ export default function PublicAnalyzePage() {
               </div>
 
               <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-                <Link
-                  href={`/${locale}/signup`}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-300 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-cyan-200"
-                >
+                <PrimaryButton href={`/${locale}/signup`}>
                   {c.signup}
                   <ArrowRight size={17} />
-                </Link>
+                </PrimaryButton>
 
                 <Link
                   href={`/${locale}/signin`}

@@ -1,5 +1,6 @@
 import Image from "next/image";
 import LanguageToggle from "./components/LanguageToggle";
+import PrimaryButton from "../../components/ui/PrimaryButton";
 import {
   ArrowRight,
   Check,
@@ -414,13 +415,10 @@ export default async function Home({
           </p>
 
           <div className="mt-9 flex flex-col gap-3 sm:flex-row">
-            <a
-              href={`${base}/analyze`}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-300 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-cyan-200"
-            >
+            <PrimaryButton href={`${base}/analyze`}>
               {c.primaryCta}
               <ArrowRight size={17} />
-            </a>
+            </PrimaryButton>
 
             <a
               href={`${base}/how-it-works`}
@@ -606,13 +604,13 @@ export default async function Home({
             {c.finalBody}
           </p>
 
-          <a
+          <PrimaryButton
             href={`${base}/analyze`}
-            className="mt-8 inline-flex items-center gap-2 rounded-xl bg-cyan-300 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-cyan-200"
+            className="mt-8"
           >
             {c.finalCta}
             <ArrowRight size={17} />
-          </a>
+          </PrimaryButton>
         </div>
       </section>
 
