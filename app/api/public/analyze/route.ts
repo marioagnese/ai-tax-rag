@@ -306,7 +306,14 @@ export async function POST(req: NextRequest) {
           code: "PUBLIC_LIMIT_REACHED",
           error:
             "Your free public analysis has already been used today. Create an account to continue.",
-          meta,
+          meta: meta
+            ? {
+                limit: meta.limit,
+                used: meta.used,
+                remaining: meta.remaining,
+                resetAt: meta.resetAt,
+              }
+            : undefined,
         },
         { status: 429 }
       );
