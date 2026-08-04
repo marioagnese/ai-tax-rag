@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
+import { trackEvent } from "../../../src/lib/analytics/ga";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -235,6 +236,11 @@ export default function PublicAnalyzePage() {
     const trimmed = question.trim();
 
     if (!trimmed || loading) return;
+
+    trackEvent("public_analysis_submitted", {
+      locale,
+      question_length: trimmed.length,
+    });
 
     setLoading(true);
     setError("");
