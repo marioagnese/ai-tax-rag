@@ -270,6 +270,10 @@ export default function PublicAnalyzePage() {
           response.status === 429 ||
           data.code === "PUBLIC_LIMIT_REACHED"
         ) {
+          trackEvent("public_analysis_limit_reached", {
+            locale,
+          });
+
           throw new Error(c.limit);
         }
 
@@ -277,6 +281,13 @@ export default function PublicAnalyzePage() {
           data.error || "The analysis could not be completed."
         );
       }
+
+      trackEvent("public_analysis_completed", {
+        locale,
+        confidence: data.consensus?.confidence,
+        models_succeeded: data.meta?.succeeded,
+        runtime_ms: data.meta?.runtimeMs ?? undefined,
+      });
 
       setResult(data);
     } catch (err) {
