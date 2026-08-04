@@ -1,5 +1,6 @@
 import "./globals.css";
 import type { Metadata } from "next";
+import Script from "next/script";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages, setRequestLocale } from "next-intl/server";
 
@@ -30,6 +31,19 @@ export default async function LocaleLayout({
   return (
     <html lang={locale}>
       <body>
+        <Script
+          src="https://www.googletagmanager.com/gtag/js?id=G-Q3FNYKW6RS"
+          strategy="afterInteractive"
+        />
+        <Script id="google-analytics" strategy="afterInteractive">
+          {`
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+            gtag('config', 'G-Q3FNYKW6RS');
+          `}
+        </Script>
+
         <NextIntlClientProvider locale={locale} messages={messages}>
           {children}
 
