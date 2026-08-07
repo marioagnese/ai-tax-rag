@@ -625,10 +625,18 @@ export default function PublicAnalyzePage() {
               </div>
 
               <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-                <PrimaryButton href={`/${locale}/signup`}>
-                  {c.signup}
-                  <ArrowRight size={17} />
-                </PrimaryButton>
+                <div
+                  onClick={() =>
+                    trackEvent("public_signup_clicked", {
+                      locale,
+                    })
+                  }
+                >
+                  <PrimaryButton href={`/${locale}/signup`}>
+                    {c.signup}
+                    <ArrowRight size={17} />
+                  </PrimaryButton>
+                </div>
 
                 <Link
                   href={`/${locale}/signin`}
