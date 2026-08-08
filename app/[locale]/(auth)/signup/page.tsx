@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { firebaseClientConfigured, getFirebaseAuth } from "@/src/lib/firebase/client";
+import { trackEvent } from "@/src/lib/analytics/ga";
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -221,6 +222,10 @@ export default function SignupPage() {
         }
 
         await saveProfileIfMissing(userCred.user.uid, userCred.user.email || email.trim());
+
+        trackEvent("signup_completed", {
+          method: "email",
+        });
 
         try {
           await sendEmailVerification(userCred.user);
