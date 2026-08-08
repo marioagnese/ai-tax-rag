@@ -70,9 +70,9 @@ const COPY: Record<Locale, Copy> = {
     title2: "Trust the consensus.",
     subtitle:
       "TaxAiPro cross-checks leading AI models, challenges conflicting answers, and produces a conservative tax research draft with assumptions, caveats, missing facts, and areas of agreement.",
-    primaryCta: "Start a CrossCheck",
-    secondaryCta: "See how it works",
-    noCard: "Built for professional review—not blind reliance.",
+    primaryCta: "Try TaxAiPro Free",
+    secondaryCta: "Sign in",
+    noCard: "One complimentary analysis. No account required.",
     questionLabel: "Tax question",
     question:
       "What are the U.S. tax consequences of a Brazilian subsidiary distributing previously taxed earnings?",
@@ -155,9 +155,9 @@ const COPY: Record<Locale, Copy> = {
     title2: "Confía en el consenso.",
     subtitle:
       "TaxAiPro compara los principales modelos de IA, cuestiona respuestas contradictorias y produce un borrador tributario conservador con premisas, salvedades, hechos faltantes y áreas de acuerdo.",
-    primaryCta: "Iniciar CrossCheck",
-    secondaryCta: "Ver cómo funciona",
-    noCard: "Creado para revisión profesional, no para confianza ciega.",
+    primaryCta: "Probar TaxAiPro Gratis",
+    secondaryCta: "Ingresar",
+    noCard: "Un análisis gratuito. No se requiere cuenta.",
     questionLabel: "Pregunta tributaria",
     question:
       "¿Cuáles son las consecuencias fiscales en EE. UU. de una distribución de utilidades previamente gravadas por una subsidiaria brasileña?",
@@ -240,9 +240,9 @@ const COPY: Record<Locale, Copy> = {
     title2: "Confie no consenso.",
     subtitle:
       "O TaxAiPro cruza os principais modelos de IA, desafia respostas conflitantes e produz uma análise tributária conservadora com premissas, ressalvas, fatos ausentes e pontos de concordância.",
-    primaryCta: "Iniciar CrossCheck",
-    secondaryCta: "Ver como funciona",
-    noCard: "Criado para revisão profissional, não para confiança cega.",
+    primaryCta: "Experimentar o TaxAiPro Grátis",
+    secondaryCta: "Entrar",
+    noCard: "Uma análise gratuita. Não é necessário criar uma conta.",
     questionLabel: "Questão tributária",
     question:
       "Quais são as consequências fiscais nos EUA de uma subsidiária brasileira distribuir lucros previamente tributados?",
@@ -421,7 +421,7 @@ export default async function Home({
             </PrimaryButton>
 
             <a
-              href={`${base}/how-it-works`}
+              href={`${base}/signin`}
               className="inline-flex items-center justify-center rounded-xl border border-white/14 bg-white/[0.035] px-5 py-3.5 text-sm font-semibold text-white/88 transition hover:bg-white/8"
             >
               {c.secondaryCta}
