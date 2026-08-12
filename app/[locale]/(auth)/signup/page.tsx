@@ -3,7 +3,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { firebaseClientConfigured, getFirebaseAuth } from "@/src/lib/firebase/client";
 import { trackEvent } from "@/src/lib/analytics/ga";
 import {
@@ -87,6 +87,7 @@ function clearPendingCorp() {
 
 export default function SignupPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const configured = useMemo(() => firebaseClientConfigured(), []);
   const auth = useMemo(() => (configured ? getFirebaseAuth() : null), [configured]);
@@ -140,16 +141,17 @@ export default function SignupPage() {
   const disable = busy || !configured;
 
   useEffect(() => {
+    const requestedMode = searchParams.get("mode");
+    const requestedHash = window.location.hash.replace("#", "").trim().toLowerCase();
+
+    setMode(requestedMode === "login" || requestedHash === "login" ? "login" : "signup");
+  }, [searchParams]);
+
+  useEffect(() => {
     try {
       const sp = new URLSearchParams(window.location.search);
       const corp = sp.get("corp");
       const invite = sp.get("invite");
-      const requestedMode = sp.get("mode");
-      const requestedHash = window.location.hash.replace("#", "").trim().toLowerCase();
-
-      if (requestedMode === "login" || requestedHash === "login") {
-        setMode("login");
-      }
 
       if (corp === "1" && invite) {
         setPendingCorp(invite);
