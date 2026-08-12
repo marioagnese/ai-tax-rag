@@ -199,8 +199,6 @@ export default function SignupPage() {
 
     if (mode === "signup") {
       if (!fullName.trim()) return setError("Please enter your full name.");
-      if (!company.trim()) return setError("Please enter your company.");
-      if (!roleTitle.trim()) return setError("Please enter your role/title.");
       if (!accepted) return setError("Please accept the consulting-only disclaimer to continue.");
     }
 
@@ -346,31 +344,13 @@ export default function SignupPage() {
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-4">
               {mode === "signup" ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
                   <input
                     className="w-full h-11 rounded-2xl bg-black/35 border border-white/10 px-4 outline-none focus:border-white/30"
                     placeholder="Full name"
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
                     autoComplete="name"
-                  />
-                  <input
-                    className="w-full h-11 rounded-2xl bg-black/35 border border-white/10 px-4 outline-none focus:border-white/30"
-                    placeholder="Company"
-                    value={company}
-                    onChange={(e) => setCompany(e.target.value)}
-                  />
-                  <input
-                    className="w-full h-11 rounded-2xl bg-black/35 border border-white/10 px-4 outline-none focus:border-white/30"
-                    placeholder="Role / Title"
-                    value={roleTitle}
-                    onChange={(e) => setRoleTitle(e.target.value)}
-                  />
-                  <input
-                    className="w-full h-11 rounded-2xl bg-black/35 border border-white/10 px-4 outline-none focus:border-white/30"
-                    placeholder="Country"
-                    value={country}
-                    onChange={(e) => setCountry(e.target.value)}
                   />
                 </div>
               ) : null}
