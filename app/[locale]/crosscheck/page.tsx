@@ -893,7 +893,7 @@ export default function CrosscheckV2Page() {
   const [followups, setFollowups] = useState<string[]>([]);
   const [disagreements, setDisagreements] = useState<string[]>([]);
   const [providers, setProviders] = useState<ProviderOutput[]>([]);
-  const DEFAULT_PROMPT = "Does a US company purchasing goods FOB from Brazil create permanent establishment risk?";
+  const DEFAULT_PROMPT = "Does a U.S. company purchasing goods FOB from Brazil create PE or other taxable-presence risk in Brazil?";
 const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
 const [hasRun, setHasRun] = useState(false);
 

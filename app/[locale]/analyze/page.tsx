@@ -53,9 +53,9 @@ const COPY = {
     subtitle:
       "TaxAiPro will challenge multiple AI models and prepare one conservative consensus. No registration required.",
     placeholder:
-      "Example: Does a U.S. company purchasing goods FOB from Brazil create permanent establishment risk?",
+      "Example: Does a U.S. company purchasing goods FOB from Brazil create PE or other taxable-presence risk in Brazil?",
     examples: [
-      "Does a U.S. company purchasing goods FOB from Brazil create permanent establishment risk?",
+      "Does a U.S. company purchasing goods FOB from Brazil create PE or other taxable-presence risk in Brazil?",
       "What are the VAT consequences of exporting goods from Mexico?",
       "How are Brazilian CFC earnings treated for U.S. tax purposes?",
     ],
@@ -93,9 +93,9 @@ const COPY = {
     subtitle:
       "TaxAiPro comparará múltiples modelos de IA y preparará un consenso conservador. No se requiere registro.",
     placeholder:
-      "Ejemplo: ¿Una empresa estadounidense que compra bienes FOB de Brasil crea riesgo de establecimiento permanente?",
+      "Ejemplo: ¿Una empresa estadounidense que compra bienes FOB de Brasil crea riesgo de establecimiento permanente u otra presencia fiscal en Brasil?",
     examples: [
-      "¿Una empresa estadounidense que compra bienes FOB de Brasil crea riesgo de establecimiento permanente?",
+      "¿Una empresa estadounidense que compra bienes FOB de Brasil crea riesgo de establecimiento permanente u otra presencia fiscal en Brasil?",
       "¿Cuáles son las consecuencias de IVA al exportar bienes desde México?",
       "¿Cómo se tratan las utilidades CFC brasileñas para fines fiscales de EE. UU.?",
     ],
@@ -133,9 +133,9 @@ const COPY = {
     subtitle:
       "O TaxAiPro desafiará vários modelos de IA e preparará um consenso conservador. Nenhum cadastro é necessário.",
     placeholder:
-      "Exemplo: Uma empresa americana que compra mercadorias FOB do Brasil cria risco de estabelecimento permanente?",
+      "Exemplo: Uma empresa dos EUA que compra mercadorias FOB do Brasil cria risco de estabelecimento permanente ou outra presença tributável no Brasil?",
     examples: [
-      "Uma empresa americana que compra mercadorias FOB do Brasil cria risco de estabelecimento permanente?",
+      "Uma empresa dos EUA que compra mercadorias FOB do Brasil cria risco de estabelecimento permanente ou outra presença tributável no Brasil?",
       "Quais são as consequências de IVA na exportação de mercadorias do México?",
       "Como os lucros de uma CFC brasileira são tratados para fins fiscais nos EUA?",
     ],
