@@ -1245,6 +1245,810 @@ function protectBlockingParentIssues(
   });
 }
 
+type LedgerRelation =
+  | "same_issue_aligned"
+  | "same_issue_conflicting"
+  | "parent_child"
+  | "unrelated";
+
+type LedgerRelationJson = {
+  relations?: Array<{
+    issue_a?: string;
+    issue_b?: string;
+    relation?: string;
+    reasoning?: string;
+  }>;
+};
+
+function issueResolutionDescriptor(
+  issue: IssueResolution
+): string {
+  return [
+    issue.issue_label,
+    issue.issue_statement,
+    issue.resolved_position || "",
+    ...issue.provider_positions.map(
+      (position) => position.position
+    ),
+    ...issue.disagreements,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function issueResolutionSemanticTokens(
+  issue: IssueResolution
+): string[] {
+  return issueIdentityTokens(
+    issueResolutionDescriptor(issue)
+  );
+}
+
+function issueResolutionNegationSignals(
+  issue: IssueResolution
+): Set<string> {
+  const text = normalizeIssueIdentityText(
+    issueResolutionDescriptor(issue)
+  );
+
+  const signals = new Set<string>();
+
+  const patterns: Array<[RegExp, string]> = [
+    [/\bno\b|\bnot\b|\bnone\b|\bwithout\b/, "negative"],
+    [/\btaxable\b/, "taxable"],
+    [/\bnontaxable\b|\bnon taxable\b|\btax free\b/, "nontaxable"],
+    [/\bapplies\b|\bapplicable\b/, "applies"],
+    [/\bdoes not apply\b|\bnot applicable\b|\bunavailable\b/, "does_not_apply"],
+    [/\brequired\b|\bmust\b/, "required"],
+    [/\bnot required\b|\boptional\b/, "not_required"],
+    [/\ballowed\b|\bavailable\b|\beligible\b/, "allowed"],
+    [/\bdisallowed\b|\bineligible\b|\bnot available\b/, "disallowed"],
+  ];
+
+  for (const [pattern, signal] of patterns) {
+    if (pattern.test(text)) signals.add(signal);
+  }
+
+  return signals;
+}
+
+function hasOpposingLegalSignals(
+  a: IssueResolution,
+  b: IssueResolution
+): boolean {
+  const aa = issueResolutionNegationSignals(a);
+  const bb = issueResolutionNegationSignals(b);
+
+  const opposingPairs: Array<[string, string]> = [
+    ["taxable", "nontaxable"],
+    ["applies", "does_not_apply"],
+    ["required", "not_required"],
+    ["allowed", "disallowed"],
+  ];
+
+  return opposingPairs.some(
+    ([left, right]) =>
+      (aa.has(left) && bb.has(right)) ||
+      (aa.has(right) && bb.has(left))
+  );
+}
+
+function sharedMaterialNumbers(
+  a: IssueResolution,
+  b: IssueResolution
+): number {
+  const extract = (value: string): Set<string> => {
+    const matches =
+      value.match(/\b\d+(?:\.\d+)?%|\$?\d+(?:,\d{3})*(?:\.\d+)?[mkb]?\b/gi) ||
+      [];
+
+    return new Set(
+      matches.map((x) =>
+        x.toLowerCase().replace(/,/g, "")
+      )
+    );
+  };
+
+  const aa = extract(issueResolutionDescriptor(a));
+  const bb = extract(issueResolutionDescriptor(b));
+
+  let shared = 0;
+
+  for (const value of aa) {
+    if (bb.has(value)) shared++;
+  }
+
+  return shared;
+}
+
+function deterministicLedgerRelation(
+  a: IssueResolution,
+  b: IssueResolution
+): LedgerRelation {
+  if (a.issue_id === b.issue_id) {
+    return "same_issue_aligned";
+  }
+
+  const ai = issueResolutionIdentity(a);
+  const bi = issueResolutionIdentity(b);
+
+  const tokensA =
+    issueResolutionSemanticTokens(a);
+  const tokensB =
+    issueResolutionSemanticTokens(b);
+
+  const overlap = tokenOverlapRatio(
+    tokensA,
+    tokensB
+  );
+
+  const jaccard = tokenJaccard(
+    tokensA,
+    tokensB
+  );
+
+  const sharedAnchor = shareIssueAnchor(
+    ai.legalAnchors,
+    bi.legalAnchors
+  );
+
+  const sharedNumbers =
+    sharedMaterialNumbers(a, b);
+
+  const opposing =
+    hasOpposingLegalSignals(a, b);
+
+  // Strongly same controlling question.
+  const sameQuestion =
+    (
+      sharedAnchor &&
+      overlap >= 0.40 &&
+      jaccard >= 0.18
+    ) ||
+    (
+      overlap >= 0.78 &&
+      jaccard >= 0.44
+    ) ||
+    (
+      sharedNumbers > 0 &&
+      overlap >= 0.58 &&
+      jaccard >= 0.30
+    );
+
+  if (sameQuestion && opposing) {
+    return "same_issue_conflicting";
+  }
+
+  if (sameQuestion) {
+    return "same_issue_aligned";
+  }
+
+  // Parent-child relation: high containment but lower symmetric similarity.
+  if (
+    overlap >= 0.72 &&
+    jaccard >= 0.26
+  ) {
+    return "parent_child";
+  }
+
+  return "unrelated";
+}
+
+function normalizeLedgerRelation(
+  value: unknown
+): LedgerRelation {
+  const v = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  if (
+    v === "same_issue_conflicting" ||
+    v === "parent_child" ||
+    v === "same_issue_aligned"
+  ) {
+    return v;
+  }
+
+  return "unrelated";
+}
+
+async function classifyLedgerRelationsWithOpenAI(args: {
+  input: CrosscheckInput;
+  issues: IssueResolution[];
+}): Promise<Map<string, LedgerRelation> | null> {
+  const apiKey = env("OPENAI_API_KEY");
+  if (!apiKey || args.issues.length < 2) {
+    return null;
+  }
+
+  const model =
+    env("OPENAI_LEDGER_RELATION_MODEL") ||
+    env("OPENAI_ISSUE_CLUSTER_MODEL") ||
+    env("OPENAI_ISSUE_ADJUDICATOR_MODEL") ||
+    env("OPENAI_MODEL") ||
+    "gpt-4.1-mini";
+
+  const client = new OpenAI({ apiKey });
+
+  const compactIssues = args.issues.map(
+    (issue) => ({
+      issue_id: issue.issue_id,
+      issue_label: issue.issue_label,
+      issue_statement: issue.issue_statement,
+      status: issue.status,
+      resolved_position:
+        issue.resolved_position || null,
+      provider_positions:
+        issue.provider_positions.map(
+          (position) => position.position
+        ),
+      disagreements:
+        issue.disagreements,
+    })
+  );
+
+  const system = [
+    "You are a ledger-integrity classifier inside a professional tax analysis engine.",
+    "You are NOT deciding tax law.",
+    "You are NOT choosing the correct provider.",
+    "",
+    "Classify whether pairs of ledger issues represent:",
+    "- same_issue_aligned: same controlling legal/mechanical question with materially compatible positions;",
+    "- same_issue_conflicting: same controlling question but materially incompatible outcomes;",
+    "- parent_child: one is a narrower component of the other's controlling question;",
+    "- unrelated: genuinely distinct issues.",
+    "",
+    "Important:",
+    "Do not treat different wording as different issues merely because providers used different labels.",
+    "Taxable vs nontaxable, applies vs does-not-apply, filing category A vs filing category B, different rates, different numerical liabilities, or mutually exclusive characterizations of the same transaction are SAME ISSUE CONFLICTS.",
+    "Do not merge merely because two issues involve the same taxpayer.",
+    "",
+    "Return STRICT JSON ONLY:",
+    "{",
+    '  "relations": [',
+    "    {",
+    '      "issue_a": string,',
+    '      "issue_b": string,',
+    '      "relation": "same_issue_aligned" | "same_issue_conflicting" | "parent_child" | "unrelated",',
+    '      "reasoning": string',
+    "    }",
+    "  ]",
+    "}",
+  ].join("\n");
+
+  const user = [
+    args.input.jurisdiction
+      ? `Jurisdiction: ${args.input.jurisdiction}`
+      : "",
+    `Question:\n${args.input.question}`,
+    args.input.facts
+      ? `Facts:\n${args.input.facts}`
+      : "",
+    "",
+    "LEDGER ISSUES:",
+    JSON.stringify(compactIssues, null, 2),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  try {
+    const response =
+      await client.chat.completions.create({
+        model,
+        temperature: 0,
+        messages: [
+          {
+            role: "system",
+            content: system,
+          },
+          {
+            role: "user",
+            content: user,
+          },
+        ],
+        max_tokens: 2600,
+      });
+
+    const raw =
+      response.choices?.[0]?.message
+        ?.content || "{}";
+
+    const parsed =
+      safeJsonParse<LedgerRelationJson>(
+        extractJsonObject(raw)
+      );
+
+    if (
+      !parsed?.relations ||
+      !Array.isArray(parsed.relations)
+    ) {
+      return null;
+    }
+
+    const validIds = new Set(
+      args.issues.map(
+        (issue) => issue.issue_id
+      )
+    );
+
+    const relations =
+      new Map<string, LedgerRelation>();
+
+    for (const relation of parsed.relations) {
+      const a = String(
+        relation.issue_a || ""
+      ).trim();
+
+      const b = String(
+        relation.issue_b || ""
+      ).trim();
+
+      if (
+        !validIds.has(a) ||
+        !validIds.has(b) ||
+        a === b
+      ) {
+        continue;
+      }
+
+      const key =
+        [a, b].sort().join("::");
+
+      relations.set(
+        key,
+        normalizeLedgerRelation(
+          relation.relation
+        )
+      );
+    }
+
+    return relations;
+  } catch {
+    return null;
+  }
+}
+
+function relationKey(
+  a: IssueResolution,
+  b: IssueResolution
+): string {
+  return [a.issue_id, b.issue_id]
+    .sort()
+    .join("::");
+}
+
+function mergeIssueFamily(
+  members: IssueResolution[],
+  forceConflict: boolean
+): IssueResolution {
+  const base = members[0];
+
+  const providerPositions = Array.from(
+    new Map(
+      members
+        .flatMap(
+          (issue) =>
+            issue.provider_positions
+        )
+        .map((position) => [
+          [
+            position.provider,
+            position.model,
+            normalizeIssueIdentityText(
+              position.position
+            ),
+          ].join("::"),
+          position,
+        ])
+    ).values()
+  );
+
+  const statuses = members.map(
+    (issue) => issue.status
+  );
+
+  const resolvedPositions = uniq(
+    members
+      .map(
+        (issue) =>
+          issue.resolved_position || ""
+      )
+      .filter(Boolean)
+  );
+
+  let status: ResolutionStatus;
+
+  if (
+    forceConflict ||
+    statuses.includes("unresolved") ||
+    resolvedPositions.length > 1
+  ) {
+    status = "unresolved";
+  } else if (
+    statuses.includes("fact_dependent")
+  ) {
+    status = "fact_dependent";
+  } else if (
+    statuses.every(
+      (status) => status === "verified"
+    )
+  ) {
+    status = "verified";
+  } else if (
+    statuses.every(
+      (status) => status === "rejected"
+    )
+  ) {
+    status = "rejected";
+  } else {
+    status = "supported";
+  }
+
+  const authorityValidations = members
+    .map(
+      (issue) =>
+        issue.authority_validation
+    )
+    .filter(Boolean);
+
+  const authorityValidation =
+    authorityValidations.find(
+      (validation) =>
+        validation?.verdict ===
+        "contradicted"
+    ) ||
+    authorityValidations.find(
+      (validation) =>
+        validation?.verdict ===
+        "insufficient"
+    ) ||
+    authorityValidations[0];
+
+  return {
+    ...base,
+    issue_label:
+      canonicalIssueLabel(
+        members.map((issue) => ({
+          claim_id: issue.issue_id,
+          provider: "",
+          model: "",
+          statement:
+            issue.issue_statement,
+          topic: issue.issue_label,
+          confidence:
+            issue.confidence,
+          applies_to: [],
+        }))
+      ),
+    provider_positions:
+      providerPositions,
+    status,
+    resolved_position:
+      status === "verified" &&
+      resolvedPositions.length === 1
+        ? resolvedPositions[0]
+        : status === "supported" &&
+          resolvedPositions.length === 1
+        ? resolvedPositions[0]
+        : undefined,
+    reasoning:
+      uniq(
+        members
+          .map(
+            (issue) => issue.reasoning
+          )
+          .filter(Boolean)
+      ).join(" | ") +
+      " | Phase 3I-Z ledger-family integrity merged related controlling issues before final synthesis.",
+    controlling:
+      members.some(
+        (issue) => issue.controlling
+      ),
+    missing_facts: uniq(
+      members.flatMap(
+        (issue) => issue.missing_facts
+      )
+    ),
+    disagreements: uniq([
+      ...members.flatMap(
+        (issue) => issue.disagreements
+      ),
+      ...(status === "unresolved"
+        ? providerPositions.map(
+            (position) =>
+              position.position
+          )
+        : []),
+    ]),
+    rejected_positions: uniq(
+      members.flatMap(
+        (issue) =>
+          issue.rejected_positions
+      )
+    ),
+    confidence:
+      status === "verified"
+        ? "high"
+        : status === "supported"
+        ? "medium"
+        : "low",
+    ...(authorityValidation
+      ? {
+          authority_validation:
+            authorityValidation,
+        }
+      : {}),
+  };
+}
+
+function assertLedgerInvariants(
+  issues: IssueResolution[]
+): {
+  ok: boolean;
+  violations: string[];
+} {
+  const violations: string[] = [];
+
+  const ids = new Set<string>();
+
+  for (const issue of issues) {
+    if (ids.has(issue.issue_id)) {
+      violations.push(
+        `duplicate issue_id: ${issue.issue_id}`
+      );
+    }
+
+    ids.add(issue.issue_id);
+
+    if (
+      issue.status === "unresolved" &&
+      issue.resolved_position
+    ) {
+      violations.push(
+        `unresolved issue has resolved_position: ${issue.issue_id}`
+      );
+    }
+
+    if (
+      issue.status === "rejected" &&
+      issue.resolved_position
+    ) {
+      violations.push(
+        `rejected issue has resolved_position: ${issue.issue_id}`
+      );
+    }
+
+    if (
+      issue.status === "verified" &&
+      issue.authority_validation &&
+      issue.authority_validation.verdict !==
+        "verified"
+    ) {
+      violations.push(
+        `verified issue lacks verified authority status: ${issue.issue_id}`
+      );
+    }
+  }
+
+  return {
+    ok: violations.length === 0,
+    violations,
+  };
+}
+
+function failClosedLedgerOnInvariantViolation(
+  issues: IssueResolution[],
+  violations: string[]
+): IssueResolution[] {
+  if (!violations.length) return issues;
+
+  return issues.map((issue) => {
+    if (!issue.controlling) {
+      return issue;
+    }
+
+    if (issue.status === "verified") {
+      return issue;
+    }
+
+    return {
+      ...issue,
+      status: "unresolved",
+      resolved_position: undefined,
+      reasoning:
+        `${issue.reasoning} | Final ledger invariant check detected an integrity violation elsewhere in the controlling ledger. This issue is not allowed to become reliance-ready until ledger integrity is restored.`,
+      disagreements: uniq([
+        ...issue.disagreements,
+        ...violations,
+      ]),
+      confidence: "low",
+    };
+  });
+}
+
+async function enforceNuclearLedgerIntegrity(args: {
+  input: CrosscheckInput;
+  issues: IssueResolution[];
+}): Promise<IssueResolution[]> {
+  if (!args.issues.length) return [];
+
+  let issues =
+    enforceCanonicalLedgerIntegrity(
+      args.issues
+    );
+
+  const aiRelations =
+    await classifyLedgerRelationsWithOpenAI({
+      input: args.input,
+      issues,
+    }).catch(() => null);
+
+  const parent = issues.map(
+    (_, index) => index
+  );
+
+  const familyConflict =
+    new Map<number, boolean>();
+
+  const find = (index: number): number => {
+    let current = index;
+
+    while (
+      parent[current] !== current
+    ) {
+      parent[current] =
+        parent[parent[current]];
+
+      current = parent[current];
+    }
+
+    return current;
+  };
+
+  const union = (
+    a: number,
+    b: number,
+    conflict: boolean
+  ): void => {
+    const ra = find(a);
+    const rb = find(b);
+
+    if (ra === rb) {
+      if (conflict) {
+        familyConflict.set(
+          ra,
+          true
+        );
+      }
+      return;
+    }
+
+    parent[rb] = ra;
+
+    familyConflict.set(
+      ra,
+      Boolean(
+        conflict ||
+        familyConflict.get(ra) ||
+        familyConflict.get(rb)
+      )
+    );
+  };
+
+  for (
+    let i = 0;
+    i < issues.length;
+    i++
+  ) {
+    for (
+      let j = i + 1;
+      j < issues.length;
+      j++
+    ) {
+      const deterministic =
+        deterministicLedgerRelation(
+          issues[i],
+          issues[j]
+        );
+
+      const ai =
+        aiRelations?.get(
+          relationKey(
+            issues[i],
+            issues[j]
+          )
+        );
+
+      // Conservative relation precedence.
+      const relation: LedgerRelation =
+        ai ===
+          "same_issue_conflicting" ||
+        deterministic ===
+          "same_issue_conflicting"
+          ? "same_issue_conflicting"
+          : ai ===
+              "same_issue_aligned" ||
+            deterministic ===
+              "same_issue_aligned"
+          ? "same_issue_aligned"
+          : ai === "parent_child" ||
+            deterministic ===
+              "parent_child"
+          ? "parent_child"
+          : "unrelated";
+
+      if (
+        relation ===
+          "same_issue_conflicting"
+      ) {
+        union(i, j, true);
+      } else if (
+        relation ===
+          "same_issue_aligned"
+      ) {
+        union(i, j, false);
+      }
+    }
+  }
+
+  const families =
+    new Map<
+      number,
+      IssueResolution[]
+    >();
+
+  issues.forEach(
+    (issue, index) => {
+      const root = find(index);
+
+      const bucket =
+        families.get(root) || [];
+
+      bucket.push(issue);
+      families.set(root, bucket);
+    }
+  );
+
+  issues = Array.from(
+    families.entries()
+  ).map(([root, members]) =>
+    mergeIssueFamily(
+      members,
+      Boolean(
+        familyConflict.get(
+          find(root)
+        )
+      )
+    )
+  );
+
+  // Apply parent-child blocking again after family merging.
+  issues =
+    protectBlockingParentIssues(
+      issues
+    );
+
+  issues =
+    mergeDuplicateIssueResolutions(
+      issues
+    );
+
+  const invariant =
+    assertLedgerInvariants(
+      issues
+    );
+
+  if (!invariant.ok) {
+    issues =
+      failClosedLedgerOnInvariantViolation(
+        issues,
+        invariant.violations
+      );
+  }
+
+  return issues;
+}
+
 function enforceCanonicalLedgerIntegrity(
   issues: IssueResolution[]
 ): IssueResolution[] {
@@ -5341,7 +6145,14 @@ export async function runCrosscheck(
   // and prevent a merely-supported subissue from settling a closely related
   // unresolved controlling issue.
   issueResolutions =
-    enforceCanonicalLedgerIntegrity(issueResolutions);
+    await enforceNuclearLedgerIntegrity({
+      input: workingInput,
+      issues: issueResolutions,
+    }).catch(() =>
+      enforceCanonicalLedgerIntegrity(
+        issueResolutions
+      )
+    );
 
   const survivingClaims = buildSurvivingClaims(reasoningConflictMatrix);
   reasoningArtifacts = filterUnstableClaimsFromArtifacts(
