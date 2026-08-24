@@ -32,6 +32,61 @@ export type ProviderOutput = {
   usage?: any;
 };
 
+export type ResolutionStatus =
+  | "verified"
+  | "supported"
+  | "fact_dependent"
+  | "unresolved"
+  | "rejected";
+
+export type IssueProviderPosition = {
+  provider: string;
+  model: string;
+  position: string;
+  confidence?: "low" | "medium" | "high";
+};
+
+export type IssueAuthorityCitation = {
+  cite: string;
+  score: number;
+  country?: string | null;
+  jurisdiction?: string | null;
+  law_code?: string | null;
+  article?: string | null;
+  section?: string | null;
+  source_type?: string | null;
+  citation_label?: string | null;
+  source_url?: string | null;
+  page_start?: number | null;
+  page_end?: number | null;
+};
+
+export type IssueAuthorityValidation = {
+  verdict:
+    | "verified"
+    | "contradicted"
+    | "fact_dependent"
+    | "insufficient";
+  reasoning: string;
+  citations: IssueAuthorityCitation[];
+};
+
+export type IssueResolution = {
+  issue_id: string;
+  issue_label: string;
+  issue_statement: string;
+  provider_positions: IssueProviderPosition[];
+  status: ResolutionStatus;
+  resolved_position?: string;
+  reasoning: string;
+  controlling: boolean;
+  missing_facts: string[];
+  disagreements: string[];
+  rejected_positions: string[];
+  confidence: "low" | "medium" | "high";
+  authority_validation?: IssueAuthorityValidation;
+};
+
 export type CrosscheckResult = {
   ok: boolean;
   meta: {
@@ -46,6 +101,7 @@ export type CrosscheckResult = {
     followups: string[];
     confidence: "low" | "medium" | "high";
     disagreements: string[];
+    issue_resolutions?: IssueResolution[];
   };
   providers: ProviderOutput[];
 };

@@ -1,6 +1,7 @@
 import type {
   CrosscheckInput,
   CrosscheckResult,
+  IssueResolution,
   ProviderCall,
   ProviderOutput,
 } from "./types";
@@ -9,6 +10,10 @@ import { callOpenRouter } from "./providers/openrouter";
 import { callGemini } from "./providers/gemini";
 import { callAnthropic } from "./providers/anthropic";
 import OpenAI from "openai";
+import {
+  formatAuthorityContext,
+  retrieveAuthority,
+} from "../retrieval/authority";
 
 function env(name: string): string {
   return process.env[name] || "";
@@ -421,6 +426,736 @@ function emptyConflictMatrix(): ConflictMatrix {
     disputed_claims: [],
     missing_or_underdeveloped_issues: [],
   };
+}
+
+function issueId(prefix: string, value: string, index: number): string {
+  const slug = String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 60);
+
+  return `${prefix}_${slug || index + 1}`;
+}
+
+function buildInitialIssueResolutionLedger(
+  matrix: ConflictMatrix
+): IssueResolution[] {
+  const ledger: IssueResolution[] = [];
+
+  matrix.common_claims.forEach((claim, index) => {
+    const statement = String(claim || "").trim();
+    if (!statement) return;
+
+    ledger.push({
+      issue_id: issueId("common", statement, index),
+      issue_label: statement,
+      issue_statement: statement,
+      provider_positions: [],
+      status: "supported",
+      resolved_position: statement,
+      reasoning:
+        "Multiple provider analyses converged on this proposition and the conflict matrix did not identify a material dispute. Independent validation may still upgrade or downgrade this status.",
+      controlling: false,
+      missing_facts: [],
+      disagreements: [],
+      rejected_positions: [],
+      confidence: "medium",
+    });
+  });
+
+  matrix.disputed_claims.forEach((claim, index) => {
+    const statement = String(claim.claim_statement || "").trim();
+    if (!statement) return;
+
+    ledger.push({
+      issue_id:
+        String(claim.claim_id || "").trim() ||
+        issueId("disputed", statement, index),
+      issue_label: statement,
+      issue_statement: statement,
+      provider_positions: claim.provider_positions.map((position) => ({
+        provider: position.provider,
+        model: position.model,
+        position: position.position,
+        confidence: position.confidence,
+      })),
+      status: "unresolved",
+      reasoning:
+        String(claim.why_controlling || "").trim() ||
+        "The providers materially disagree on this proposition. It must not be resolved by vote, repetition, or prose blending.",
+      controlling: true,
+      missing_facts: [],
+      disagreements: claim.provider_positions
+        .map((position) => position.position)
+        .filter(Boolean),
+      rejected_positions: [],
+      confidence: "low",
+    });
+  });
+
+  matrix.missing_or_underdeveloped_issues.forEach((issue, index) => {
+    const statement = String(issue || "").trim();
+    if (!statement) return;
+
+    ledger.push({
+      issue_id: issueId("missing", statement, index),
+      issue_label: statement,
+      issue_statement: statement,
+      provider_positions: [],
+      status: "fact_dependent",
+      reasoning:
+        "The cross-model review identified this issue as missing or insufficiently developed. The final treatment depends on additional facts or analysis.",
+      controlling: true,
+      missing_facts: [statement],
+      disagreements: [],
+      rejected_positions: [],
+      confidence: "low",
+    });
+  });
+
+  return ledger;
+}
+
+function normalizeIssueResolutionLedger(
+  raw: unknown,
+  fallback: IssueResolution[]
+): IssueResolution[] {
+  if (!Array.isArray(raw)) return fallback;
+
+  const fallbackById = new Map(
+    fallback.map((issue) => [issue.issue_id, issue])
+  );
+
+  const allowedStatuses = new Set([
+    "supported",
+    "fact_dependent",
+    "unresolved",
+    "rejected",
+  ]);
+
+  const allowedConfidence = new Set(["low", "medium", "high"]);
+
+  const normalized: IssueResolution[] = [];
+
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+
+    const obj = item as Record<string, unknown>;
+    const issueIdValue = String(obj.issue_id || "").trim();
+
+    if (!issueIdValue) continue;
+
+    const prior = fallbackById.get(issueIdValue);
+    if (!prior) continue;
+
+    const rawStatus = String(obj.status || "").trim().toLowerCase();
+
+    // IMPORTANT:
+    // This adjudication stage does not have an independent authoritative
+    // source layer. It is therefore not allowed to upgrade anything to
+    // "verified". Verification is reserved for a later authority-validation pass.
+    const status =
+      allowedStatuses.has(rawStatus)
+        ? (rawStatus as IssueResolution["status"])
+        : prior.status === "verified"
+        ? "supported"
+        : prior.status;
+
+    const rawConfidence = String(obj.confidence || "")
+      .trim()
+      .toLowerCase();
+
+    const confidence =
+      allowedConfidence.has(rawConfidence)
+        ? (rawConfidence as IssueResolution["confidence"])
+        : prior.confidence;
+
+    const asStrings = (value: unknown): string[] =>
+      Array.isArray(value)
+        ? uniq(value.map((x) => String(x || "").trim()).filter(Boolean))
+        : [];
+
+    normalized.push({
+      ...prior,
+      issue_label:
+        String(obj.issue_label || "").trim() || prior.issue_label,
+      issue_statement:
+        String(obj.issue_statement || "").trim() || prior.issue_statement,
+      status,
+      resolved_position:
+        String(obj.resolved_position || "").trim() ||
+        prior.resolved_position,
+      reasoning:
+        String(obj.reasoning || "").trim() || prior.reasoning,
+      controlling:
+        typeof obj.controlling === "boolean"
+          ? obj.controlling
+          : prior.controlling,
+      missing_facts: asStrings(obj.missing_facts).length
+        ? asStrings(obj.missing_facts)
+        : prior.missing_facts,
+      disagreements: asStrings(obj.disagreements).length
+        ? asStrings(obj.disagreements)
+        : prior.disagreements,
+      rejected_positions: asStrings(obj.rejected_positions),
+      confidence,
+    });
+  }
+
+  const normalizedById = new Map(
+    normalized.map((issue) => [issue.issue_id, issue])
+  );
+
+  // Preserve every original issue even if the adjudicator omitted one.
+  return fallback.map(
+    (issue) => normalizedById.get(issue.issue_id) || issue
+  );
+}
+
+async function adjudicateIssueResolutionLedgerWithOpenAI(args: {
+  input: CrosscheckInput;
+  initialLedger: IssueResolution[];
+  artifacts: ProviderMemoArtifact[];
+  assessments: ProviderAssessment[];
+  conflictMatrix: ConflictMatrix;
+}): Promise<IssueResolution[]> {
+  if (!args.initialLedger.length) return [];
+
+  const apiKey = env("OPENAI_API_KEY");
+  if (!apiKey) return args.initialLedger;
+
+  const model =
+    env("OPENAI_ISSUE_ADJUDICATOR_MODEL") ||
+    env("OPENAI_ADJUDICATOR_MODEL") ||
+    env("OPENAI_SYNTH_MODEL") ||
+    env("OPENAI_MODEL") ||
+    "gpt-4.1-mini";
+
+  const client = new OpenAI({ apiKey });
+
+  const system = [
+    "You are an issue-level tax adjudicator inside a multi-model tax analysis engine.",
+    "You are NOT writing the final memo.",
+    "You must adjudicate each issue independently.",
+    "",
+    "CORE PRINCIPLES",
+    "1. Model agreement is evidence of convergence, not proof of correctness.",
+    "2. Never resolve an issue by majority vote.",
+    "3. A minority position may be controlling if it identifies a legally or mechanically important distinction.",
+    "4. Do not reward fluency, length, confidence, or repetition.",
+    "5. Separate factual ambiguity from legal disagreement.",
+    "6. Preserve branch outcomes where different facts produce different results.",
+    "7. If the supplied facts are insufficient, mark the issue fact_dependent.",
+    "8. If competing positions cannot be safely resolved from the available material, mark the issue unresolved.",
+    "9. You may reject a provider position only when the available material demonstrates that it is internally inconsistent, mechanically incompatible with the stated facts, contradicted by controlling source material supplied in the input, or otherwise unsupportable from the record.",
+    "10. Do not invent statutes, regulations, treaties, authorities, rates, dates, or citations.",
+    "",
+    "STATUS RULES",
+    '- "supported": best available position is materially stronger and no controlling conflict remains, but it has NOT been independently authority-verified.',
+    '- "fact_dependent": resolution turns on one or more missing facts; identify them explicitly.',
+    '- "unresolved": available reasoning does not safely resolve competing legal or mechanical positions.',
+    '- "rejected": the issue proposition itself or identified position is unsupportable from the supplied record.',
+    "",
+    'You MUST NOT return status "verified". Independent authority verification occurs in a later pipeline stage.',
+    "",
+    "For numeric disputes, identify the precise assumption, formula component, classification, or input causing the difference rather than averaging the numbers.",
+    "For scope or classification disputes, identify the controlling factual or legal branch.",
+    "For compliance disputes, distinguish filing requirement, filing category, form mechanics, and substantive tax treatment rather than blending them.",
+    "",
+    "Return STRICT JSON ONLY as an array of issue objects with these keys:",
+    "issue_id, issue_label, issue_statement, status, resolved_position, reasoning, controlling, missing_facts, disagreements, rejected_positions, confidence.",
+  ].join("\\n");
+
+  const user = [
+    args.input.jurisdiction
+      ? `Jurisdiction: ${args.input.jurisdiction}`
+      : "",
+    args.input.facts
+      ? `Facts:\\n${args.input.facts}`
+      : "",
+    args.input.constraints
+      ? `Constraints:\\n${args.input.constraints}`
+      : "",
+    `Question:\\n${args.input.question}`,
+    "",
+    responseLanguageInstruction(args.input),
+    "",
+    "INITIAL ISSUE LEDGER:",
+    JSON.stringify(args.initialLedger, null, 2),
+    "",
+    "CONFLICT MATRIX:",
+    serializeConflictMatrix(args.conflictMatrix),
+    "",
+    "PROVIDER ASSESSMENTS:",
+    serializeAssessments(args.assessments),
+    "",
+    "PROVIDER ARTIFACTS:",
+    serializeProviderArtifacts(args.artifacts),
+  ]
+    .filter(Boolean)
+    .join("\\n\\n");
+
+  const resp = await client.chat.completions.create({
+    model,
+    temperature: 0,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    max_tokens: clampInt(args.input.maxTokens, 1200, 4200, 2600),
+  });
+
+  const raw = resp.choices?.[0]?.message?.content || "[]";
+
+  let parsed: unknown = null;
+
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    const first = raw.indexOf("[");
+    const last = raw.lastIndexOf("]");
+
+    if (first >= 0 && last > first) {
+      try {
+        parsed = JSON.parse(raw.slice(first, last + 1));
+      } catch {
+        parsed = null;
+      }
+    }
+  }
+
+  return normalizeIssueResolutionLedger(
+    parsed,
+    args.initialLedger
+  );
+}
+
+type AuthorityVerificationJson = {
+  verdict?: "verified" | "contradicted" | "fact_dependent" | "insufficient" | string;
+  reasoning?: string;
+  missing_facts?: string[];
+  rejected_positions?: string[];
+  citations?: string[];
+};
+
+function authorityVerificationMaxIssues(): number {
+  return clampInt(
+    Number(env("CROSSCHECK_AUTHORITY_VERIFY_MAX")) || 6,
+    1,
+    12,
+    6
+  );
+}
+
+function authorityVerificationMinScore(): number {
+  const raw = Number(env("CROSSCHECK_AUTHORITY_MIN_SCORE"));
+  if (Number.isFinite(raw) && raw > 0 && raw < 1) return raw;
+  return 0.58;
+}
+
+function authoritySourceIsPrimaryOrOfficial(sourceType: string | null): boolean {
+  const normalized = String(sourceType || "").trim().toLowerCase();
+
+  return (
+    normalized === "statute" ||
+    normalized === "regulation" ||
+    normalized === "administrativeguidance" ||
+    normalized === "caselaw" ||
+    normalized === "treaty"
+  );
+}
+
+function authorityVerificationPriority(issue: IssueResolution): number {
+  let score = 0;
+
+  if (issue.controlling) score += 100;
+
+  if (issue.status === "unresolved") score += 80;
+  else if (issue.status === "fact_dependent") score += 70;
+  else if (issue.status === "supported") score += 60;
+  else if (issue.status === "rejected") score += 40;
+
+  if (issue.provider_positions.length >= 2) score += 20;
+  if (issue.disagreements.length) score += 20;
+
+  return score;
+}
+
+function normalizeAuthorityVerdict(value: unknown):
+  | "verified"
+  | "contradicted"
+  | "fact_dependent"
+  | "insufficient" {
+  const normalized = String(value || "").trim().toLowerCase();
+
+  if (
+    normalized === "verified" ||
+    normalized === "contradicted" ||
+    normalized === "fact_dependent" ||
+    normalized === "insufficient"
+  ) {
+    return normalized;
+  }
+
+  return "insufficient";
+}
+
+async function verifySingleIssueWithAuthority(args: {
+  input: CrosscheckInput;
+  issue: IssueResolution;
+}): Promise<IssueResolution> {
+  const proposedPosition =
+    String(args.issue.resolved_position || "").trim() ||
+    args.issue.issue_statement;
+
+  const retrievalQuery = [
+    args.input.jurisdiction
+      ? `Jurisdiction: ${args.input.jurisdiction}`
+      : "",
+    `Tax question: ${args.input.question}`,
+    args.input.facts
+      ? `Relevant facts: ${args.input.facts}`
+      : "",
+    `Issue requiring authoritative verification: ${args.issue.issue_statement}`,
+    `Proposed position to test: ${proposedPosition}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  let retrieval;
+
+  try {
+    retrieval = await retrieveAuthority({
+      query: retrievalQuery,
+      topK: 6,
+      minScore: authorityVerificationMinScore(),
+    });
+  } catch (error) {
+    return {
+      ...args.issue,
+      authority_validation: {
+        verdict: "insufficient",
+        reasoning:
+          "Authoritative retrieval was unavailable for this issue. The issue was not upgraded to verified.",
+        citations: [],
+      },
+    };
+  }
+
+  if (!retrieval.ok || !retrieval.sources.length) {
+    return {
+      ...args.issue,
+      authority_validation: {
+        verdict: "insufficient",
+        reasoning:
+          `No sufficiently relevant authoritative source material was retrieved (${retrieval.reason || "insufficient retrieval"}). The issue was not upgraded to verified.`,
+        citations: [],
+      },
+    };
+  }
+
+  const authoritativeSources = retrieval.sources.filter((source) =>
+    authoritySourceIsPrimaryOrOfficial(source.source_type)
+  );
+
+  if (!authoritativeSources.length) {
+    return {
+      ...args.issue,
+      authority_validation: {
+        verdict: "insufficient",
+        reasoning:
+          "Retrieved material did not include a statute, regulation, administrative guidance, case law, or treaty source. The issue was not upgraded to verified.",
+        citations: [],
+      },
+    };
+  }
+
+  const apiKey = env("OPENAI_API_KEY");
+
+  if (!apiKey) {
+    return {
+      ...args.issue,
+      authority_validation: {
+        verdict: "insufficient",
+        reasoning:
+          "Authoritative source material was retrieved, but no authority-validation model was available.",
+        citations: authoritativeSources.map((source) => ({
+          cite: source.cite,
+          score: source.score,
+          country: source.country,
+          jurisdiction: source.jurisdiction,
+          law_code: source.law_code,
+          article: source.article,
+          section: source.section,
+          source_type: source.source_type,
+          citation_label: source.citation_label,
+          source_url: source.source_url,
+          page_start: source.page_start,
+          page_end: source.page_end,
+        })),
+      },
+    };
+  }
+
+  const model =
+    env("OPENAI_AUTHORITY_VALIDATOR_MODEL") ||
+    env("OPENAI_CLAIM_VALIDATOR_MODEL") ||
+    env("OPENAI_ADJUDICATOR_MODEL") ||
+    env("OPENAI_MODEL") ||
+    "gpt-4.1-mini";
+
+  const client = new OpenAI({ apiKey });
+
+  const system = [
+    "You are an authority-grounded tax issue verifier.",
+    "You are NOT deciding which AI model sounds better.",
+    "You must use ONLY the authoritative source excerpts supplied below.",
+    "",
+    "Your task is to determine whether the proposed tax position is established by the retrieved authority.",
+    "",
+    "VERDICT RULES",
+    '- "verified": the supplied authority materially establishes the proposed legal/mechanical position for the stated issue.',
+    '- "contradicted": the supplied authority materially conflicts with the proposed position.',
+    '- "fact_dependent": the governing rule is supported, but one or more unresolved facts prevent application of the rule to the taxpayer.',
+    '- "insufficient": the retrieved excerpts do not adequately establish or contradict the proposition.',
+    "",
+    "STRICT RULES",
+    "1. Model consensus is irrelevant.",
+    "2. Do not use outside memory or unstated legal knowledge.",
+    "3. Do not invent statutes, regulations, cases, treaties, forms, rates, dates, or citations.",
+    "4. Do not treat a merely similar statute or different jurisdiction as controlling.",
+    "5. Do not treat CommercialDataset material as sufficient primary authority.",
+    "6. Similarity score alone does not prove legal support.",
+    "7. If the source addresses the general rule but not the factual trigger, use fact_dependent.",
+    "8. If the excerpts are ambiguous or incomplete, use insufficient.",
+    "9. Return only citation IDs actually supplied in the source block.",
+    "",
+    "Return STRICT JSON ONLY with keys:",
+    "verdict, reasoning, missing_facts, rejected_positions, citations.",
+  ].join("\n");
+
+  const user = [
+    args.input.jurisdiction
+      ? `Jurisdiction: ${args.input.jurisdiction}`
+      : "",
+    args.input.facts
+      ? `Facts:\n${args.input.facts}`
+      : "",
+    `Question:\n${args.input.question}`,
+    "",
+    `Issue:\n${args.issue.issue_statement}`,
+    "",
+    `Proposed position:\n${proposedPosition}`,
+    "",
+    "AUTHORITATIVE SOURCE EXCERPTS:",
+    formatAuthorityContext(authoritativeSources),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  let parsed: AuthorityVerificationJson | null = null;
+
+  try {
+    const response = await client.chat.completions.create({
+      model,
+      temperature: 0,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      max_tokens: 1100,
+    });
+
+    const raw =
+      response.choices?.[0]?.message?.content || "{}";
+
+    parsed =
+      safeJsonParse<AuthorityVerificationJson>(
+        extractJsonObject(raw)
+      );
+  } catch {
+    parsed = null;
+  }
+
+  if (!parsed) {
+    return {
+      ...args.issue,
+      authority_validation: {
+        verdict: "insufficient",
+        reasoning:
+          "Authoritative source material was retrieved, but the verification result could not be parsed safely.",
+        citations: authoritativeSources.map((source) => ({
+          cite: source.cite,
+          score: source.score,
+          country: source.country,
+          jurisdiction: source.jurisdiction,
+          law_code: source.law_code,
+          article: source.article,
+          section: source.section,
+          source_type: source.source_type,
+          citation_label: source.citation_label,
+          source_url: source.source_url,
+          page_start: source.page_start,
+          page_end: source.page_end,
+        })),
+      },
+    };
+  }
+
+  const verdict = normalizeAuthorityVerdict(parsed.verdict);
+
+  const allowedCitationIds = new Set(
+    authoritativeSources.map((source) => source.cite)
+  );
+
+  const requestedCitationIds = Array.isArray(parsed.citations)
+    ? parsed.citations
+        .map((x) => String(x || "").trim())
+        .filter((x) => allowedCitationIds.has(x))
+    : [];
+
+  const citedSources =
+    requestedCitationIds.length
+      ? authoritativeSources.filter((source) =>
+          requestedCitationIds.includes(source.cite)
+        )
+      : verdict === "verified" || verdict === "contradicted"
+      ? []
+      : authoritativeSources.slice(0, 3);
+
+  // A proposition cannot be called verified or contradicted unless
+  // the verifier points to at least one retrieved authority source.
+  const safeVerdict =
+    (verdict === "verified" || verdict === "contradicted") &&
+    !citedSources.length
+      ? "insufficient"
+      : verdict;
+
+  const authorityValidation = {
+    verdict: safeVerdict,
+    reasoning:
+      String(parsed.reasoning || "").trim() ||
+      "Authority verification completed.",
+    citations: citedSources.map((source) => ({
+      cite: source.cite,
+      score: source.score,
+      country: source.country,
+      jurisdiction: source.jurisdiction,
+      law_code: source.law_code,
+      article: source.article,
+      section: source.section,
+      source_type: source.source_type,
+      citation_label: source.citation_label,
+      source_url: source.source_url,
+      page_start: source.page_start,
+      page_end: source.page_end,
+    })),
+  } as const;
+
+  const missingFacts = Array.isArray(parsed.missing_facts)
+    ? uniq([
+        ...args.issue.missing_facts,
+        ...parsed.missing_facts.map((x) =>
+          String(x || "").trim()
+        ),
+      ])
+    : args.issue.missing_facts;
+
+  const rejectedPositions = Array.isArray(
+    parsed.rejected_positions
+  )
+    ? uniq([
+        ...args.issue.rejected_positions,
+        ...parsed.rejected_positions.map((x) =>
+          String(x || "").trim()
+        ),
+      ])
+    : args.issue.rejected_positions;
+
+  if (safeVerdict === "verified") {
+    return {
+      ...args.issue,
+      status: "verified",
+      reasoning: authorityValidation.reasoning,
+      confidence:
+        retrieval.bestScore >= 0.7 ? "high" : "medium",
+      authority_validation: authorityValidation,
+    };
+  }
+
+  if (safeVerdict === "contradicted") {
+    return {
+      ...args.issue,
+      status: "rejected",
+      resolved_position: undefined,
+      reasoning: authorityValidation.reasoning,
+      rejected_positions: uniq([
+        ...rejectedPositions,
+        proposedPosition,
+      ]),
+      confidence:
+        retrieval.bestScore >= 0.7 ? "high" : "medium",
+      authority_validation: authorityValidation,
+    };
+  }
+
+  if (safeVerdict === "fact_dependent") {
+    return {
+      ...args.issue,
+      status: "fact_dependent",
+      reasoning: authorityValidation.reasoning,
+      missing_facts: missingFacts,
+      confidence: "medium",
+      authority_validation: authorityValidation,
+    };
+  }
+
+  return {
+    ...args.issue,
+    authority_validation: authorityValidation,
+  };
+}
+
+async function verifyIssueResolutionLedgerWithAuthority(args: {
+  input: CrosscheckInput;
+  issues: IssueResolution[];
+}): Promise<IssueResolution[]> {
+  if (!args.issues.length) return [];
+
+  const maxIssues = authorityVerificationMaxIssues();
+
+  const candidates = [...args.issues]
+    .filter((issue) => issue.status !== "rejected")
+    .sort(
+      (a, b) =>
+        authorityVerificationPriority(b) -
+        authorityVerificationPriority(a)
+    )
+    .slice(0, maxIssues);
+
+  const candidateIds = new Set(
+    candidates.map((issue) => issue.issue_id)
+  );
+
+  const verified = await Promise.all(
+    candidates.map((issue) =>
+      verifySingleIssueWithAuthority({
+        input: args.input,
+        issue,
+      }).catch(() => issue)
+    )
+  );
+
+  const verifiedById = new Map(
+    verified.map((issue) => [issue.issue_id, issue])
+  );
+
+  return args.issues.map((issue) =>
+    candidateIds.has(issue.issue_id)
+      ? verifiedById.get(issue.issue_id) || issue
+      : issue
+  );
 }
 
 function buildMemoAnswer(parsed: Omit<NormalizedMemo, "answer" | "claims">): string {
@@ -1637,6 +2372,7 @@ async function adjudicateFinalWithOpenAI(args: {
   conflictMatrix1: ConflictMatrix;
   conflictMatrix2: ConflictMatrix;
   survivingClaims: SurvivingClaims;
+  issueResolutions: IssueResolution[];
 }): Promise<NormalizedMemo | null> {
   const apiKey = env("OPENAI_API_KEY");
   if (!apiKey) return null;
@@ -1664,6 +2400,11 @@ async function adjudicateFinalWithOpenAI(args: {
     "6. If a disputed claim is numeric, directional, scope-defining, or branch-defining and remains unstable, convert it into a missing confirmation or narrow caveat instead of asserting it.",
     "7. Repetition across providers is not correctness if structural completeness is weaker.",
     "8. If a recent-law instruction is provided, explicitly distinguish current law from recently enacted, proposed, or future-effective law where material.",
+    "9. The ISSUE RESOLUTION LEDGER is controlling. Do not contradict it.",
+    "10. Do not silently upgrade fact_dependent or unresolved issues into affirmative conclusions.",
+    "11. Do not reintroduce positions listed as rejected.",
+    "12. If the ledger contains materially different branch outcomes, preserve those branches in the memo.",
+    "13. A supported issue may be stated cautiously, but it has not yet been independently authority-verified.",
     "",
     "OUTPUT RULES",
     "- Write a concise internal memo.",
@@ -1707,6 +2448,9 @@ async function adjudicateFinalWithOpenAI(args: {
     "Excluded critical claims that must NOT be stated as fact:",
     JSON.stringify(args.survivingClaims.excludedCriticalClaims, null, 2),
     "",
+    "ISSUE RESOLUTION LEDGER (CONTROLLING):",
+    JSON.stringify(args.issueResolutions, null, 2),
+    "",
     "Combined draft:",
     JSON.stringify(args.combinedDraft || {}, null, 2),
   ]
@@ -1739,6 +2483,7 @@ async function adjudicateFinalWithClaude(args: {
   conflictMatrix1: ConflictMatrix;
   conflictMatrix2: ConflictMatrix;
   survivingClaims: SurvivingClaims;
+  issueResolutions: IssueResolution[];
 }): Promise<NormalizedMemo | null> {
   const prompt = [
     args.input.jurisdiction ? `Jurisdiction: ${args.input.jurisdiction}` : "",
@@ -1771,6 +2516,9 @@ async function adjudicateFinalWithClaude(args: {
     "Excluded critical claims that must NOT be stated as fact:",
     JSON.stringify(args.survivingClaims.excludedCriticalClaims, null, 2),
     "",
+    "ISSUE RESOLUTION LEDGER (CONTROLLING):",
+    JSON.stringify(args.issueResolutions, null, 2),
+    "",
     "Combined draft:",
     JSON.stringify(args.combinedDraft || {}, null, 2),
     "",
@@ -1782,6 +2530,11 @@ async function adjudicateFinalWithClaude(args: {
     "Never state excluded critical claims as fact.",
     "If a disputed claim is numeric, directional, scope-defining, or branch-defining and remains unstable, convert it into a missing confirmation or narrow caveat instead of asserting it.",
     "If a recent-law instruction is provided, explicitly distinguish current law from recently enacted, proposed, or future-effective law where material.",
+    "The ISSUE RESOLUTION LEDGER is controlling. Do not contradict it.",
+    "Do not silently upgrade fact_dependent or unresolved issues into affirmative conclusions.",
+    "Do not reintroduce rejected positions.",
+    "Preserve materially different branch outcomes identified in the ledger.",
+    "Treat supported issues as supported rather than independently verified.",
     "Prefer legal precision over generic completeness.",
     "Do not recommend contacting tax authorities.",
     "Do not invent citations.",
@@ -1813,6 +2566,7 @@ async function mergeFinalMemosWithOpenAI(args: {
   combinedDraft: NormalizedMemo | null;
   conflictMatrix2: ConflictMatrix;
   survivingClaims: SurvivingClaims;
+  issueResolutions: IssueResolution[];
 }): Promise<NormalizedMemo | null> {
   const apiKey = env("OPENAI_API_KEY");
   if (!apiKey) return args.gpt || args.claude || args.combinedDraft || null;
@@ -1832,6 +2586,10 @@ async function mergeFinalMemosWithOpenAI(args: {
     "Do NOT write a comparison.",
     "Prefer the more legally precise memo where they differ.",
     "Never state excluded critical claims as fact.",
+    "The ISSUE RESOLUTION LEDGER is controlling over the candidate memos.",
+    "Do not silently resolve unresolved or fact-dependent issues.",
+    "Do not reintroduce rejected positions.",
+    "Preserve branch outcomes and missing-fact dependencies from the ledger.",
     "Use the combined draft and the round 2 conflict matrix only as support.",
     "If a recent-law instruction is provided, explicitly distinguish current law from recently enacted, proposed, or future-effective law where material.",
     "Do not invent citations or authorities.",
@@ -1857,6 +2615,9 @@ async function mergeFinalMemosWithOpenAI(args: {
     "",
     "Claude final memo:",
     JSON.stringify(args.claude || {}, null, 2),
+    "",
+    "ISSUE RESOLUTION LEDGER (CONTROLLING):",
+    JSON.stringify(args.issueResolutions, null, 2),
     "",
     "Excluded critical claims that must NOT be stated as fact:",
     JSON.stringify(args.survivingClaims.excludedCriticalClaims, null, 2),
@@ -2333,6 +3094,7 @@ async function rewriteFinalMemoConservativelyWithOpenAI(args: {
   legalClaimValidation: LegalClaimValidation | null;
   highRiskProviderConflicts: string[];
   freshnessScan: LegalFreshnessScan | null;
+  issueResolutions: IssueResolution[];
 }): Promise<NormalizedMemo | null> {
   if (!args.finalMemo) return null;
   if (!args.highRiskProviderConflicts.length) return args.finalMemo;
@@ -2362,8 +3124,12 @@ async function rewriteFinalMemoConservativelyWithOpenAI(args: {
     "4. If providers disagree on whether an activity is inside an enumerated taxable category, say that the classification must be verified before concluding liability.",
     "5. Separate ordinary/core activities from contingent or special activities.",
     "6. Separate current law from recently enacted, proposed, or future-effective law if a freshness instruction is present.",
-    "7. Do not mention providers, models, or internal validation mechanics.",
-    "8. Do not invent citations or authorities.",
+    "7. The ISSUE RESOLUTION LEDGER is controlling. The rewrite may not contradict it.",
+    "8. Do not upgrade unresolved or fact-dependent issues into settled conclusions.",
+    "9. Do not reintroduce rejected positions.",
+    "10. Preserve material branch outcomes and required missing facts.",
+    "11. Do not mention providers, models, or internal validation mechanics.",
+    "12. Do not invent citations or authorities.",
     "",
     "OUTPUT STYLE",
     "- Professional tax memo tone.",
@@ -2399,6 +3165,9 @@ async function rewriteFinalMemoConservativelyWithOpenAI(args: {
     "",
     "Provider artifacts used for reasoning:",
     serializeProviderArtifacts(args.reasoningArtifacts),
+    "",
+    "ISSUE RESOLUTION LEDGER (CONTROLLING):",
+    JSON.stringify(args.issueResolutions, null, 2),
     "",
     "Original final memo that must be rewritten conservatively:",
     JSON.stringify(args.finalMemo, null, 2),
@@ -3321,6 +4090,33 @@ export async function runCrosscheck(
       ? round2ConflictMatrix
       : round1ConflictMatrix;
 
+  const initialIssueResolutions =
+    buildInitialIssueResolutionLedger(reasoningConflictMatrix);
+
+  let issueResolutions = initialIssueResolutions;
+
+  if (
+    initialIssueResolutions.length &&
+    reasoningArtifacts.length >= 2
+  ) {
+    issueResolutions =
+      await adjudicateIssueResolutionLedgerWithOpenAI({
+        input: workingInput,
+        initialLedger: initialIssueResolutions,
+        artifacts: reasoningArtifacts,
+        assessments: reasoningAssessments,
+        conflictMatrix: reasoningConflictMatrix,
+      }).catch(() => initialIssueResolutions);
+  }
+
+  if (issueResolutions.length) {
+    issueResolutions =
+      await verifyIssueResolutionLedgerWithAuthority({
+        input: workingInput,
+        issues: issueResolutions,
+      }).catch(() => issueResolutions);
+  }
+
   const survivingClaims = buildSurvivingClaims(reasoningConflictMatrix);
   reasoningArtifacts = filterUnstableClaimsFromArtifacts(
     reasoningArtifacts,
@@ -3360,6 +4156,7 @@ export async function runCrosscheck(
           conflictMatrix1: round1ConflictMatrix,
           conflictMatrix2: reasoningConflictMatrix,
           survivingClaims,
+          issueResolutions,
         }).catch(() => null),
         adjudicateFinalWithClaude({
           input: workingInput,
@@ -3370,6 +4167,7 @@ export async function runCrosscheck(
           conflictMatrix1: round1ConflictMatrix,
           conflictMatrix2: reasoningConflictMatrix,
           survivingClaims,
+          issueResolutions,
         }).catch(() => null),
       ]);
 
@@ -3380,6 +4178,7 @@ export async function runCrosscheck(
         combinedDraft,
         conflictMatrix2: reasoningConflictMatrix,
         survivingClaims,
+        issueResolutions,
       }).catch(() => gptFinal || claudeFinal || combinedDraft || null);
     } else {
       finalMemo = await adjudicateFinalWithOpenAI({
@@ -3391,6 +4190,7 @@ export async function runCrosscheck(
         conflictMatrix1: round1ConflictMatrix,
         conflictMatrix2: reasoningConflictMatrix,
         survivingClaims,
+        issueResolutions,
       }).catch(() => combinedDraft);
     }
   }
@@ -3424,6 +4224,7 @@ export async function runCrosscheck(
       legalClaimValidation,
       highRiskProviderConflicts,
       freshnessScan: legalFreshnessScan,
+      issueResolutions,
     }).catch(() => finalMemo);
 
     // Re-validate the rewritten memo. If the rewrite fixed the issue, the cap may loosen,
@@ -3616,6 +4417,7 @@ export async function runCrosscheck(
       followups,
       confidence,
       disagreements: unresolvedDisagreements,
+      issue_resolutions: issueResolutions,
     },
     providers,
   };
