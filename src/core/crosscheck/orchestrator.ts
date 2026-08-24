@@ -2295,6 +2295,7 @@ async function constructCombinedDraftWithOpenAI(args: {
   assessments: ProviderAssessment[];
   conflictMatrix: ConflictMatrix;
   survivingClaims: SurvivingClaims;
+  issueResolutions: IssueResolution[];
 }): Promise<NormalizedMemo | null> {
   const apiKey = env("OPENAI_API_KEY");
   if (!apiKey) return null;
@@ -2310,6 +2311,12 @@ async function constructCombinedDraftWithOpenAI(args: {
     "Build one concise internal memo from surviving claims only.",
     "You MUST exclude claims listed as excluded critical claims.",
     "Do not smooth over unresolved controlling conflicts.",
+    "The ISSUE RESOLUTION LEDGER is controlling over provider convergence and draft fluency.",
+    "Do not contradict a resolved ledger position.",
+    "Do not state unresolved, fact_dependent, or rejected ledger positions as settled facts.",
+    "Do not reintroduce positions listed as rejected.",
+    "Preserve material branch outcomes and missing-fact dependencies from the ledger.",
+    "A supported issue may be stated cautiously, but must not be presented as independently verified unless the ledger status is verified.",
     "Do not invent citations or authorities.",
     treatyReliabilityInstruction(),
     "Return STRICT JSON ONLY with keys:",
@@ -2342,6 +2349,9 @@ async function constructCombinedDraftWithOpenAI(args: {
     "",
     "Excluded critical claims that must NOT be stated as fact:",
     JSON.stringify(args.survivingClaims.excludedCriticalClaims, null, 2),
+    "",
+    "ISSUE RESOLUTION LEDGER (CONTROLLING):",
+    JSON.stringify(args.issueResolutions, null, 2),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -4117,6 +4127,30 @@ export async function runCrosscheck(
       }).catch(() => issueResolutions);
   }
 
+  const ledgerBlockingIssues = issueResolutions.filter(
+    (issue) =>
+      issue.controlling &&
+      (
+        issue.status === "unresolved" ||
+        issue.status === "fact_dependent" ||
+        issue.status === "rejected"
+      )
+  );
+
+  if (
+    pipelineDecision.mode === "fast_consensus" &&
+    ledgerBlockingIssues.length > 0
+  ) {
+    pipelineDecision = {
+      ...pipelineDecision,
+      mode: "standard",
+      reasons: [
+        ...pipelineDecision.reasons,
+        `Fast consensus revoked after issue-level adjudication: ${ledgerBlockingIssues.length} controlling issue(s) remain unresolved, fact-dependent, or rejected.`,
+      ],
+    };
+  }
+
   const survivingClaims = buildSurvivingClaims(reasoningConflictMatrix);
   reasoningArtifacts = filterUnstableClaimsFromArtifacts(
     reasoningArtifacts,
@@ -4131,6 +4165,7 @@ export async function runCrosscheck(
       assessments: reasoningAssessments,
       conflictMatrix: reasoningConflictMatrix,
       survivingClaims,
+      issueResolutions,
     }).catch(() => null);
   }
 
