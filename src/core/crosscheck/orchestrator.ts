@@ -3492,7 +3492,18 @@ async function rewriteFinalMemoConservativelyWithOpenAI(args: {
   issueResolutions: IssueResolution[];
 }): Promise<NormalizedMemo | null> {
   if (!args.finalMemo) return null;
-  if (!args.highRiskProviderConflicts.length) return args.finalMemo;
+
+  const validationRequiresRepair =
+    args.legalClaimValidation?.valid === false ||
+    args.legalClaimValidation?.severity === "critical" ||
+    args.legalClaimValidation?.severity === "material";
+
+  if (
+    !args.highRiskProviderConflicts.length &&
+    !validationRequiresRepair
+  ) {
+    return args.finalMemo;
+  }
 
   const apiKey = env("OPENAI_API_KEY");
   if (!apiKey) return args.finalMemo;
@@ -3508,7 +3519,7 @@ async function rewriteFinalMemoConservativelyWithOpenAI(args: {
 
   const sys = [
     "You are a senior tax quality-control editor.",
-    "You are rewriting a final tax memo after a high-risk legal conflict was detected.",
+    "You are rewriting a final tax memo because a high-risk provider conflict and/or legal-validation failure was detected.",
     "Your task is NOT to make the answer more aggressive.",
     "Your task is to make the answer professionally conservative and reliance-safe.",
     "",
@@ -3597,6 +3608,147 @@ async function rewriteFinalMemoConservativelyWithOpenAI(args: {
   };
 }
 
+
+function buildLedgerSafeFallbackMemo(args: {
+  input: CrosscheckInput;
+  issueResolutions: IssueResolution[];
+}): NormalizedMemo {
+  const verified = args.issueResolutions.filter(
+    (issue) => issue.controlling && issue.status === "verified"
+  );
+
+  const supported = args.issueResolutions.filter(
+    (issue) => issue.controlling && issue.status === "supported"
+  );
+
+  const unresolved = args.issueResolutions.filter(
+    (issue) => issue.controlling && issue.status === "unresolved"
+  );
+
+  const factDependent = args.issueResolutions.filter(
+    (issue) => issue.controlling && issue.status === "fact_dependent"
+  );
+
+  const rejected = args.issueResolutions.filter(
+    (issue) => issue.controlling && issue.status === "rejected"
+  );
+
+  const treatment: string[] = [];
+
+  for (const issue of verified) {
+    if (issue.resolved_position) {
+      treatment.push(
+        `Verified: ${issue.issue_label}: ${issue.resolved_position}`
+      );
+    }
+  }
+
+  for (const issue of supported) {
+    const position =
+      issue.resolved_position || issue.issue_statement;
+
+    treatment.push(
+      `Provisionally supported but not independently authority-verified: ${issue.issue_label}: ${position}`
+    );
+  }
+
+  for (const issue of unresolved) {
+    const positions = uniq(
+      issue.provider_positions
+        .map((position) => position.position)
+        .filter(Boolean)
+    );
+
+    treatment.push(
+      positions.length
+        ? `Unresolved controlling issue — ${issue.issue_label}. Competing positions: ${positions.join(
+            " | "
+          )}`
+        : `Unresolved controlling issue — ${issue.issue_label}.`
+    );
+  }
+
+  for (const issue of factDependent) {
+    treatment.push(
+      `Fact-dependent controlling issue — ${issue.issue_label}.`
+    );
+  }
+
+  const requiredConfirmations = uniq([
+    ...unresolved.map(
+      (issue) =>
+        `Resolve controlling issue before reliance: ${issue.issue_label}`
+    ),
+    ...factDependent.flatMap((issue) =>
+      issue.missing_facts.length
+        ? issue.missing_facts
+        : [`Confirm facts required for: ${issue.issue_label}`]
+    ),
+    ...supported
+      .filter(
+        (issue) =>
+          issue.authority_validation?.verdict === "insufficient"
+      )
+      .map(
+        (issue) =>
+          `Obtain authoritative support before treating as settled: ${issue.issue_label}`
+      ),
+  ]);
+
+  const unresolvedCount =
+    unresolved.length + factDependent.length;
+
+  const executiveSummary =
+    unresolvedCount > 0
+      ? `TaxAiPro identified ${unresolvedCount} controlling issue(s) that could not be resolved safely from the available provider analysis and authoritative material. Those issues are not presented as settled conclusions below.`
+      : supported.length > 0
+      ? "TaxAiPro identified provisionally supported positions, but some controlling positions could not be independently authority-verified. They should not be treated as return-ready conclusions without confirmation."
+      : verified.length > 0
+      ? "TaxAiPro completed the analysis with authority-verified controlling conclusions."
+      : "TaxAiPro could not establish a reliance-safe controlling conclusion from the available analysis.";
+
+  const analysis = [
+    "This response was produced under TaxAiPro's final integrity safeguard because the generated memo did not clear the final legal-validation gate.",
+    "",
+    verified.length
+      ? `Authority-verified controlling issues: ${verified.length}.`
+      : "No controlling issue was upgraded to authority-verified status.",
+    supported.length
+      ? `Provisionally supported controlling issues: ${supported.length}.`
+      : "",
+    unresolved.length
+      ? `Unresolved controlling issues: ${unresolved.length}.`
+      : "",
+    factDependent.length
+      ? `Fact-dependent controlling issues: ${factDependent.length}.`
+      : "",
+    rejected.length
+      ? `${rejected.length} rejected controlling position(s) were excluded from affirmative conclusions.`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return normalizeMemoJson({
+    executive_summary: executiveSummary,
+    analysis,
+    transaction_specific_treatment: treatment,
+    required_confirmations: requiredConfirmations,
+    recommendation:
+      unresolvedCount > 0 || supported.length > 0
+        ? "Do not rely on a precise filing, rate, liability, computational, or classification position for the unresolved or unverified issues until the listed confirmations or authoritative support are obtained."
+        : "Proceed using the authority-verified conclusions above, subject to the stated facts and assumptions.",
+    confidence:
+      unresolvedCount > 0
+        ? "low"
+        : supported.length > 0
+        ? "medium"
+        : verified.length > 0
+        ? "high"
+        : "low",
+    claims: [],
+  });
+}
 
 function highRiskLegalText(s: string): string {
   return String(s || "").toLowerCase();
@@ -4648,7 +4800,15 @@ export async function runCrosscheck(
 
   const highRiskProviderConflicts = detectHighRiskProviderConflict(reasoningArtifacts);
 
-  if (highRiskProviderConflicts.length && finalMemo) {
+  const legalValidationRequiresRepair =
+    legalClaimValidation?.valid === false ||
+    legalClaimValidation?.severity === "critical" ||
+    legalClaimValidation?.severity === "material";
+
+  if (
+    finalMemo &&
+    (highRiskProviderConflicts.length || legalValidationRequiresRepair)
+  ) {
     finalMemo = await rewriteFinalMemoConservativelyWithOpenAI({
       input: workingInput,
       finalMemo,
@@ -4671,6 +4831,51 @@ export async function runCrosscheck(
       conflictMatrix: reasoningConflictMatrix,
       freshnessScan: legalFreshnessScan,
     }).catch(() => legalClaimValidation);
+  }
+
+  // Phase 3F — final integrity gate.
+  //
+  // A fluent final memo must not bypass a material or critical legal-validation
+  // failure merely because provider conflict detection did not independently
+  // fire. Allow one final conservative repair pass, then validate the repaired
+  // memo again. This is intentionally bounded: no recursive repair loop.
+  const finalValidationRequiresRepair =
+    legalClaimValidation?.valid === false ||
+    legalClaimValidation?.severity === "critical" ||
+    legalClaimValidation?.severity === "material";
+
+  if (finalMemo && finalValidationRequiresRepair) {
+    finalMemo = await rewriteFinalMemoConservativelyWithOpenAI({
+      input: workingInput,
+      finalMemo,
+      reasoningArtifacts,
+      assessments: reasoningAssessments,
+      conflictMatrix: reasoningConflictMatrix,
+      legalClaimValidation,
+      highRiskProviderConflicts,
+      freshnessScan: legalFreshnessScan,
+      issueResolutions,
+    }).catch(() => finalMemo);
+
+    legalClaimValidation = await validateLegalClaimsWithOpenAI({
+      input: workingInput,
+      finalMemo,
+      reasoningArtifacts,
+      assessments: reasoningAssessments,
+      conflictMatrix: reasoningConflictMatrix,
+      freshnessScan: legalFreshnessScan,
+    }).catch(() => legalClaimValidation);
+  }
+
+  const finalValidationStillUnsafe =
+    legalClaimValidation?.severity === "critical" ||
+    legalClaimValidation?.severity === "material";
+
+  if (finalMemo && finalValidationStillUnsafe) {
+    finalMemo = buildLedgerSafeFallbackMemo({
+      input: workingInput,
+      issueResolutions,
+    });
   }
 
   const answer =
