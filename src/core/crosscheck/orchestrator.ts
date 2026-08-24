@@ -16,6 +16,7 @@ import {
   formatAuthorityContext,
   retrieveAuthority,
 } from "../retrieval/authority";
+import { escalateSevereIssueConflicts } from "../research/escalation";
 
 function env(name: string): string {
   return process.env[name] || "";
@@ -7464,6 +7465,36 @@ export async function runCrosscheck(
         issueResolutions
       )
     );
+
+  // Generic conflict escalation:
+  //
+  // Normal TaxAiPro operation remains the 3-5 model crosscheck.
+  // Only controlling issues that are STILL unresolved after internal
+  // issue-level adjudication are eligible for public-source research.
+  //
+  // This is jurisdiction-neutral and contains no tax-topic-specific rules.
+  const externalConflictEscalation =
+    await escalateSevereIssueConflicts({
+      input: workingInput,
+      issues: issueResolutions,
+    }).catch(() => ({
+      issues: issueResolutions,
+      attempted: 0,
+      resolved: 0,
+      factDependent: 0,
+      unresolved: 0,
+    }));
+
+  issueResolutions =
+    externalConflictEscalation.issues;
+
+  if (
+    externalConflictEscalation.attempted > 0
+  ) {
+    pipelineDecision.reasons.push(
+      `External conflict escalation researched ${externalConflictEscalation.attempted} severe unresolved controlling issue(s): ${externalConflictEscalation.resolved} resolved, ${externalConflictEscalation.factDependent} fact-dependent, ${externalConflictEscalation.unresolved} still unresolved.`
+    );
+  }
 
   const survivingClaims = buildSurvivingClaims(reasoningConflictMatrix);
   reasoningArtifacts = filterUnstableClaimsFromArtifacts(

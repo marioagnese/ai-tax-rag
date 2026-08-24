@@ -85,6 +85,31 @@ export type IssueResolution = {
   rejected_positions: string[];
   confidence: "low" | "medium" | "high";
   authority_validation?: IssueAuthorityValidation;
+  external_research?: {
+    attempted: boolean;
+    verdict:
+      | "supports_one"
+      | "fact_dependent"
+      | "unresolved";
+    selected_position?: string;
+    reasoning: string;
+    confidence:
+      | "low"
+      | "medium"
+      | "high";
+    source_quality:
+      | "primary"
+      | "official_secondary"
+      | "mixed"
+      | "weak";
+    sources: Array<{
+      title: string;
+      url: string;
+      publisher?: string;
+      source_type?: string;
+    }>;
+  };
+
 };
 
 export type CrosscheckResult = {
