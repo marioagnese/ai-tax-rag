@@ -1707,7 +1707,11 @@ function refineIssueStatusesAfterEquivalence(
 function splitOverMergedIssueFamily(
   issue: IssueResolution
 ): IssueResolution[] {
+  // Phase 4.1:
+  // A Phase-4-created subissue is already at proposition granularity.
+  // Never recursively split _sub_ issues into _sub_1_sub_1 chains.
   if (
+    issue.issue_id.includes("_sub_") ||
     issue.provider_positions.length < 3
   ) {
     return [issue];
@@ -1949,6 +1953,686 @@ function enforceFinalMemoLedgerInvariant(
     safe: blocked.length === 0,
     blockedIssueIds: blocked,
   };
+}
+
+type LedgerStructuralRelation =
+  | "equivalent"
+  | "complementary"
+  | "conflicting"
+  | "distinct";
+
+type LedgerStructuralAuditJson = {
+  relations?: Array<{
+    issue_ids?: string[];
+    relation?: LedgerStructuralRelation;
+    reasoning?: string;
+  }>;
+};
+
+function extractMaterialAssertionMarkers(
+  value: unknown
+): string[] {
+  const text =
+    normalizeIssueIdentityText(value);
+
+  const markers = new Set<string>();
+
+  const percentages =
+    text.match(/\b\d+(?:\.\d+)?\s*percent\b/g) || [];
+
+  for (const pct of percentages) {
+    markers.add(
+      `pct:${pct.replace(/\s+/g, "")}`
+    );
+  }
+
+  const rawPercentages =
+    String(value || "").match(
+      /\b\d+(?:\.\d+)?%/g
+    ) || [];
+
+  for (const pct of rawPercentages) {
+    markers.add(
+      `pct:${pct.replace(/\s+/g, "")}`
+    );
+  }
+
+  const money =
+    String(value || "").match(
+      /\$\s*\d+(?:,\d{3})*(?:\.\d+)?(?:\s*[mkb])?/gi
+    ) || [];
+
+  for (const amount of money) {
+    markers.add(
+      `money:${amount
+        .toLowerCase()
+        .replace(/\s+/g, "")
+        .replace(/,/g, "")}`
+    );
+  }
+
+  const categories =
+    text.match(
+      /\bcategory\s+[0-9]+[a-z]?\b/g
+    ) || [];
+
+  for (const category of categories) {
+    markers.add(
+      `category:${category.replace(/\s+/g, "")}`
+    );
+  }
+
+  return Array.from(markers).sort();
+}
+
+function markerFamily(
+  marker: string
+): string {
+  const idx = marker.indexOf(":");
+  return idx >= 0
+    ? marker.slice(0, idx)
+    : marker;
+}
+
+function hasContradictoryMaterialMarkers(
+  a: unknown,
+  b: unknown
+): boolean {
+  const aa =
+    extractMaterialAssertionMarkers(a);
+
+  const bb =
+    extractMaterialAssertionMarkers(b);
+
+  if (!aa.length || !bb.length) {
+    return false;
+  }
+
+  const families =
+    new Set([
+      ...aa.map(markerFamily),
+      ...bb.map(markerFamily),
+    ]);
+
+  for (const family of families) {
+    const av = aa.filter(
+      (x) => markerFamily(x) === family
+    );
+
+    const bv = bb.filter(
+      (x) => markerFamily(x) === family
+    );
+
+    if (!av.length || !bv.length) {
+      continue;
+    }
+
+    const intersection =
+      av.some((x) => bv.includes(x));
+
+    if (!intersection) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function issueHasInternalMaterialContradiction(
+  issue: IssueResolution
+): boolean {
+  if (!issue.resolved_position) {
+    return false;
+  }
+
+  const labelStatement = [
+    issue.issue_label,
+    issue.issue_statement,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  if (
+    hasContradictoryMaterialMarkers(
+      labelStatement,
+      issue.resolved_position
+    )
+  ) {
+    return true;
+  }
+
+  const labelIssue = {
+    ...issue,
+    issue_id: `${issue.issue_id}_label_check`,
+    issue_label: "",
+    issue_statement: labelStatement,
+    provider_positions: [],
+    resolved_position: labelStatement,
+  } as IssueResolution;
+
+  const resolvedIssue = {
+    ...issue,
+    issue_id: `${issue.issue_id}_resolved_check`,
+    issue_label: "",
+    issue_statement:
+      issue.resolved_position,
+    provider_positions: [],
+    resolved_position:
+      issue.resolved_position,
+  } as IssueResolution;
+
+  return hasOpposingLegalSignals(
+    labelIssue,
+    resolvedIssue
+  );
+}
+
+function enforceInternalIssueConsistency(
+  issues: IssueResolution[]
+): IssueResolution[] {
+  return issues.map((issue) => {
+    if (
+      issue.status !== "supported" &&
+      issue.status !== "verified"
+    ) {
+      return issue;
+    }
+
+    if (
+      !issueHasInternalMaterialContradiction(
+        issue
+      )
+    ) {
+      return issue;
+    }
+
+    return {
+      ...issue,
+      status: "unresolved",
+      resolved_position: undefined,
+      disagreements: uniq([
+        ...issue.disagreements,
+        issue.issue_statement,
+        ...(issue.provider_positions || [])
+          .map((x) => x.position),
+      ]),
+      reasoning:
+        `${issue.reasoning} | Phase 4.1 detected a material contradiction between the issue label/statement and its purported resolved position. The issue was downgraded rather than allowing inconsistent rates, amounts, filing categories, or opposite outcomes to survive as supported.`,
+      confidence: "low",
+    };
+  });
+}
+
+function normalizeStructuralRelation(
+  value: unknown
+): LedgerStructuralRelation {
+  const v = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  if (
+    v === "equivalent" ||
+    v === "complementary" ||
+    v === "conflicting" ||
+    v === "distinct"
+  ) {
+    return v;
+  }
+
+  return "distinct";
+}
+
+async function auditLedgerStructureWithOpenAI(args: {
+  input: CrosscheckInput;
+  issues: IssueResolution[];
+}): Promise<LedgerStructuralAuditJson | null> {
+  const apiKey = env("OPENAI_API_KEY");
+
+  if (
+    !apiKey ||
+    args.issues.length < 2
+  ) {
+    return null;
+  }
+
+  const model =
+    env("OPENAI_LEDGER_AUDIT_MODEL") ||
+    env("OPENAI_LEDGER_RELATION_MODEL") ||
+    env("OPENAI_ISSUE_ADJUDICATOR_MODEL") ||
+    env("OPENAI_MODEL") ||
+    "gpt-4.1-mini";
+
+  const client =
+    new OpenAI({ apiKey });
+
+  const compact = args.issues.map(
+    (issue) => ({
+      issue_id: issue.issue_id,
+      issue_label: issue.issue_label,
+      issue_statement:
+        issue.issue_statement,
+      status: issue.status,
+      resolved_position:
+        issue.resolved_position || null,
+      provider_positions:
+        issue.provider_positions.map(
+          (position) => ({
+            provider:
+              position.provider,
+            model:
+              position.model,
+            position:
+              position.position,
+          })
+        ),
+    })
+  );
+
+  const system = [
+    "You are the FINAL STRUCTURAL AUDITOR for a professional multi-model tax engine.",
+    "",
+    "You are NOT deciding which tax position is legally correct.",
+    "You are ONLY determining structural relationships among propositions.",
+    "",
+    "Classify related ISSUE GROUPS using exactly one of:",
+    "",
+    "equivalent:",
+    "- materially the same legal proposition expressed differently;",
+    "- one statement may contain slightly more explanation but reaches the same legal conclusion.",
+    "",
+    "complementary:",
+    "- different propositions that can both be true;",
+    "- one may state methodology while another states the resulting calculation;",
+    "- one may be a prerequisite and another a consequence;",
+    "- DO NOT treat complementary propositions as disagreements.",
+    "",
+    "conflicting:",
+    "- propositions answer the SAME legal/mechanical question with mutually incompatible results;",
+    "- examples include taxable vs nontaxable, applies vs does not apply, Category 3 vs Category 4 for the same filing-status question, 37.5% vs 50% for the same rate question, or materially different dollar calculations for the same liability.",
+    "",
+    "distinct:",
+    "- genuinely separate legal questions even if part of the same transaction;",
+    "- for example entity status is distinct from information-reporting category; income computation is distinct from foreign tax credit mechanics.",
+    "",
+    "CRITICAL RULES:",
+    "1. Different wording is NOT disagreement.",
+    "2. Methodology and a numerical result from that methodology are generally complementary unless the methodology itself contradicts the result.",
+    "3. Different legal subquestions must not be merged merely because they involve the same taxpayer, transaction, tax regime, or Code chapter.",
+    "4. Mutually exclusive filing categories, rates, amounts, classifications, taxable/nontaxable results, availability/nonavailability, or applies/does-not-apply results for the SAME question are conflicting.",
+    "5. Do not choose the legally correct answer.",
+    "",
+    "Return STRICT JSON ONLY:",
+    "{",
+    '  "relations": [',
+    "    {",
+    '      "issue_ids": string[],',
+    '      "relation": "equivalent" | "complementary" | "conflicting" | "distinct",',
+    '      "reasoning": string',
+    "    }",
+    "  ]",
+    "}",
+  ].join("\n");
+
+  const user = [
+    args.input.jurisdiction
+      ? `Jurisdiction: ${args.input.jurisdiction}`
+      : "",
+    `Question:\n${args.input.question}`,
+    args.input.facts
+      ? `Facts:\n${args.input.facts}`
+      : "",
+    "",
+    "CURRENT ISSUE LEDGER:",
+    JSON.stringify(
+      compact,
+      null,
+      2
+    ),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  try {
+    const response =
+      await client.chat.completions.create({
+        model,
+        temperature: 0,
+        messages: [
+          {
+            role: "system",
+            content: system,
+          },
+          {
+            role: "user",
+            content: user,
+          },
+        ],
+        max_tokens: 3200,
+      });
+
+    const raw =
+      response.choices?.[0]
+        ?.message?.content || "{}";
+
+    const parsed =
+      safeJsonParse<LedgerStructuralAuditJson>(
+        extractJsonObject(raw)
+      );
+
+    if (
+      !parsed?.relations ||
+      !Array.isArray(parsed.relations)
+    ) {
+      return null;
+    }
+
+    const validIds =
+      new Set(
+        args.issues.map(
+          (issue) => issue.issue_id
+        )
+      );
+
+    const relations =
+      parsed.relations
+        .map((relation) => ({
+          issue_ids: uniq(
+            Array.isArray(
+              relation.issue_ids
+            )
+              ? relation.issue_ids
+                  .map((x) =>
+                    String(x || "").trim()
+                  )
+                  .filter(
+                    (x) =>
+                      validIds.has(x)
+                  )
+              : []
+          ),
+          relation:
+            normalizeStructuralRelation(
+              relation.relation
+            ),
+          reasoning:
+            String(
+              relation.reasoning || ""
+            ).trim(),
+        }))
+        .filter(
+          (relation) =>
+            relation.issue_ids.length >= 2
+        );
+
+    return { relations };
+  } catch {
+    return null;
+  }
+}
+
+function mergeStructurallyEquivalentIssues(
+  members: IssueResolution[],
+  reasoning: string
+): IssueResolution {
+  const merged =
+    mergeDuplicateIssueResolutions(
+      members
+    )[0] || members[0];
+
+  const collapsedPositions =
+    collapseEquivalentProviderPositions(
+      members.flatMap(
+        (issue) =>
+          issue.provider_positions
+      )
+    );
+
+  const blockers =
+    members.some(
+      (issue) =>
+        issue.status === "unresolved" ||
+        issue.status === "fact_dependent" ||
+        issue.status === "rejected"
+    );
+
+  const hasRealConflict =
+    collapsedPositions.some(
+      (a, index) =>
+        collapsedPositions
+          .slice(index + 1)
+          .some(
+            (b) =>
+              !positionsMateriallyEquivalent(
+                a.position,
+                b.position
+              )
+          )
+    );
+
+  if (
+    blockers &&
+    hasRealConflict
+  ) {
+    return {
+      ...merged,
+      provider_positions:
+        collapsedPositions,
+      status: "unresolved",
+      resolved_position: undefined,
+      disagreements: uniq(
+        collapsedPositions.map(
+          (x) => x.position
+        )
+      ),
+      reasoning:
+        `${merged.reasoning} | Structural audit: ${reasoning}`,
+      confidence: "low",
+    };
+  }
+
+  const representative =
+    collapsedPositions[0]
+      ?.position ||
+    members.find(
+      (x) => x.resolved_position
+    )?.resolved_position ||
+    merged.issue_statement;
+
+  return {
+    ...merged,
+    provider_positions:
+      collapsedPositions,
+    status:
+      members.every(
+        (x) =>
+          x.status === "verified"
+      )
+        ? "verified"
+        : "supported",
+    resolved_position:
+      representative,
+    disagreements: [],
+    reasoning:
+      `${merged.reasoning} | Phase 4.1 structural audit merged semantically equivalent propositions. ${reasoning}`,
+    confidence:
+      members.every(
+        (x) =>
+          x.status === "verified"
+      )
+        ? "high"
+        : "medium",
+  };
+}
+
+function mergeStructurallyConflictingIssues(
+  members: IssueResolution[],
+  reasoning: string
+): IssueResolution {
+  const base = members[0];
+
+  const positions =
+    collapseEquivalentProviderPositions(
+      members.flatMap(
+        (issue) =>
+          issue.provider_positions
+      )
+    );
+
+  return {
+    ...base,
+    issue_label:
+      members
+        .map((x) => x.issue_label)
+        .sort(
+          (a, b) =>
+            a.length - b.length
+        )[0] ||
+      base.issue_label,
+    provider_positions:
+      positions,
+    status: "unresolved",
+    resolved_position: undefined,
+    controlling:
+      members.some(
+        (x) => x.controlling
+      ),
+    missing_facts: uniq(
+      members.flatMap(
+        (x) => x.missing_facts
+      )
+    ),
+    disagreements: uniq(
+      positions.map(
+        (x) => x.position
+      )
+    ),
+    rejected_positions: uniq(
+      members.flatMap(
+        (x) =>
+          x.rejected_positions
+      )
+    ),
+    reasoning:
+      `${uniq(
+        members.map(
+          (x) => x.reasoning
+        )
+      ).join(" | ")} | Phase 4.1 structural audit identified mutually incompatible answers to the same controlling question. ${reasoning}`,
+    confidence: "low",
+  };
+}
+
+function applyStructuralAudit(
+  issues: IssueResolution[],
+  audit: LedgerStructuralAuditJson | null
+): IssueResolution[] {
+  if (
+    !audit?.relations?.length
+  ) {
+    return enforceInternalIssueConsistency(
+      issues
+    );
+  }
+
+  let working =
+    enforceInternalIssueConsistency(
+      issues
+    );
+
+  const consumed =
+    new Set<string>();
+
+  const replacements:
+    IssueResolution[] = [];
+
+  // Conflicts have highest precedence.
+  for (
+    const relation of audit.relations
+  ) {
+    if (
+      relation.relation !==
+        "conflicting"
+    ) {
+      continue;
+    }
+
+    const members =
+      working.filter(
+        (issue) =>
+          relation.issue_ids?.includes(
+            issue.issue_id
+          )
+      );
+
+    if (members.length < 2) {
+      continue;
+    }
+
+    members.forEach(
+      (x) =>
+        consumed.add(x.issue_id)
+    );
+
+    replacements.push(
+      mergeStructurallyConflictingIssues(
+        members,
+        relation.reasoning || ""
+      )
+    );
+  }
+
+  // Equivalent propositions merge only if none were consumed by a conflict.
+  for (
+    const relation of audit.relations
+  ) {
+    if (
+      relation.relation !==
+        "equivalent"
+    ) {
+      continue;
+    }
+
+    const members =
+      working.filter(
+        (issue) =>
+          !consumed.has(
+            issue.issue_id
+          ) &&
+          relation.issue_ids?.includes(
+            issue.issue_id
+          )
+      );
+
+    if (members.length < 2) {
+      continue;
+    }
+
+    members.forEach(
+      (x) =>
+        consumed.add(x.issue_id)
+    );
+
+    replacements.push(
+      mergeStructurallyEquivalentIssues(
+        members,
+        relation.reasoning || ""
+      )
+    );
+  }
+
+  // Complementary and distinct issues intentionally stay separate.
+  const untouched =
+    working.filter(
+      (issue) =>
+        !consumed.has(
+          issue.issue_id
+        )
+    );
+
+  return enforceInternalIssueConsistency([
+    ...untouched,
+    ...replacements,
+  ]);
 }
 
 function deterministicLedgerRelation(
@@ -2634,6 +3318,29 @@ async function enforceNuclearLedgerIntegrity(args: {
 
   issues =
     normalizeLedgerIssueGranularity(
+      issues
+    );
+
+  // Phase 4.1 — final proposition-aware structural audit.
+  //
+  // This is deliberately the last semantic operation on the ledger.
+  // It distinguishes equivalence, complementarity, true conflict,
+  // and distinct legal subquestions across the entire ledger.
+  const structuralAudit =
+    await auditLedgerStructureWithOpenAI({
+      input: args.input,
+      issues,
+    }).catch(() => null);
+
+  issues =
+    applyStructuralAudit(
+      issues,
+      structuralAudit
+    );
+
+  // One final deterministic consistency check after the global audit.
+  issues =
+    enforceInternalIssueConsistency(
       issues
     );
 
