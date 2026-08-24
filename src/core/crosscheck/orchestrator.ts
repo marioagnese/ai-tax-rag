@@ -4,6 +4,7 @@ import type {
   IssueResolution,
   ProviderCall,
   ProviderOutput,
+  IssueProviderPosition,
 } from "./types";
 import { callOpenAI } from "./providers/openai";
 import { callOpenRouter } from "./providers/openrouter";
@@ -4100,8 +4101,73 @@ export async function runCrosscheck(
       ? round2ConflictMatrix
       : round1ConflictMatrix;
 
-  const initialIssueResolutions =
+  let initialIssueResolutions =
     buildInitialIssueResolutionLedger(reasoningConflictMatrix);
+
+  // Phase 3D:
+  // Provider convergence must never cause controlling legal claims to bypass
+  // the issue-resolution / authority-verification layer.
+  //
+  // The conflict matrix can legitimately contain no disputes, but it may also
+  // under-extract common claims. In that case, seed the ledger directly from
+  // controlling claims supplied by the selected provider artifacts.
+  if (initialIssueResolutions.length === 0) {
+    const providerControllingClaims = new Map<
+      string,
+      {
+        statement: string;
+        positions: IssueProviderPosition[];
+      }
+    >();
+
+    for (const artifact of reasoningArtifacts) {
+      for (const claim of artifact.memo.claims || []) {
+        if (!claim?.controlling) continue;
+
+        const statement = String(claim.statement || "").trim();
+        if (!statement) continue;
+
+        const key = statement
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, " ")
+          .trim();
+
+        if (!key) continue;
+
+        const existing = providerControllingClaims.get(key) || {
+          statement,
+          positions: [],
+        };
+
+        existing.positions.push({
+          provider: artifact.provider,
+          model: artifact.model,
+          position: statement,
+          confidence: claim.confidence || "medium",
+        });
+
+        providerControllingClaims.set(key, existing);
+      }
+    }
+
+    initialIssueResolutions = Array.from(
+      providerControllingClaims.values()
+    ).map((entry, index) => ({
+      issue_id: issueId("provider_controlling", entry.statement, index),
+      issue_label: entry.statement,
+      issue_statement: entry.statement,
+      provider_positions: entry.positions,
+      status: "supported" as const,
+      resolved_position: entry.statement,
+      reasoning:
+        "Controlling proposition extracted directly from provider claims because the conflict matrix produced no issue ledger. Provider agreement is provisional support only and does not constitute independent authority verification.",
+      controlling: true,
+      missing_facts: [],
+      disagreements: [],
+      rejected_positions: [],
+      confidence: "medium" as const,
+    }));
+  }
 
   let issueResolutions = initialIssueResolutions;
 
