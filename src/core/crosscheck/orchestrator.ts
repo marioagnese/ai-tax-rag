@@ -439,6 +439,390 @@ function issueId(prefix: string, value: string, index: number): string {
   return `${prefix}_${slug || index + 1}`;
 }
 
+type ControllingClaimCandidate = {
+  claim_id: string;
+  provider: string;
+  model: string;
+  statement: string;
+  topic: string;
+  confidence: "low" | "medium" | "high";
+  applies_to: string[];
+};
+
+type SemanticClaimGroup = {
+  issue_label: string;
+  issue_statement: string;
+  claim_ids: string[];
+  relationship: "aligned" | "conflicting" | "mixed";
+  reasoning: string;
+};
+
+type SemanticClaimGroupingJson = {
+  groups?: Array<{
+    issue_label?: string;
+    issue_statement?: string;
+    claim_ids?: unknown;
+    relationship?: string;
+    reasoning?: string;
+  }>;
+};
+
+function normalizeClaimConfidence(
+  value: unknown
+): "low" | "medium" | "high" {
+  const v = String(value || "").trim().toLowerCase();
+  if (v === "low" || v === "high") return v;
+  return "medium";
+}
+
+function normalizeAppliesTo(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return uniq(
+      value.map((x) => String(x || "").trim()).filter(Boolean)
+    );
+  }
+
+  const single = String(value || "").trim();
+  return single ? [single] : [];
+}
+
+function collectControllingClaimCandidates(
+  artifacts: ProviderMemoArtifact[]
+): ControllingClaimCandidate[] {
+  const candidates: ControllingClaimCandidate[] = [];
+  let counter = 1;
+
+  for (const artifact of artifacts) {
+    for (const claim of artifact.memo.claims || []) {
+      if (!claim?.controlling) continue;
+
+      const statement = String(claim.statement || "").trim();
+      if (!statement) continue;
+
+      candidates.push({
+        claim_id: `c${counter++}`,
+        provider: artifact.provider,
+        model: artifact.model,
+        statement,
+        topic: String(claim.topic || "").trim(),
+        confidence: normalizeClaimConfidence(claim.confidence),
+        applies_to: normalizeAppliesTo(claim.applies_to),
+      });
+    }
+  }
+
+  return candidates;
+}
+
+function buildConsolidatedIssueFromGroup(args: {
+  group: SemanticClaimGroup;
+  claimsById: Map<string, ControllingClaimCandidate>;
+  index: number;
+}): IssueResolution | null {
+  const claims = args.group.claim_ids
+    .map((id) => args.claimsById.get(id))
+    .filter(Boolean) as ControllingClaimCandidate[];
+
+  if (!claims.length) return null;
+
+  const positions: IssueProviderPosition[] = claims.map((claim) => ({
+    provider: claim.provider,
+    model: claim.model,
+    position: claim.statement,
+    confidence: claim.confidence,
+  }));
+
+  const distinctPositions = uniq(
+    claims.map((claim) => claim.statement)
+  );
+
+  const relationship =
+    args.group.relationship === "conflicting" ||
+    args.group.relationship === "mixed"
+      ? args.group.relationship
+      : "aligned";
+
+  const unresolved =
+    relationship !== "aligned" && distinctPositions.length > 1;
+
+  const issueStatement =
+    String(args.group.issue_statement || "").trim() ||
+    String(args.group.issue_label || "").trim() ||
+    claims[0].topic ||
+    claims[0].statement;
+
+  const issueLabel =
+    String(args.group.issue_label || "").trim() ||
+    issueStatement;
+
+  return {
+    issue_id: issueId(
+      "provider_semantic",
+      issueStatement,
+      args.index
+    ),
+    issue_label: issueLabel,
+    issue_statement: issueStatement,
+    provider_positions: positions,
+    status: unresolved ? "unresolved" : "supported",
+    resolved_position:
+      unresolved || !distinctPositions.length
+        ? undefined
+        : distinctPositions[0],
+    reasoning:
+      String(args.group.reasoning || "").trim() ||
+      (unresolved
+        ? "Multiple controlling provider claims address the same underlying issue but reach materially different positions. The issue must be adjudicated rather than treated as consensus."
+        : "Controlling provider claims were semantically consolidated into one underlying issue. Provider convergence is provisional support only and does not constitute authority verification."),
+    controlling: true,
+    missing_facts: [],
+    disagreements: unresolved ? distinctPositions : [],
+    rejected_positions: [],
+    confidence: unresolved ? "low" : "medium",
+  };
+}
+
+function fallbackSemanticGroups(
+  claims: ControllingClaimCandidate[]
+): SemanticClaimGroup[] {
+  const buckets = new Map<string, ControllingClaimCandidate[]>();
+
+  for (const claim of claims) {
+    const topic = claim.topic.toLowerCase().trim();
+    const applies = claim.applies_to
+      .map((x) => x.toLowerCase().trim())
+      .sort()
+      .join("|");
+
+    const key =
+      topic || applies
+        ? `${topic}::${applies}`
+        : claim.claim_id;
+
+    const bucket = buckets.get(key) || [];
+    bucket.push(claim);
+    buckets.set(key, bucket);
+  }
+
+  return Array.from(buckets.values()).map((bucket) => {
+    const positions = uniq(bucket.map((x) => x.statement));
+
+    return {
+      issue_label:
+        bucket[0].topic ||
+        bucket[0].applies_to[0] ||
+        bucket[0].statement,
+      issue_statement:
+        bucket[0].topic ||
+        bucket[0].applies_to[0] ||
+        bucket[0].statement,
+      claim_ids: bucket.map((x) => x.claim_id),
+
+      // The local fallback is intentionally conservative.
+      // If multiple distinct controlling propositions land in the same
+      // provider-declared topic/scope, do not call that consensus.
+      relationship:
+        positions.length > 1 ? "mixed" : "aligned",
+      reasoning:
+        positions.length > 1
+          ? "Semantic clustering was unavailable. Multiple distinct controlling provider positions were grouped conservatively by provider-declared topic/scope and treated as unresolved."
+          : "Semantic clustering was unavailable. Singleton controlling claim retained as provisionally supported.",
+    };
+  });
+}
+
+async function consolidateControllingProviderClaims(args: {
+  input: CrosscheckInput;
+  artifacts: ProviderMemoArtifact[];
+}): Promise<IssueResolution[]> {
+  const claims = collectControllingClaimCandidates(args.artifacts);
+  if (!claims.length) return [];
+
+  const claimsById = new Map(
+    claims.map((claim) => [claim.claim_id, claim])
+  );
+
+  const apiKey = env("OPENAI_API_KEY");
+
+  let groups: SemanticClaimGroup[] | null = null;
+
+  if (apiKey) {
+    const model =
+      env("OPENAI_ISSUE_CLUSTER_MODEL") ||
+      env("OPENAI_ISSUE_ADJUDICATOR_MODEL") ||
+      env("OPENAI_ADJUDICATOR_MODEL") ||
+      env("OPENAI_MODEL") ||
+      "gpt-4.1-mini";
+
+    const client = new OpenAI({ apiKey });
+
+    const system = [
+      "You are a semantic issue-clustering stage inside a tax crosscheck engine.",
+      "You are NOT deciding which provider is correct.",
+      "You are NOT writing a tax memo.",
+      "",
+      "Your sole job is to group controlling provider claims that answer the SAME underlying legal, computational, filing, classification, rate, timing, or mechanical issue.",
+      "",
+      "Examples of claims that belong in the SAME issue:",
+      "- competing numeric calculations of the same tax inclusion or liability;",
+      "- different Form filing categories for the same filing obligation;",
+      "- different rates or thresholds for the same rule;",
+      "- competing characterizations of the same transaction;",
+      "- one provider saying a rule applies and another saying it does not.",
+      "",
+      "Do NOT combine claims merely because they share a broad tax topic.",
+      "For example, GILTI inclusion amount, Section 250 deduction, FTC limitation, and QBAI mechanics are separate issues unless the individual claims actually answer the same question.",
+      "",
+      "CRITICAL SAFETY RULES:",
+      "1. Use only the supplied claim IDs.",
+      "2. Do not invent provider positions.",
+      "3. Every claim ID must appear in exactly one group.",
+      "4. Preserve competing positions inside one group rather than splitting them into separate groups.",
+      "5. relationship='aligned' only if the claims are materially consistent.",
+      "6. relationship='conflicting' if the claims reach incompatible outcomes.",
+      "7. relationship='mixed' if they overlap but contain a material unresolved distinction.",
+      "8. Differences in numerical amount, filing category, legal applicability, rate, threshold, direction, or tax character are material unless plainly reconcilable.",
+      "",
+      "Return STRICT JSON ONLY:",
+      "{",
+      '  "groups": [',
+      "    {",
+      '      "issue_label": string,',
+      '      "issue_statement": string,',
+      '      "claim_ids": string[],',
+      '      "relationship": "aligned" | "conflicting" | "mixed",',
+      '      "reasoning": string',
+      "    }",
+      "  ]",
+      "}",
+    ].join("\n");
+
+    const user = [
+      args.input.jurisdiction
+        ? `Jurisdiction: ${args.input.jurisdiction}`
+        : "",
+      args.input.facts
+        ? `Facts:\n${args.input.facts}`
+        : "",
+      `Question:\n${args.input.question}`,
+      "",
+      "CONTROLLING PROVIDER CLAIMS:",
+      JSON.stringify(claims, null, 2),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    try {
+      const response = await client.chat.completions.create({
+        model,
+        temperature: 0,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+        max_tokens: 2200,
+      });
+
+      const raw =
+        response.choices?.[0]?.message?.content || "{}";
+
+      const parsed =
+        safeJsonParse<SemanticClaimGroupingJson>(
+          extractJsonObject(raw)
+        );
+
+      if (parsed?.groups && Array.isArray(parsed.groups)) {
+        const used = new Set<string>();
+        const candidateGroups: SemanticClaimGroup[] = [];
+
+        for (const rawGroup of parsed.groups) {
+          const claimIds = Array.isArray(rawGroup.claim_ids)
+            ? uniq(
+                rawGroup.claim_ids
+                  .map((x) => String(x || "").trim())
+                  .filter(
+                    (id) =>
+                      claimsById.has(id) &&
+                      !used.has(id)
+                  )
+              )
+            : [];
+
+          if (!claimIds.length) continue;
+
+          claimIds.forEach((id) => used.add(id));
+
+          const relationRaw = String(
+            rawGroup.relationship || ""
+          )
+            .trim()
+            .toLowerCase();
+
+          const relationship:
+            | "aligned"
+            | "conflicting"
+            | "mixed" =
+            relationRaw === "conflicting" ||
+            relationRaw === "mixed"
+              ? relationRaw
+              : "aligned";
+
+          candidateGroups.push({
+            issue_label:
+              String(rawGroup.issue_label || "").trim(),
+            issue_statement:
+              String(
+                rawGroup.issue_statement || ""
+              ).trim(),
+            claim_ids: claimIds,
+            relationship,
+            reasoning:
+              String(rawGroup.reasoning || "").trim(),
+          });
+        }
+
+        // Never lose a controlling claim because of clustering output.
+        for (const claim of claims) {
+          if (used.has(claim.claim_id)) continue;
+
+          candidateGroups.push({
+            issue_label:
+              claim.topic ||
+              claim.applies_to[0] ||
+              claim.statement,
+            issue_statement:
+              claim.topic ||
+              claim.applies_to[0] ||
+              claim.statement,
+            claim_ids: [claim.claim_id],
+            relationship: "aligned",
+            reasoning:
+              "Controlling claim was not assigned by the semantic clustering response and was preserved as a singleton issue.",
+          });
+        }
+
+        groups = candidateGroups;
+      }
+    } catch {
+      groups = null;
+    }
+  }
+
+  if (!groups?.length) {
+    groups = fallbackSemanticGroups(claims);
+  }
+
+  return groups
+    .map((group, index) =>
+      buildConsolidatedIssueFromGroup({
+        group,
+        claimsById,
+        index,
+      })
+    )
+    .filter(Boolean) as IssueResolution[];
+}
+
 function buildInitialIssueResolutionLedger(
   matrix: ConflictMatrix
 ): IssueResolution[] {
@@ -4104,69 +4488,18 @@ export async function runCrosscheck(
   let initialIssueResolutions =
     buildInitialIssueResolutionLedger(reasoningConflictMatrix);
 
-  // Phase 3D:
-  // Provider convergence must never cause controlling legal claims to bypass
-  // the issue-resolution / authority-verification layer.
-  //
-  // The conflict matrix can legitimately contain no disputes, but it may also
-  // under-extract common claims. In that case, seed the ledger directly from
-  // controlling claims supplied by the selected provider artifacts.
+  // Phase 3E:
+  // If the conflict matrix produces no usable issue ledger, consolidate
+  // controlling provider claims by their underlying legal/mechanical issue.
+  // Competing numeric, filing, classification, rate, or applicability
+  // positions must become positions within ONE issue rather than separate
+  // provisionally-supported issues.
   if (initialIssueResolutions.length === 0) {
-    const providerControllingClaims = new Map<
-      string,
-      {
-        statement: string;
-        positions: IssueProviderPosition[];
-      }
-    >();
-
-    for (const artifact of reasoningArtifacts) {
-      for (const claim of artifact.memo.claims || []) {
-        if (!claim?.controlling) continue;
-
-        const statement = String(claim.statement || "").trim();
-        if (!statement) continue;
-
-        const key = statement
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, " ")
-          .trim();
-
-        if (!key) continue;
-
-        const existing = providerControllingClaims.get(key) || {
-          statement,
-          positions: [],
-        };
-
-        existing.positions.push({
-          provider: artifact.provider,
-          model: artifact.model,
-          position: statement,
-          confidence: claim.confidence || "medium",
-        });
-
-        providerControllingClaims.set(key, existing);
-      }
-    }
-
-    initialIssueResolutions = Array.from(
-      providerControllingClaims.values()
-    ).map((entry, index) => ({
-      issue_id: issueId("provider_controlling", entry.statement, index),
-      issue_label: entry.statement,
-      issue_statement: entry.statement,
-      provider_positions: entry.positions,
-      status: "supported" as const,
-      resolved_position: entry.statement,
-      reasoning:
-        "Controlling proposition extracted directly from provider claims because the conflict matrix produced no issue ledger. Provider agreement is provisional support only and does not constitute independent authority verification.",
-      controlling: true,
-      missing_facts: [],
-      disagreements: [],
-      rejected_positions: [],
-      confidence: "medium" as const,
-    }));
+    initialIssueResolutions =
+      await consolidateControllingProviderClaims({
+        input: workingInput,
+        artifacts: reasoningArtifacts,
+      }).catch(() => []);
   }
 
   let issueResolutions = initialIssueResolutions;
