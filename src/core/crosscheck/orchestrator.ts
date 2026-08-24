@@ -5,6 +5,7 @@ import type {
   ProviderCall,
   ProviderOutput,
   IssueProviderPosition,
+  ResolutionStatus,
 } from "./types";
 import { callOpenAI } from "./providers/openai";
 import { callOpenRouter } from "./providers/openrouter";
@@ -929,6 +930,337 @@ function fallbackSemanticGroups(
           : "Model-based semantic clustering was unavailable or unusable. Deterministic issue-identity normalization retained this controlling position as provisionally supported pending authority verification.",
     };
   });
+}
+
+function resolutionPositionSignature(
+  issue: IssueResolution
+): string {
+  return uniq(
+    issue.provider_positions
+      .map((position) =>
+        normalizeIssueIdentityText(position.position)
+      )
+      .filter(Boolean)
+  )
+    .sort()
+    .join("||");
+}
+
+function resolutionCanonicalKey(
+  issue: IssueResolution
+): string {
+  const id = normalizeIssueIdentityText(issue.issue_id);
+  const label = normalizeIssueIdentityText(
+    issue.issue_label || issue.issue_statement
+  );
+  const positions = resolutionPositionSignature(issue);
+
+  // Exact canonical IDs are strongest. Position signature provides a
+  // deterministic backstop when equivalent issues received slightly
+  // different generated labels.
+  return id || `${label}::${positions}`;
+}
+
+function mostConservativeMergedStatus(
+  issues: IssueResolution[]
+): ResolutionStatus {
+  const statuses = new Set(
+    issues.map((issue) => issue.status)
+  );
+
+  if (statuses.has("unresolved")) {
+    return "unresolved";
+  }
+
+  // A rejected position mixed with any surviving position is itself a
+  // conflict, not a basis for selecting either side.
+  if (
+    statuses.has("rejected") &&
+    statuses.size > 1
+  ) {
+    return "unresolved";
+  }
+
+  if (
+    statuses.size === 1 &&
+    statuses.has("rejected")
+  ) {
+    return "rejected";
+  }
+
+  if (statuses.has("fact_dependent")) {
+    return "fact_dependent";
+  }
+
+  // Verified survives only when every duplicate copy is verified.
+  if (
+    statuses.size === 1 &&
+    statuses.has("verified")
+  ) {
+    return "verified";
+  }
+
+  return "supported";
+}
+
+function mergeDuplicateIssueResolutions(
+  issues: IssueResolution[]
+): IssueResolution[] {
+  const groups = new Map<string, IssueResolution[]>();
+
+  for (const issue of issues) {
+    const key = resolutionCanonicalKey(issue);
+    const bucket = groups.get(key) || [];
+    bucket.push(issue);
+    groups.set(key, bucket);
+  }
+
+  return Array.from(groups.values()).map((members) => {
+    if (members.length === 1) {
+      return members[0];
+    }
+
+    const base = members[0];
+    const status = mostConservativeMergedStatus(members);
+
+    const providerPositions = Array.from(
+      new Map(
+        members
+          .flatMap((issue) => issue.provider_positions)
+          .map((position) => [
+            [
+              position.provider,
+              position.model,
+              normalizeIssueIdentityText(position.position),
+            ].join("::"),
+            position,
+          ])
+      ).values()
+    );
+
+    const distinctResolvedPositions = uniq(
+      members
+        .map((issue) =>
+          String(issue.resolved_position || "").trim()
+        )
+        .filter(Boolean)
+    );
+
+    const allDisagreements = uniq([
+      ...members.flatMap((issue) => issue.disagreements),
+      ...(status === "unresolved"
+        ? providerPositions.map(
+            (position) => position.position
+          )
+        : []),
+    ]);
+
+    const allMissingFacts = uniq(
+      members.flatMap((issue) => issue.missing_facts)
+    );
+
+    const allRejectedPositions = uniq(
+      members.flatMap(
+        (issue) => issue.rejected_positions
+      )
+    );
+
+    const authorityValidations = members
+      .map((issue) => issue.authority_validation)
+      .filter(Boolean);
+
+    const authorityValidation =
+      authorityValidations.find(
+        (validation) =>
+          validation?.verdict === "insufficient"
+      ) ||
+      authorityValidations.find(
+        (validation) =>
+          validation?.verdict === "contradicted"
+      ) ||
+      authorityValidations[0];
+
+    const canKeepResolvedPosition =
+      (status === "verified" ||
+        status === "supported") &&
+      distinctResolvedPositions.length === 1;
+
+    return {
+      ...base,
+      provider_positions: providerPositions,
+      status,
+      resolved_position: canKeepResolvedPosition
+        ? distinctResolvedPositions[0]
+        : undefined,
+      reasoning: uniq(
+        members
+          .map((issue) => issue.reasoning)
+          .filter(Boolean)
+      ).join(
+        " | "
+      ) +
+        " | Duplicate canonical ledger entries were merged before final synthesis.",
+      controlling: members.some(
+        (issue) => issue.controlling
+      ),
+      missing_facts: allMissingFacts,
+      disagreements: allDisagreements,
+      rejected_positions: allRejectedPositions,
+      confidence:
+        status === "verified"
+          ? "high"
+          : status === "supported"
+          ? "medium"
+          : "low",
+      ...(authorityValidation
+        ? { authority_validation: authorityValidation }
+        : {}),
+    };
+  });
+}
+
+function issueResolutionIdentity(
+  issue: IssueResolution
+): {
+  tokens: string[];
+  legalAnchors: string[];
+} {
+  const descriptor = [
+    issue.issue_label,
+    issue.issue_statement,
+    issue.resolved_position || "",
+    ...issue.provider_positions.map(
+      (position) => position.position
+    ),
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return {
+    tokens: issueIdentityTokens(descriptor),
+    legalAnchors:
+      extractIssueLegalAnchors(descriptor),
+  };
+}
+
+function issueResolutionsCloselyRelated(
+  a: IssueResolution,
+  b: IssueResolution
+): boolean {
+  if (a.issue_id === b.issue_id) return true;
+
+  const ai = issueResolutionIdentity(a);
+  const bi = issueResolutionIdentity(b);
+
+  const overlap = tokenOverlapRatio(
+    ai.tokens,
+    bi.tokens
+  );
+
+  const jaccard = tokenJaccard(
+    ai.tokens,
+    bi.tokens
+  );
+
+  const sharedAnchor = shareIssueAnchor(
+    ai.legalAnchors,
+    bi.legalAnchors
+  );
+
+  // This relationship test is intentionally stricter than Phase 3G
+  // claim grouping. Phase 3H is only preventing a narrow supported
+  // proposition from silently overriding an already-blocking parent issue.
+  if (
+    sharedAnchor &&
+    overlap >= 0.46 &&
+    jaccard >= 0.22
+  ) {
+    return true;
+  }
+
+  if (
+    overlap >= 0.82 &&
+    jaccard >= 0.52
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function protectBlockingParentIssues(
+  issues: IssueResolution[]
+): IssueResolution[] {
+  const blockers = issues.filter(
+    (issue) =>
+      issue.controlling &&
+      (
+        issue.status === "unresolved" ||
+        issue.status === "fact_dependent" ||
+        issue.status === "rejected"
+      )
+  );
+
+  if (!blockers.length) return issues;
+
+  return issues.map((issue) => {
+    // Authority-verified propositions remain verified.
+    if (
+      !issue.controlling ||
+      issue.status !== "supported"
+    ) {
+      return issue;
+    }
+
+    const relatedBlocker = blockers.find(
+      (blocker) =>
+        blocker.issue_id !== issue.issue_id &&
+        issueResolutionsCloselyRelated(
+          issue,
+          blocker
+        )
+    );
+
+    if (!relatedBlocker) {
+      return issue;
+    }
+
+    return {
+      ...issue,
+      status: "fact_dependent",
+      resolved_position: undefined,
+      reasoning:
+        `${issue.reasoning} | This provisionally supported proposition is closely related to unresolved controlling issue "${relatedBlocker.issue_label}" and therefore cannot independently settle the broader legal result.`,
+      missing_facts: uniq([
+        ...issue.missing_facts,
+        ...relatedBlocker.missing_facts,
+        `Resolve related controlling issue before reliance: ${relatedBlocker.issue_label}`,
+      ]),
+      disagreements: uniq([
+        ...issue.disagreements,
+        ...relatedBlocker.disagreements,
+      ]),
+      confidence: "low",
+    };
+  });
+}
+
+function enforceCanonicalLedgerIntegrity(
+  issues: IssueResolution[]
+): IssueResolution[] {
+  if (!issues.length) return [];
+
+  const deduplicated =
+    mergeDuplicateIssueResolutions(issues);
+
+  const parentProtected =
+    protectBlockingParentIssues(deduplicated);
+
+  // Parent protection can make two previously different entries
+  // canonical duplicates. Merge one final time.
+  return mergeDuplicateIssueResolutions(
+    parentProtected
+  );
 }
 
 async function consolidateControllingProviderClaims(args: {
@@ -5001,6 +5333,15 @@ export async function runCrosscheck(
       ],
     };
   }
+
+  // Phase 3H — canonical ledger integrity.
+  //
+  // Authority verification has now had its opportunity to upgrade or reject
+  // positions. Before any final synthesis, remove duplicate canonical issues
+  // and prevent a merely-supported subissue from settling a closely related
+  // unresolved controlling issue.
+  issueResolutions =
+    enforceCanonicalLedgerIntegrity(issueResolutions);
 
   const survivingClaims = buildSurvivingClaims(reasoningConflictMatrix);
   reasoningArtifacts = filterUnstableClaimsFromArtifacts(
