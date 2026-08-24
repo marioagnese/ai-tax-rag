@@ -1361,6 +1361,596 @@ function sharedMaterialNumbers(
   return shared;
 }
 
+function normalizePositionForEquivalence(
+  value: unknown
+): string {
+  return normalizeIssueIdentityText(value)
+    .replace(/\bapproximately\b/g, "")
+    .replace(/\bapprox\b/g, "")
+    .replace(/\bgenerally\b/g, "")
+    .replace(/\blikely\b/g, "")
+    .replace(/\bpotentially\b/g, "")
+    .replace(/\bmay\b/g, "")
+    .replace(/\bsubject to\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function positionEquivalenceTokens(
+  value: unknown
+): string[] {
+  return issueIdentityTokens(
+    normalizePositionForEquivalence(value)
+  );
+}
+
+function positionsMateriallyEquivalent(
+  a: string,
+  b: string
+): boolean {
+  const aa = normalizePositionForEquivalence(a);
+  const bb = normalizePositionForEquivalence(b);
+
+  if (!aa || !bb) return false;
+  if (aa === bb) return true;
+
+  const tokensA = positionEquivalenceTokens(a);
+  const tokensB = positionEquivalenceTokens(b);
+
+  const overlap = tokenOverlapRatio(
+    tokensA,
+    tokensB
+  );
+
+  const jaccard = tokenJaccard(
+    tokensA,
+    tokensB
+  );
+
+  const anchorsA = extractIssueLegalAnchors(a);
+  const anchorsB = extractIssueLegalAnchors(b);
+
+  const sharedAnchor = shareIssueAnchor(
+    anchorsA,
+    anchorsB
+  );
+
+  const opposing =
+    hasOpposingLegalSignals(
+      {
+        issue_id: "a",
+        issue_label: "",
+        issue_statement: a,
+        provider_positions: [],
+        status: "supported",
+        resolved_position: a,
+        reasoning: "",
+        controlling: true,
+        missing_facts: [],
+        disagreements: [],
+        rejected_positions: [],
+        confidence: "medium",
+      } as IssueResolution,
+      {
+        issue_id: "b",
+        issue_label: "",
+        issue_statement: b,
+        provider_positions: [],
+        status: "supported",
+        resolved_position: b,
+        reasoning: "",
+        controlling: true,
+        missing_facts: [],
+        disagreements: [],
+        rejected_positions: [],
+        confidence: "medium",
+      } as IssueResolution
+    );
+
+  if (opposing) return false;
+
+  if (
+    sharedAnchor &&
+    overlap >= 0.62 &&
+    jaccard >= 0.34
+  ) {
+    return true;
+  }
+
+  if (
+    overlap >= 0.84 &&
+    jaccard >= 0.58
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function collapseEquivalentProviderPositions(
+  positions: IssueProviderPosition[]
+): IssueProviderPosition[] {
+  const buckets: IssueProviderPosition[][] = [];
+
+  for (const position of positions) {
+    const existing = buckets.find((bucket) =>
+      bucket.some((candidate) =>
+        positionsMateriallyEquivalent(
+          candidate.position,
+          position.position
+        )
+      )
+    );
+
+    if (existing) {
+      existing.push(position);
+    } else {
+      buckets.push([position]);
+    }
+  }
+
+  return buckets.map((bucket) => {
+    const representative =
+      bucket
+        .slice()
+        .sort(
+          (a, b) =>
+            String(b.position || "").length -
+            String(a.position || "").length
+        )[0];
+
+    return {
+      ...representative,
+      position: representative.position,
+      confidence:
+        bucket.some(
+          (x) => x.confidence === "high"
+        )
+          ? "high"
+          : bucket.some(
+              (x) => x.confidence === "medium"
+            )
+          ? "medium"
+          : representative.confidence,
+    };
+  });
+}
+
+function issueCoreIdentity(
+  issue: IssueResolution
+): {
+  labelTokens: string[];
+  positionTokens: string[];
+  anchors: string[];
+} {
+  const labelText = [
+    issue.issue_label,
+    issue.issue_statement,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const positionText = [
+    issue.resolved_position || "",
+    ...issue.provider_positions.map(
+      (position) => position.position
+    ),
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return {
+    labelTokens:
+      issueIdentityTokens(labelText),
+    positionTokens:
+      issueIdentityTokens(positionText),
+    anchors:
+      extractIssueLegalAnchors(
+        `${labelText} ${positionText}`
+      ),
+  };
+}
+
+function areSameLegalSubissue(
+  a: IssueResolution,
+  b: IssueResolution
+): boolean {
+  if (a.issue_id === b.issue_id) {
+    return true;
+  }
+
+  const ai = issueCoreIdentity(a);
+  const bi = issueCoreIdentity(b);
+
+  const labelOverlap =
+    tokenOverlapRatio(
+      ai.labelTokens,
+      bi.labelTokens
+    );
+
+  const labelJaccard =
+    tokenJaccard(
+      ai.labelTokens,
+      bi.labelTokens
+    );
+
+  const positionOverlap =
+    tokenOverlapRatio(
+      ai.positionTokens,
+      bi.positionTokens
+    );
+
+  const positionJaccard =
+    tokenJaccard(
+      ai.positionTokens,
+      bi.positionTokens
+    );
+
+  const sharedAnchor =
+    shareIssueAnchor(
+      ai.anchors,
+      bi.anchors
+    );
+
+  // Strong label identity.
+  if (
+    labelOverlap >= 0.80 &&
+    labelJaccard >= 0.50
+  ) {
+    return true;
+  }
+
+  // Same explicit legal provision plus strong outcome similarity.
+  if (
+    sharedAnchor &&
+    positionOverlap >= 0.68 &&
+    positionJaccard >= 0.38
+  ) {
+    return true;
+  }
+
+  // Strong position identity plus at least some label similarity.
+  if (
+    positionOverlap >= 0.86 &&
+    positionJaccard >= 0.58 &&
+    labelOverlap >= 0.38
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function refineIssueStatusesAfterEquivalence(
+  issues: IssueResolution[]
+): IssueResolution[] {
+  return issues.map((issue) => {
+    const collapsed =
+      collapseEquivalentProviderPositions(
+        issue.provider_positions
+      );
+
+    const uniquePositions =
+      collapsed.map(
+        (position) => position.position
+      );
+
+    const distinctResolved =
+      uniq(
+        [
+          issue.resolved_position || "",
+          ...uniquePositions,
+        ]
+          .filter(Boolean)
+      );
+
+    const hasMaterialConflict =
+      uniquePositions.some((a, index) =>
+        uniquePositions
+          .slice(index + 1)
+          .some(
+            (b) =>
+              !positionsMateriallyEquivalent(
+                a,
+                b
+              )
+          )
+      );
+
+    if (
+      issue.status === "unresolved" &&
+      !hasMaterialConflict
+    ) {
+      const best =
+        uniquePositions[0] ||
+        issue.resolved_position ||
+        issue.issue_statement;
+
+      return {
+        ...issue,
+        provider_positions: collapsed,
+        status: "supported",
+        resolved_position: best,
+        disagreements: [],
+        reasoning:
+          `${issue.reasoning} | Phase 4 semantic-equivalence pass found no material conflict among the surviving provider positions; wording-only differences were collapsed.`,
+        confidence: "medium",
+      };
+    }
+
+    if (
+      hasMaterialConflict
+    ) {
+      return {
+        ...issue,
+        provider_positions: collapsed,
+        status: "unresolved",
+        resolved_position: undefined,
+        disagreements:
+          uniq(uniquePositions),
+        confidence: "low",
+      };
+    }
+
+    return {
+      ...issue,
+      provider_positions: collapsed,
+      resolved_position:
+        issue.status === "supported" &&
+        distinctResolved.length === 1
+          ? distinctResolved[0]
+          : issue.resolved_position,
+    };
+  });
+}
+
+function splitOverMergedIssueFamily(
+  issue: IssueResolution
+): IssueResolution[] {
+  if (
+    issue.provider_positions.length < 3
+  ) {
+    return [issue];
+  }
+
+  const buckets: IssueProviderPosition[][] = [];
+
+  for (const position of issue.provider_positions) {
+    const candidateIssue = {
+      ...issue,
+      issue_id: `${issue.issue_id}_candidate`,
+      issue_label: position.position,
+      issue_statement: position.position,
+      provider_positions: [position],
+      resolved_position: position.position,
+      status: "supported",
+    } as IssueResolution;
+
+    const bucket = buckets.find((existing) => {
+      const representative =
+        existing[0];
+
+      const representativeIssue = {
+        ...issue,
+        issue_id: `${issue.issue_id}_rep`,
+        issue_label:
+          representative.position,
+        issue_statement:
+          representative.position,
+        provider_positions:
+          [representative],
+        resolved_position:
+          representative.position,
+        status: "supported",
+      } as IssueResolution;
+
+      return areSameLegalSubissue(
+        representativeIssue,
+        candidateIssue
+      );
+    });
+
+    if (bucket) {
+      bucket.push(position);
+    } else {
+      buckets.push([position]);
+    }
+  }
+
+  if (buckets.length <= 1) {
+    return [issue];
+  }
+
+  return buckets.map(
+    (bucket, index) => {
+      const label =
+        bucket[0].position;
+
+      const collapsed =
+        collapseEquivalentProviderPositions(
+          bucket
+        );
+
+      const hasConflict =
+        collapsed.some((a, i) =>
+          collapsed
+            .slice(i + 1)
+            .some(
+              (b) =>
+                !positionsMateriallyEquivalent(
+                  a.position,
+                  b.position
+                )
+            )
+        );
+
+      return {
+        ...issue,
+        issue_id:
+          `${issue.issue_id}_sub_${index + 1}`,
+        issue_label: label,
+        issue_statement: label,
+        provider_positions:
+          collapsed,
+        status:
+          hasConflict
+            ? "unresolved"
+            : "supported",
+        resolved_position:
+          hasConflict
+            ? undefined
+            : collapsed[0]?.position,
+        disagreements:
+          hasConflict
+            ? collapsed.map(
+                (x) => x.position
+              )
+            : [],
+        reasoning:
+          `${issue.reasoning} | Phase 4 split an over-merged legal family into separately adjudicable subissues.`,
+        confidence:
+          hasConflict
+            ? "low"
+            : "medium",
+      };
+    }
+  );
+}
+
+function normalizeLedgerIssueGranularity(
+  issues: IssueResolution[]
+): IssueResolution[] {
+  const split =
+    issues.flatMap(
+      splitOverMergedIssueFamily
+    );
+
+  return refineIssueStatusesAfterEquivalence(
+    split
+  );
+}
+
+function blockedIssuePhrases(
+  issue: IssueResolution
+): string[] {
+  return uniq(
+    [
+      issue.resolved_position || "",
+      ...issue.provider_positions.map(
+        (position) => position.position
+      ),
+      ...issue.disagreements,
+    ]
+      .map((x) => String(x || "").trim())
+      .filter(Boolean)
+  );
+}
+
+function memoContainsBlockedConclusion(
+  memo: NormalizedMemo,
+  issue: IssueResolution
+): boolean {
+  if (
+    issue.status !== "unresolved" &&
+    issue.status !== "fact_dependent" &&
+    issue.status !== "rejected"
+  ) {
+    return false;
+  }
+
+  const memoText =
+    normalizeIssueIdentityText(
+      [
+        memo.executive_summary,
+        memo.analysis,
+        memo.recommendation,
+        ...memo.transaction_specific_treatment,
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
+
+  if (!memoText) return false;
+
+  return blockedIssuePhrases(issue)
+    .some((phrase) => {
+      const normalizedPhrase =
+        normalizeIssueIdentityText(
+          phrase
+        );
+
+      if (
+        !normalizedPhrase ||
+        normalizedPhrase.length < 18
+      ) {
+        return false;
+      }
+
+      if (
+        memoText.includes(
+          normalizedPhrase
+        )
+      ) {
+        return true;
+      }
+
+      const phraseTokens =
+        issueIdentityTokens(
+          normalizedPhrase
+        );
+
+      const memoTokens =
+        issueIdentityTokens(
+          memoText
+        );
+
+      const overlap =
+        tokenOverlapRatio(
+          phraseTokens,
+          memoTokens
+        );
+
+      return (
+        phraseTokens.length >= 4 &&
+        overlap >= 0.88
+      );
+    });
+}
+
+function enforceFinalMemoLedgerInvariant(
+  memo: NormalizedMemo | null,
+  issues: IssueResolution[]
+): {
+  safe: boolean;
+  blockedIssueIds: string[];
+} {
+  if (!memo) {
+    return {
+      safe: true,
+      blockedIssueIds: [],
+    };
+  }
+
+  const blocked =
+    issues
+      .filter(
+        (issue) =>
+          issue.controlling &&
+          memoContainsBlockedConclusion(
+            memo,
+            issue
+          )
+      )
+      .map(
+        (issue) => issue.issue_id
+      );
+
+  return {
+    safe: blocked.length === 0,
+    blockedIssueIds: blocked,
+  };
+}
+
 function deterministicLedgerRelation(
   a: IssueResolution,
   b: IssueResolution
@@ -1877,6 +2467,15 @@ async function enforceNuclearLedgerIntegrity(args: {
       args.issues
     );
 
+  // Phase 4:
+  // First repair issue granularity and collapse wording-only differences.
+  // This prevents an entire legal family from being treated as one issue,
+  // while also preventing equivalent statements from becoming fake conflicts.
+  issues =
+    normalizeLedgerIssueGranularity(
+      issues
+    );
+
   const aiRelations =
     await classifyLedgerRelationsWithOpenAI({
       input: args.input,
@@ -2030,6 +2629,11 @@ async function enforceNuclearLedgerIntegrity(args: {
 
   issues =
     mergeDuplicateIssueResolutions(
+      issues
+    );
+
+  issues =
+    normalizeLedgerIssueGranularity(
       issues
     );
 
@@ -6328,6 +6932,27 @@ export async function runCrosscheck(
       input: workingInput,
       issueResolutions,
     });
+  }
+
+  // Phase 4 — deterministic final memo acceptance gate.
+  //
+  // No unresolved, fact-dependent, or rejected controlling position may
+  // survive into the delivered memo as an affirmative conclusion.
+  const finalMemoLedgerInvariant =
+    enforceFinalMemoLedgerInvariant(
+      finalMemo,
+      issueResolutions
+    );
+
+  if (
+    finalMemo &&
+    !finalMemoLedgerInvariant.safe
+  ) {
+    finalMemo =
+      buildLedgerSafeFallbackMemo({
+        input: workingInput,
+        issueResolutions,
+      });
   }
 
   const answer =
