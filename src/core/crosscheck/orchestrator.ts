@@ -582,51 +582,351 @@ function buildConsolidatedIssueFromGroup(args: {
   };
 }
 
+function normalizeIssueIdentityText(value: unknown): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/§/g, " section ")
+    .replace(/\bsec(?:tion)?\.?\s*/g, " section ")
+    .replace(/\birc\b/g, " internal revenue code ")
+    .replace(/\bu\.?s\.?c\.?\b/g, " code ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function issueIdentityTokens(value: unknown): string[] {
+  const stop = new Set([
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "been",
+    "being",
+    "by",
+    "for",
+    "from",
+    "has",
+    "have",
+    "in",
+    "into",
+    "is",
+    "it",
+    "its",
+    "may",
+    "of",
+    "on",
+    "or",
+    "that",
+    "the",
+    "their",
+    "this",
+    "to",
+    "under",
+    "was",
+    "were",
+    "whether",
+    "which",
+    "with",
+    "would",
+    "tax",
+    "taxes",
+    "taxpayer",
+    "rule",
+    "rules",
+    "treatment",
+    "amount",
+    "calculation",
+    "calculate",
+    "computed",
+    "compute",
+    "determination",
+    "determine",
+    "application",
+    "applies",
+    "applicable",
+  ]);
+
+  return uniq(
+    normalizeIssueIdentityText(value)
+      .split(" ")
+      .filter((token) => token.length >= 2 && !stop.has(token))
+  ).sort();
+}
+
+function extractIssueLegalAnchors(value: unknown): string[] {
+  const text = normalizeIssueIdentityText(value);
+  const anchors = new Set<string>();
+
+  const sectionPattern =
+    /\bsection\s+([0-9]{1,4}[a-z]?)\b/g;
+
+  for (const match of text.matchAll(sectionPattern)) {
+    const normalized = String(match[1] || "")
+      .replace(/\s+/g, "")
+      .trim();
+
+    if (normalized) {
+      anchors.add(`section:${normalized}`);
+    }
+  }
+
+  const formPattern =
+    /\bform\s+([0-9]{3,5}[a-z]?)\b/g;
+
+  for (const match of text.matchAll(formPattern)) {
+    const normalized = String(match[1] || "").trim();
+    if (normalized) {
+      anchors.add(`form:${normalized}`);
+    }
+  }
+
+  return Array.from(anchors).sort();
+}
+
+function buildClaimIssueIdentity(claim: ControllingClaimCandidate): {
+  descriptor: string;
+  tokens: string[];
+  legalAnchors: string[];
+  scopeTokens: string[];
+} {
+  const descriptor = [
+    claim.topic,
+    ...claim.applies_to,
+    claim.statement,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return {
+    descriptor,
+    tokens: issueIdentityTokens(descriptor),
+    legalAnchors: extractIssueLegalAnchors(descriptor),
+    scopeTokens: issueIdentityTokens(
+      [claim.topic, ...claim.applies_to]
+        .filter(Boolean)
+        .join(" ")
+    ),
+  };
+}
+
+function tokenOverlapRatio(a: string[], b: string[]): number {
+  if (!a.length || !b.length) return 0;
+
+  const aa = new Set(a);
+  const bb = new Set(b);
+
+  let intersection = 0;
+
+  for (const token of aa) {
+    if (bb.has(token)) intersection++;
+  }
+
+  return intersection / Math.min(aa.size, bb.size);
+}
+
+function tokenJaccard(a: string[], b: string[]): number {
+  if (!a.length || !b.length) return 0;
+
+  const aa = new Set(a);
+  const bb = new Set(b);
+
+  let intersection = 0;
+
+  for (const token of aa) {
+    if (bb.has(token)) intersection++;
+  }
+
+  const union = new Set([...aa, ...bb]).size;
+  return union ? intersection / union : 0;
+}
+
+function shareIssueAnchor(a: string[], b: string[]): boolean {
+  if (!a.length || !b.length) return false;
+
+  const bb = new Set(b);
+  return a.some((anchor) => bb.has(anchor));
+}
+
+function claimsShareDeterministicIssue(
+  a: ControllingClaimCandidate,
+  b: ControllingClaimCandidate
+): boolean {
+  const ai = buildClaimIssueIdentity(a);
+  const bi = buildClaimIssueIdentity(b);
+
+  const sharedLegalAnchor = shareIssueAnchor(
+    ai.legalAnchors,
+    bi.legalAnchors
+  );
+
+  const scopeOverlap = tokenOverlapRatio(
+    ai.scopeTokens,
+    bi.scopeTokens
+  );
+
+  const overallOverlap = tokenOverlapRatio(
+    ai.tokens,
+    bi.tokens
+  );
+
+  const jaccard = tokenJaccard(
+    ai.tokens,
+    bi.tokens
+  );
+
+  // Same explicit legal/form anchor plus meaningful semantic overlap.
+  if (
+    sharedLegalAnchor &&
+    overallOverlap >= 0.30 &&
+    (jaccard >= 0.16 || scopeOverlap >= 0.34)
+  ) {
+    return true;
+  }
+
+  // Strong provider-declared scope overlap is useful only when the
+  // substantive claim language also overlaps. Shared parties alone
+  // (for example, "U.S. parent") must never collapse unrelated issues.
+  if (
+    ai.scopeTokens.length &&
+    bi.scopeTokens.length &&
+    scopeOverlap >= 0.72 &&
+    overallOverlap >= 0.38 &&
+    jaccard >= 0.20
+  ) {
+    return true;
+  }
+
+  // Strong overall lexical-semantic identity.
+  if (
+    overallOverlap >= 0.72 &&
+    jaccard >= 0.42
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function canonicalIssueLabel(
+  bucket: ControllingClaimCandidate[]
+): string {
+  const topicCounts = new Map<string, number>();
+
+  for (const claim of bucket) {
+    const topic = String(claim.topic || "").trim();
+    if (!topic) continue;
+
+    const key = normalizeIssueIdentityText(topic);
+    if (!key) continue;
+
+    topicCounts.set(key, (topicCounts.get(key) || 0) + 1);
+  }
+
+  const rankedTopics = Array.from(topicCounts.entries())
+    .sort((a, b) => b[1] - a[1]);
+
+  if (rankedTopics.length) {
+    const winner = rankedTopics[0][0];
+
+    const original = bucket
+      .map((claim) => String(claim.topic || "").trim())
+      .find(
+        (topic) =>
+          normalizeIssueIdentityText(topic) === winner
+      );
+
+    if (original) return original;
+  }
+
+  const scoped = bucket
+    .flatMap((claim) => claim.applies_to)
+    .map((x) => String(x || "").trim())
+    .find(Boolean);
+
+  if (scoped) return scoped;
+
+  return bucket[0]?.statement || "Controlling legal issue";
+}
+
 function fallbackSemanticGroups(
   claims: ControllingClaimCandidate[]
 ): SemanticClaimGroup[] {
-  const buckets = new Map<string, ControllingClaimCandidate[]>();
+  if (!claims.length) return [];
 
-  for (const claim of claims) {
-    const topic = claim.topic.toLowerCase().trim();
-    const applies = claim.applies_to
-      .map((x) => x.toLowerCase().trim())
-      .sort()
-      .join("|");
+  // Phase 3G:
+  // Build deterministic connected components of claims that appear to answer
+  // the same underlying issue. This fallback must remain useful even when the
+  // model-based semantic clustering stage is unavailable or malformed.
+  //
+  // Importantly, this does NOT decide which legal position is correct.
+  // It only prevents materially competing positions from escaping into
+  // separate "supported" ledger entries because providers used different
+  // labels for the same issue.
 
-    const key =
-      topic || applies
-        ? `${topic}::${applies}`
-        : claim.claim_id;
+  const parent = claims.map((_, index) => index);
 
-    const bucket = buckets.get(key) || [];
-    bucket.push(claim);
-    buckets.set(key, bucket);
+  const find = (index: number): number => {
+    let current = index;
+
+    while (parent[current] !== current) {
+      parent[current] = parent[parent[current]];
+      current = parent[current];
+    }
+
+    return current;
+  };
+
+  const union = (a: number, b: number): void => {
+    const ra = find(a);
+    const rb = find(b);
+
+    if (ra !== rb) {
+      parent[rb] = ra;
+    }
+  };
+
+  for (let i = 0; i < claims.length; i++) {
+    for (let j = i + 1; j < claims.length; j++) {
+      if (claimsShareDeterministicIssue(claims[i], claims[j])) {
+        union(i, j);
+      }
+    }
   }
 
+  const buckets = new Map<number, ControllingClaimCandidate[]>();
+
+  claims.forEach((claim, index) => {
+    const root = find(index);
+    const bucket = buckets.get(root) || [];
+    bucket.push(claim);
+    buckets.set(root, bucket);
+  });
+
   return Array.from(buckets.values()).map((bucket) => {
-    const positions = uniq(bucket.map((x) => x.statement));
+    const positions = uniq(
+      bucket.map((claim) => claim.statement)
+    );
+
+    const label = canonicalIssueLabel(bucket);
 
     return {
-      issue_label:
-        bucket[0].topic ||
-        bucket[0].applies_to[0] ||
-        bucket[0].statement,
-      issue_statement:
-        bucket[0].topic ||
-        bucket[0].applies_to[0] ||
-        bucket[0].statement,
-      claim_ids: bucket.map((x) => x.claim_id),
+      issue_label: label,
+      issue_statement: label,
+      claim_ids: bucket.map((claim) => claim.claim_id),
 
-      // The local fallback is intentionally conservative.
-      // If multiple distinct controlling propositions land in the same
-      // provider-declared topic/scope, do not call that consensus.
+      // Deterministic fallback is deliberately conservative:
+      // distinct controlling positions inside the same canonical issue
+      // are not consensus merely because providers broadly agree elsewhere.
       relationship:
         positions.length > 1 ? "mixed" : "aligned",
+
       reasoning:
         positions.length > 1
-          ? "Semantic clustering was unavailable. Multiple distinct controlling provider positions were grouped conservatively by provider-declared topic/scope and treated as unresolved."
-          : "Semantic clustering was unavailable. Singleton controlling claim retained as provisionally supported.",
+          ? "Model-based semantic clustering was unavailable or unusable. Deterministic issue-identity normalization grouped materially related controlling claims into the same issue. Because distinct positions remain, the issue is treated as unresolved pending adjudication or authority verification."
+          : "Model-based semantic clustering was unavailable or unusable. Deterministic issue-identity normalization retained this controlling position as provisionally supported pending authority verification.",
     };
   });
 }
