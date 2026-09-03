@@ -143,6 +143,130 @@ function overlapRatio(
     Math.min(aa.size, bb.size);
 }
 
+function obviousEquivalentPositions(
+  positions: IssueProviderPosition[]
+): boolean {
+  if (positions.length < 2) {
+    return false;
+  }
+
+  /*
+   * Conservative deterministic shortcut only.
+   *
+   * This does NOT attempt to decide tax law.
+   * It catches only very strong textual equivalence before
+   * asking the semantic referee.
+   *
+   * Anything less obvious continues to the model classifier.
+   */
+  for (let i = 0; i < positions.length; i++) {
+    for (
+      let j = i + 1;
+      j < positions.length;
+      j++
+    ) {
+      const a =
+        normalize(
+          positions[i].position
+        );
+
+      const b =
+        normalize(
+          positions[j].position
+        );
+
+      if (!a || !b) {
+        return false;
+      }
+
+      if (a === b) {
+        continue;
+      }
+
+      /*
+       * Never use textual similarity to collapse positions
+       * that contain different explicit numerical outcomes.
+       *
+       * Example:
+       * "bonus depreciation is 80%" vs "bonus depreciation is 100%"
+       * may have extremely high token overlap but is a genuine
+       * material conflict.
+       */
+      const numbersA =
+        a.match(/\b\d+(?:\.\d+)?\b/g) || [];
+
+      const numbersB =
+        b.match(/\b\d+(?:\.\d+)?\b/g) || [];
+
+      if (
+        JSON.stringify(numbersA) !==
+        JSON.stringify(numbersB)
+      ) {
+        return false;
+      }
+
+      /*
+       * Likewise, do not deterministically collapse statements
+       * whose explicit polarity differs. Let the semantic referee
+       * determine whether the apparent difference is substantive.
+       */
+      const negativeMarkers =
+        /\b(?:not|no|never|cannot|cant|without|excluded|exempt|nontaxable)\b/g;
+
+      const negativesA =
+        a.match(negativeMarkers) || [];
+
+      const negativesB =
+        b.match(negativeMarkers) || [];
+
+      if (
+        negativesA.length !==
+        negativesB.length
+      ) {
+        return false;
+      }
+
+      const shorter =
+        a.length <= b.length ? a : b;
+
+      const longer =
+        a.length > b.length ? a : b;
+
+      /*
+       * One statement may simply add a code section,
+       * amount, implementation detail, or qualification.
+       */
+      if (
+        shorter.length >= 35 &&
+        longer.includes(shorter) &&
+        shorter.length /
+          longer.length >=
+          0.55
+      ) {
+        continue;
+      }
+
+      /*
+       * Very high token overlap is another strong signal
+       * of duplicate wording. Keep threshold deliberately
+       * high so genuine legal conflicts are not collapsed.
+       */
+      if (
+        overlapRatio(
+          tokens(a),
+          tokens(b)
+        ) >= 0.78
+      ) {
+        continue;
+      }
+
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function extractJsonObject(
   raw: string
 ): string {
@@ -370,6 +494,20 @@ async function classifyConflictNature(args: {
       })
     );
 
+  if (
+    obviousEquivalentPositions(
+      args.issue.provider_positions
+    )
+  ) {
+    return {
+      classification: "equivalent",
+      representativePositionId: "P1",
+      reasoning:
+        "Deterministic preflight found the provider positions to be materially duplicate formulations of the same operative conclusion.",
+      missingFacts: [],
+    };
+  }
+
   const model =
     env(
       "OPENAI_CONFLICT_CLASSIFIER_MODEL"
@@ -408,6 +546,11 @@ async function classifyConflictNature(args: {
     "3. A methodology statement and a numerical result are normally complementary unless the numerical result contradicts the methodology.",
     "4. Do not manufacture a conflict merely because providers cited different provisions.",
     "5. Do not choose the legally correct position when there is a real material conflict.",
+    "6. Compare the OPERATIVE LEGAL OUTCOME, not sentence wording.",
+    "7. If one provider says an item must be capitalized and another says the cost is capitalized under a specific statutory provision, those are equivalent or complementary unless one actually reaches a different treatment.",
+    "8. If one provider states a broad filing obligation and another states the same obligation plus an additional category, schedule, condition, or detail, do not call them conflicting merely because one is more complete.",
+    "9. If two positions both say an amount is excluded, creditable, deductible, taxable, subject to withholding, or otherwise receives the same operative treatment, added citations or explanatory detail normally make them equivalent or complementary.",
+    "10. Use material_conflict only when accepting one position would make another materially false for the same facts.",
     "",
     "Return STRICT JSON ONLY:",
     "{",
@@ -981,6 +1124,14 @@ export async function escalateSevereIssueConflicts(args: {
     };
   }
 
+  /*
+   * Every unresolved controlling issue must pass through
+   * semantic triage.
+   *
+   * EXTERNAL_RESEARCH_MAX_ISSUES limits WEB SEARCHES,
+   * not the number of issues TaxAiPro is allowed to
+   * classify internally.
+   */
   const candidates =
     args.issues
       .filter(shouldEscalate)
@@ -988,10 +1139,6 @@ export async function escalateSevereIssueConflicts(args: {
         (a, b) =>
           escalationPriority(b) -
           escalationPriority(a)
-      )
-      .slice(
-        0,
-        maxResearchIssues()
       );
 
   if (!candidates.length) {
@@ -1102,15 +1249,33 @@ export async function escalateSevereIssueConflicts(args: {
   /*
    * Public-source research is reserved exclusively
    * for genuine material conflicts.
+   *
+   * The research limit is intentionally applied HERE,
+   * after semantic triage, so equivalent, complementary,
+   * and fact-dependent issues are never left unresolved
+   * merely because the web-research budget was reached.
    */
+  const webResearchCandidates =
+    researchCandidates
+      .sort(
+        (a, b) =>
+          escalationPriority(b) -
+          escalationPriority(a)
+      )
+      .slice(
+        0,
+        maxResearchIssues()
+      );
+
   const researched =
     await Promise.all(
-      researchCandidates.map((issue) =>
-        researchIssue({
-          client,
-          input: args.input,
-          issue,
-        })
+      webResearchCandidates.map(
+        (issue) =>
+          researchIssue({
+            client,
+            input: args.input,
+            issue,
+          })
       )
     );
 
