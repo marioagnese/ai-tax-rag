@@ -470,6 +470,43 @@ function positionIdForIndex(
   return `P${index + 1}`;
 }
 
+function logConflictTriage(args: {
+  issue: IssueResolution;
+  path:
+    | "deterministic"
+    | "classifier"
+    | "parse_failure"
+    | "api_failure";
+  classification: ConflictNature;
+  representativePositionId?: string;
+  reasoning?: string;
+  model?: string;
+}): void {
+  console.info(
+    "[TaxAiPro conflict triage]",
+    JSON.stringify({
+      issue_id:
+        args.issue.issue_id,
+      issue_label:
+        args.issue.issue_label,
+      provider_position_count:
+        args.issue.provider_positions.length,
+      path:
+        args.path,
+      classification:
+        args.classification,
+      representative_position_id:
+        args.representativePositionId || null,
+      model:
+        args.model || null,
+      reasoning:
+        String(
+          args.reasoning || ""
+        ).slice(0, 500),
+    })
+  );
+}
+
 async function classifyConflictNature(args: {
   client: OpenAI;
   input: CrosscheckInput;
@@ -499,11 +536,21 @@ async function classifyConflictNature(args: {
       args.issue.provider_positions
     )
   ) {
+    const reasoning =
+      "Deterministic preflight found the provider positions to be materially duplicate formulations of the same operative conclusion.";
+
+    logConflictTriage({
+      issue: args.issue,
+      path: "deterministic",
+      classification: "equivalent",
+      representativePositionId: "P1",
+      reasoning,
+    });
+
     return {
       classification: "equivalent",
       representativePositionId: "P1",
-      reasoning:
-        "Deterministic preflight found the provider positions to be materially duplicate formulations of the same operative conclusion.",
+      reasoning,
       missingFacts: [],
     };
   }
@@ -627,45 +674,82 @@ async function classifyConflictNature(args: {
        * preserve the existing unresolved issue and permit
        * research rather than falsely collapsing a real conflict.
        */
+      const reasoning =
+        "Conflict classification could not be parsed safely; the unresolved issue was conservatively retained for escalation.";
+
+      logConflictTriage({
+        issue: args.issue,
+        path: "parse_failure",
+        classification:
+          "material_conflict",
+        reasoning,
+        model,
+      });
+
       return {
         classification:
           "material_conflict",
-        reasoning:
-          "Conflict classification could not be parsed safely; the unresolved issue was conservatively retained for escalation.",
+        reasoning,
         missingFacts: [],
       };
     }
 
+    const representativePositionId =
+      String(
+        parsed?.representative_position_id ||
+        ""
+      ).trim() || undefined;
+
+    const reasoning =
+      String(
+        parsed?.reasoning || ""
+      ).trim();
+
+    const missingFacts =
+      Array.isArray(
+        parsed?.missing_facts
+      )
+        ? parsed!.missing_facts!
+            .map((x) =>
+              String(x || "").trim()
+            )
+            .filter(Boolean)
+        : [];
+
+    logConflictTriage({
+      issue: args.issue,
+      path: "classifier",
+      classification,
+      representativePositionId,
+      reasoning,
+      model,
+    });
+
     return {
       classification,
-      representativePositionId:
-        String(
-          parsed?.representative_position_id ||
-          ""
-        ).trim() || undefined,
-      reasoning:
-        String(
-          parsed?.reasoning || ""
-        ).trim(),
-      missingFacts:
-        Array.isArray(
-          parsed?.missing_facts
-        )
-          ? parsed!.missing_facts!
-              .map((x) =>
-                String(x || "").trim()
-              )
-              .filter(Boolean)
-          : [],
+      representativePositionId,
+      reasoning,
+      missingFacts,
     };
   } catch (error: any) {
+    const reasoning =
+      `Conflict classification was unavailable and therefore failed conservatively: ${String(
+        error?.message || error
+      ).slice(0, 300)}`;
+
+    logConflictTriage({
+      issue: args.issue,
+      path: "api_failure",
+      classification:
+        "material_conflict",
+      reasoning,
+      model,
+    });
+
     return {
       classification:
         "material_conflict",
-      reasoning:
-        `Conflict classification was unavailable and therefore failed conservatively: ${String(
-          error?.message || error
-        ).slice(0, 300)}`,
+      reasoning,
       missingFacts: [],
     };
   }
