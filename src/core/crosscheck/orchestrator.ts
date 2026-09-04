@@ -3615,7 +3615,7 @@ function buildInitialIssueResolutionLedger(
       status: "unresolved",
       reasoning:
         String(claim.why_controlling || "").trim() ||
-        "The providers materially disagree on this proposition. It must not be resolved by vote, repetition, or prose blending.",
+        "The providers materially disagree on this proposition. Model convergence is relevant evidence, but the issue should be resolved by weighing convergence together with factual fit, legal or mechanical reasoning, and whether any minority position identifies a controlling distinction. If one position is materially stronger, it may be selected as the best-supported crosscheck position; otherwise keep the issue unresolved.",
       controlling: true,
       missing_facts: [],
       disagreements: claim.provider_positions
@@ -3773,7 +3773,7 @@ async function adjudicateIssueResolutionLedgerWithOpenAI(args: {
     "",
     "CORE PRINCIPLES",
     "1. Model agreement is evidence of convergence, not proof of correctness.",
-    "2. Never resolve an issue by majority vote.",
+    "2. Do not resolve an issue by simple majority alone. Treat independent model convergence as material evidence and weigh it together with factual fit, legal or mechanical reasoning, internal consistency, and whether a minority position identifies a genuinely controlling distinction. When one position is materially stronger on the available record, select it as the best-supported crosscheck position even if independent authority verification has not occurred.",
     "3. A minority position may be controlling if it identifies a legally or mechanically important distinction.",
     "4. Do not reward fluency, length, confidence, or repetition.",
     "5. Separate factual ambiguity from legal disagreement.",
