@@ -949,6 +949,9 @@ async function researchIssue(args: {
             },
           ],
           tool_choice: "auto",
+          include: [
+            "web_search_call.action.sources",
+          ],
           input: prompt,
         });
 
