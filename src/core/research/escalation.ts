@@ -647,7 +647,7 @@ async function classifyConflictNature(args: {
             content: user,
           },
         ],
-        max_tokens: 700,
+        max_completion_tokens: 700,
       });
 
     const raw =
