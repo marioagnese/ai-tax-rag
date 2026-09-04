@@ -1070,12 +1070,36 @@ async function researchIssue(args: {
           .provider_positions
       );
 
-    if (
-      !selected ||
-      !enoughExternalEvidence({
+    const evidenceSufficient =
+      enoughExternalEvidence({
         parsed,
         actualUrls,
+      });
+
+    console.info(
+      "[TaxAiPro external research resolution]",
+      JSON.stringify({
+        issue_id: args.issue.issue_id,
+        issue_label: args.issue.issue_label,
+        verdict,
+        selected_position_id:
+          parsed.selected_position_id || null,
+        selected_position_mapped:
+          Boolean(selected),
+        source_quality:
+          parsed.source_quality || "weak",
+        confidence:
+          parsed.confidence || "low",
+        actual_url_count:
+          actualUrls.length,
+        evidence_sufficient:
+          evidenceSufficient,
       })
+    );
+
+    if (
+      !selected ||
+      !evidenceSufficient
     ) {
       return {
         ...args.issue,
