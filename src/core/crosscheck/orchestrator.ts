@@ -6293,6 +6293,7 @@ async function validateLegalClaimsWithOpenAI(args: {
   assessments: ProviderAssessment[];
   conflictMatrix: ConflictMatrix;
   freshnessScan: LegalFreshnessScan | null;
+  useWeb?: boolean;
 }): Promise<LegalClaimValidation | null> {
   if (!args.finalMemo) return null;
   if (!legalClaimValidationLooksNeeded({
@@ -6333,7 +6334,9 @@ async function validateLegalClaimsWithOpenAI(args: {
     "Provider agreement is evidence of convergence, but it is not independent proof that a legal proposition is correct.",
     "Do not validate a material legal claim merely because multiple providers repeat or support it.",
     "For material statutory classifications, eligibility rules, named regimes, rates, thresholds, effective dates, transition rules, filing mechanics, or other outcome-determinative legal propositions, test whether the proposition actually fits the stated facts and current law.",
-    "Use current public web sources selectively when needed to test those material propositions. Prefer primary or official authority when available.",
+    args.useWeb
+      ? "Use current public web sources selectively when needed to test those material propositions. Prefer primary or official authority when available."
+      : "This is the fast quality-control pass. Identify material claims that appear to require independent current-law or authority checking, but do not assume provider consensus proves them correct.",
     "Do not require every ordinary or uncontested statement to be independently researched. External checking is a quality-control safeguard for material legal or factual-fit risk.",
     "If a material claim introduces a legal regime whose prerequisites are not established by the facts, flag the claim rather than treating provider consensus as sufficient support.",
     "If providers conflict on a statutory article, tax rate, effective date, named regime, eligibility condition, classification, or compliance mechanism, flag it.",
@@ -6368,28 +6371,45 @@ async function validateLegalClaimsWithOpenAI(args: {
     .filter(Boolean)
     .join("\n\n");
 
-  const prompt = [
-    sys,
-    "",
-    user,
-  ].join("\n\n");
+  let raw = "{}";
 
-  const resp = await (client as any).responses.create({
-    model,
-    tools: [
-      {
-        type: "web_search",
-        search_context_size: "medium",
-      },
-    ],
-    tool_choice: "auto",
-    include: [
-      "web_search_call.action.sources",
-    ],
-    input: prompt,
-  });
+  if (args.useWeb) {
+    const prompt = [
+      sys,
+      "",
+      user,
+    ].join("\n\n");
 
-  const raw = String(resp?.output_text || "{}");
+    const resp = await (client as any).responses.create({
+      model,
+      tools: [
+        {
+          type: "web_search",
+          search_context_size: "medium",
+        },
+      ],
+      tool_choice: "auto",
+      include: [
+        "web_search_call.action.sources",
+      ],
+      input: prompt,
+    });
+
+    raw = String(resp?.output_text || "{}");
+  } else {
+    const resp = await client.chat.completions.create({
+      model,
+      temperature: 0,
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: user },
+      ],
+      max_tokens: 1200,
+    });
+
+    raw = resp.choices?.[0]?.message?.content || "{}";
+  }
+
   const parsed = safeJsonParse<Partial<LegalClaimValidation>>(
     extractJsonObject(raw)
   );
@@ -7784,6 +7804,27 @@ export async function runCrosscheck(
   }).catch(() => null);
 
   const highRiskProviderConflicts = detectHighRiskProviderConflict(reasoningArtifacts);
+
+  // Escalate legal-claim QC to current public sources only when the fast
+  // validator itself identifies a material or critical problem. This keeps
+  // routine analyses fast while independently checking genuinely risky
+  // statutory, classification, eligibility, rate, threshold, or timing claims.
+  const legalValidationNeedsExternalCheck =
+    legalClaimValidation?.valid === false ||
+    legalClaimValidation?.severity === "critical" ||
+    legalClaimValidation?.severity === "material";
+
+  if (finalMemo && legalValidationNeedsExternalCheck) {
+    legalClaimValidation = await validateLegalClaimsWithOpenAI({
+      input: workingInput,
+      finalMemo,
+      reasoningArtifacts,
+      assessments: reasoningAssessments,
+      conflictMatrix: reasoningConflictMatrix,
+      freshnessScan: legalFreshnessScan,
+      useWeb: true,
+    }).catch(() => legalClaimValidation);
+  }
 
   const legalValidationRequiresRepair =
     legalClaimValidation?.valid === false ||
