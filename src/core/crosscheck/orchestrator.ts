@@ -5439,7 +5439,7 @@ async function constructCombinedDraftWithOpenAI(args: {
 
   const sys = [
     "You are constructing a combined tax memo draft from multiple revised model answers.",
-    "You are NOT writing a comparison.",
+    "You are NOT writing a provider-by-provider comparison. You may summarize material crosscheck convergence, minority disagreement, and the strength of the working position in aggregate without naming individual providers or models.",
     "Build one concise internal memo from surviving claims only.",
     "You MUST exclude claims listed as excluded critical claims.",
     "Do not smooth over unresolved controlling conflicts.",
@@ -5550,7 +5550,7 @@ async function adjudicateFinalWithOpenAI(args: {
     "",
     "OUTPUT RULES",
     "- Write a concise internal memo.",
-    "- Do not mention providers, models, rounds, agreements, or disagreements.",
+    "- Do not identify individual providers, model names, or rounds. However, do summarize material crosscheck convergence in aggregate when it helps the user understand the strength of the working position. If a clear majority supports the selected position, you may say that multiple independent analyses converged or that a majority materially aligned. If a meaningful minority view remains, disclose it briefly and explain whether it weakens confidence, identifies a controlling distinction, or warrants further research. Do not present supported positions as independently verified unless the ledger status is verified.",
     "- Do not include penalty scare language or generic disclaimers.",
     "- Do not recommend contacting tax authorities.",
     "- Do not invent citations or authorities.",
@@ -5666,7 +5666,7 @@ async function adjudicateFinalWithClaude(args: {
     "",
     "You are the final senior tax adjudicator.",
     "Re-derive the answer from surviving claims, not from prose blending.",
-    "Do NOT write a model comparison.",
+    "Do NOT write a provider-by-provider model comparison. You may summarize material convergence and minority disagreement in aggregate when it is relevant to confidence or the recommended working position, without naming providers or models.",
     "Weight round 2 higher than round 1.",
     "Use the combined draft as a candidate, not as unquestioned truth.",
     "Never state excluded critical claims as fact.",
@@ -5725,7 +5725,7 @@ async function mergeFinalMemosWithOpenAI(args: {
   const sys = [
     "You are the final merger for two adjudicated tax memos.",
     "Write one concise internal tax memo.",
-    "Do NOT write a comparison.",
+    "Do NOT write a provider-by-provider comparison. You may preserve concise aggregate crosscheck transparency, including strong convergence, meaningful minority disagreement, and whether the selected position is supported versus independently verified.",
     "Prefer the more legally precise memo where they differ.",
     "Never state excluded critical claims as fact.",
     "The ISSUE RESOLUTION LEDGER is controlling over the candidate memos.",
