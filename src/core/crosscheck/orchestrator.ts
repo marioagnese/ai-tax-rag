@@ -432,13 +432,28 @@ function emptyConflictMatrix(): ConflictMatrix {
 }
 
 function issueId(prefix: string, value: string, index: number): string {
-  const slug = String(value || "")
+  const normalized = String(value || "")
+    .trim()
     .toLowerCase()
+    .replace(/\s+/g, " ");
+
+  const slug = normalized
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "")
-    .slice(0, 60);
+    .slice(0, 48);
 
-  return `${prefix}_${slug || index + 1}`;
+  let hash = 2166136261;
+
+  for (let i = 0; i < normalized.length; i++) {
+    hash ^= normalized.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  const fingerprint = (hash >>> 0)
+    .toString(36)
+    .padStart(7, "0");
+
+  return `${prefix}_${slug || "issue"}_${fingerprint}_${index + 1}`;
 }
 
 type ControllingClaimCandidate = {
@@ -1709,10 +1724,9 @@ function splitOverMergedIssueFamily(
   issue: IssueResolution
 ): IssueResolution[] {
   // Phase 4.1:
-  // A Phase-4-created subissue is already at proposition granularity.
-  // Never recursively split _sub_ issues into _sub_1_sub_1 chains.
+  // Split any still-overmerged issue family, including a previously created
+  // subissue, because later semantic passes may reveal additional propositions.
   if (
-    issue.issue_id.includes("_sub_") ||
     issue.provider_positions.length < 3
   ) {
     return [issue];
