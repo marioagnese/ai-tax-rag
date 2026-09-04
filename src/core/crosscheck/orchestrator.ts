@@ -6329,9 +6329,14 @@ async function validateLegalClaimsWithOpenAI(args: {
     "- claims that a taxpayer is subject to, exempt from, or outside a tax",
     "- claims that may blend one tax regime into another",
     "",
-    "You must identify unsupported, internally inconsistent, overconfident, or suspicious claims.",
-    "Do not require formal citations. Instead evaluate whether the final memo has enough support from the provider artifacts and whether provider positions materially conflict.",
-    "If providers conflict on a statutory article, tax rate, effective date, named regime, or compliance mechanism, flag it.",
+    "You must identify unsupported, internally inconsistent, overconfident, factually mismatched, or suspicious claims.",
+    "Provider agreement is evidence of convergence, but it is not independent proof that a legal proposition is correct.",
+    "Do not validate a material legal claim merely because multiple providers repeat or support it.",
+    "For material statutory classifications, eligibility rules, named regimes, rates, thresholds, effective dates, transition rules, filing mechanics, or other outcome-determinative legal propositions, test whether the proposition actually fits the stated facts and current law.",
+    "Use current public web sources selectively when needed to test those material propositions. Prefer primary or official authority when available.",
+    "Do not require every ordinary or uncontested statement to be independently researched. External checking is a quality-control safeguard for material legal or factual-fit risk.",
+    "If a material claim introduces a legal regime whose prerequisites are not established by the facts, flag the claim rather than treating provider consensus as sufficient support.",
+    "If providers conflict on a statutory article, tax rate, effective date, named regime, eligibility condition, classification, or compliance mechanism, flag it.",
     "If the final memo adopts a disputed high-risk claim without narrowing or confirmation, severity should be material or critical.",
     "If the final memo is cautious and converts disputed high-risk claims into required confirmations, severity can be minor or none.",
     "",
@@ -6363,18 +6368,32 @@ async function validateLegalClaimsWithOpenAI(args: {
     .filter(Boolean)
     .join("\n\n");
 
-  const resp = await client.chat.completions.create({
+  const prompt = [
+    sys,
+    "",
+    user,
+  ].join("\n\n");
+
+  const resp = await (client as any).responses.create({
     model,
-    temperature: 0,
-    messages: [
-      { role: "system", content: sys },
-      { role: "user", content: user },
+    tools: [
+      {
+        type: "web_search",
+        search_context_size: "medium",
+      },
     ],
-    max_tokens: 1200,
+    tool_choice: "auto",
+    include: [
+      "web_search_call.action.sources",
+    ],
+    input: prompt,
   });
 
-  const raw = resp.choices?.[0]?.message?.content || "{}";
-  const parsed = safeJsonParse<Partial<LegalClaimValidation>>(extractJsonObject(raw));
+  const raw = String(resp?.output_text || "{}");
+  const parsed = safeJsonParse<Partial<LegalClaimValidation>>(
+    extractJsonObject(raw)
+  );
+
   return normalizeLegalClaimValidation(parsed);
 }
 
