@@ -6918,18 +6918,38 @@ async function runLegalFreshnessScan(input: CrosscheckInput): Promise<LegalFresh
     .filter(Boolean)
     .join("\n\n");
 
-  const resp = await client.chat.completions.create({
+  const prompt = [
+    sys,
+    "",
+    user,
+    "",
+    "Use current public web sources when determining whether enacted law,",
+    "effective dates, transition rules, rates, thresholds, or tax-authority",
+    "guidance have changed or may materially affect the requested tax period.",
+    "Do not perform a full tax analysis. This search is only a freshness-risk",
+    "screen used to warn the downstream crosscheck providers.",
+  ].join("\n");
+
+  const resp = await (client as any).responses.create({
     model,
-    temperature: 0,
-    messages: [
-      { role: "system", content: sys },
-      { role: "user", content: user },
+    tools: [
+      {
+        type: "web_search",
+        search_context_size: "medium",
+      },
     ],
-    max_tokens: 900,
+    tool_choice: "auto",
+    include: [
+      "web_search_call.action.sources",
+    ],
+    input: prompt,
   });
 
-  const raw = resp.choices?.[0]?.message?.content || "{}";
-  const parsed = safeJsonParse<Partial<LegalFreshnessScan>>(extractJsonObject(raw));
+  const raw = String(resp?.output_text || "{}");
+  const parsed = safeJsonParse<Partial<LegalFreshnessScan>>(
+    extractJsonObject(raw)
+  );
+
   return normalizeLegalFreshnessScan(parsed);
 }
 
