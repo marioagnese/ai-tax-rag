@@ -1876,22 +1876,28 @@ function memoContainsBlockedConclusion(
     return false;
   }
 
+  const rawMemoText = [
+    memo.executive_summary,
+    memo.analysis,
+    memo.recommendation,
+    ...memo.transaction_specific_treatment,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   const memoText =
     normalizeIssueIdentityText(
-      [
-        memo.executive_summary,
-        memo.analysis,
-        memo.recommendation,
-        ...memo.transaction_specific_treatment,
-      ]
-        .filter(Boolean)
-        .join(" ")
+      rawMemoText
     );
 
   if (!memoText) return false;
 
-  return blockedIssuePhrases(issue)
-    .some((phrase) => {
+  const blockedPhrases =
+    blockedIssuePhrases(issue);
+
+  // Preserve the original direct blocked-position detection.
+  if (
+    blockedPhrases.some((phrase) => {
       const normalizedPhrase =
         normalizeIssueIdentityText(
           phrase
@@ -1932,7 +1938,140 @@ function memoContainsBlockedConclusion(
         phraseTokens.length >= 4 &&
         overlap >= 0.88
       );
-    });
+    })
+  ) {
+    return true;
+  }
+
+  // Phase 4.2:
+  // A controlling unresolved issue must not be silently resolved in the memo
+  // through a new third position that was never present in the ledger.
+  const issueDescriptor = [
+    issue.issue_label,
+    issue.issue_statement,
+    ...issue.provider_positions.map(
+      (position) => position.position
+    ),
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const issueTokens =
+    issueIdentityTokens(
+      issueDescriptor
+    );
+
+  const issueAnchors =
+    extractIssueLegalAnchors(
+      issueDescriptor
+    );
+
+  const knownMarkers =
+    new Set(
+      blockedPhrases.flatMap(
+        extractMaterialAssertionMarkers
+      )
+    );
+
+  const cautiousPattern =
+    /\b(?:unresolved|uncertain|must be confirmed|requires confirmation|subject to confirmation|cannot be determined|depends on|fact dependent|fact-dependent|competing positions|further research)\b/i;
+
+  const memoChunks =
+    rawMemoText
+      .split(/(?<=[.!?])\s+|\n+/)
+      .map((chunk) => chunk.trim())
+      .filter(Boolean);
+
+  for (const chunk of memoChunks) {
+    if (cautiousPattern.test(chunk)) {
+      continue;
+    }
+
+    const chunkTokens =
+      issueIdentityTokens(
+        chunk
+      );
+
+    const chunkAnchors =
+      extractIssueLegalAnchors(
+        chunk
+      );
+
+    const sharedAnchor =
+      shareIssueAnchor(
+        issueAnchors,
+        chunkAnchors
+      );
+
+    const overlap =
+      tokenOverlapRatio(
+        issueTokens,
+        chunkTokens
+      );
+
+    const jaccard =
+      tokenJaccard(
+        issueTokens,
+        chunkTokens
+      );
+
+    const sameIssue =
+      (
+        sharedAnchor &&
+        overlap >= 0.24
+      ) ||
+      (
+        overlap >= 0.52 &&
+        jaccard >= 0.22
+      );
+
+    if (!sameIssue) {
+      continue;
+    }
+
+    const chunkMarkers =
+      extractMaterialAssertionMarkers(
+        chunk
+      );
+
+    // If the memo states a concrete percentage, amount, category, etc. for
+    // this unresolved issue, it may not introduce a value absent from every
+    // known ledger position.
+    if (
+      chunkMarkers.some(
+        (marker) =>
+          !knownMarkers.has(marker)
+      )
+    ) {
+      return true;
+    }
+
+    // Also prevent the memo from silently selecting one of the competing
+    // unresolved positions merely by paraphrasing it.
+    if (
+      blockedPhrases.some((phrase) => {
+        const phraseTokens =
+          issueIdentityTokens(
+            phrase
+          );
+
+        if (phraseTokens.length < 4) {
+          return false;
+        }
+
+        return (
+          tokenOverlapRatio(
+            phraseTokens,
+            chunkTokens
+          ) >= 0.82
+        );
+      })
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function enforceFinalMemoLedgerInvariant(
