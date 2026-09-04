@@ -1475,7 +1475,7 @@ function collapseEquivalentProviderPositions(
 
   for (const position of positions) {
     const existing = buckets.find((bucket) =>
-      bucket.some((candidate) =>
+      bucket.every((candidate) =>
         positionsMateriallyEquivalent(
           candidate.position,
           position.position
@@ -1731,29 +1731,28 @@ function splitOverMergedIssueFamily(
       status: "supported",
     } as IssueResolution;
 
-    const bucket = buckets.find((existing) => {
-      const representative =
-        existing[0];
+    const bucket = buckets.find((existing) =>
+      existing.every((member) => {
+        const memberIssue = {
+          ...issue,
+          issue_id: `${issue.issue_id}_member`,
+          issue_label:
+            member.position,
+          issue_statement:
+            member.position,
+          provider_positions:
+            [member],
+          resolved_position:
+            member.position,
+          status: "supported",
+        } as IssueResolution;
 
-      const representativeIssue = {
-        ...issue,
-        issue_id: `${issue.issue_id}_rep`,
-        issue_label:
-          representative.position,
-        issue_statement:
-          representative.position,
-        provider_positions:
-          [representative],
-        resolved_position:
-          representative.position,
-        status: "supported",
-      } as IssueResolution;
-
-      return areSameLegalSubissue(
-        representativeIssue,
-        candidateIssue
-      );
-    });
+        return areSameLegalSubissue(
+          memberIssue,
+          candidateIssue
+        );
+      })
+    );
 
     if (bucket) {
       bucket.push(position);
