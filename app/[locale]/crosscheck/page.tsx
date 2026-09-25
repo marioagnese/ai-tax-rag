@@ -1451,7 +1451,18 @@ async function persistRun(args: {
       setCaveats(data?.consensus?.caveats || []);
       setFollowups(data?.consensus?.followups || []);
       setDisagreements(data?.consensus?.disagreements || []);
-      setIssueResolutions(data?.consensus?.issue_resolutions || []);
+
+      const nextIssueResolutions =
+        data?.consensus?.issue_resolutions || [];
+
+      // A refine/follow-up/finalize response may return a new memo without
+      // repeating the issue-level CrossCheck ledger. Preserve the most recent
+      // valid ledger in that case so CrossCheck Intelligence remains attached
+      // to the analysis and final deliverable.
+      if (nextIssueResolutions.length > 0 || !preserveExistingResult) {
+        setIssueResolutions(nextIssueResolutions);
+      }
+
       setProviders(data?.providers || []);
       setRuntimeMs(
         typeof data?.meta?.runtime_ms === "number" ? data.meta.runtime_ms : null
