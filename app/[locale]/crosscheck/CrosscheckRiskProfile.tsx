@@ -66,12 +66,83 @@ function average(values: number[]) {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
+function analysisIdentity(position: IssueResolution["provider_positions"][number]) {
+  return `${position.provider || "unknown"}::${position.model || "unknown"}`;
+}
+
+function independentAnalysisCount(issue: IssueResolution) {
+  return new Set(issue.provider_positions.map(analysisIdentity)).size;
+}
+
+function hasRelatedBlockingIssue(issue: IssueResolution) {
+  return issue.missing_facts.some((fact) =>
+    fact.toLowerCase().includes("resolve related controlling issue before reliance:")
+  );
+}
+
+function blockingIssueNames(issue: IssueResolution) {
+  return issue.missing_facts
+    .filter((fact) =>
+      fact.toLowerCase().includes("resolve related controlling issue before reliance:")
+    )
+    .map((fact) =>
+      fact.replace(
+        /resolve related controlling issue before reliance:\s*/i,
+        ""
+      ).trim()
+    )
+    .filter(Boolean);
+}
+
+function cleanIssueTitle(issue: IssueResolution) {
+  const label = (issue.issue_label || "").trim();
+  const statement = (issue.issue_statement || "").trim();
+
+  const genericLabels = new Set([
+    "governing_tax",
+    "governing tax",
+    "tax",
+    "general tax",
+    "general",
+    "other",
+  ]);
+
+  if (genericLabels.has(label.toLowerCase()) && statement) {
+    return statement;
+  }
+
+  return label || statement || "Tax issue";
+}
+
+function normalizedIssueKey(issue: IssueResolution) {
+  return cleanIssueTitle(issue)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function dedupeIssues(items: IssueResolution[]) {
+  const seen = new Set<string>();
+
+  return items.filter((issue) => {
+    const key = normalizedIssueKey(issue);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function divergenceRisk(issue: IssueResolution) {
   if (issue.status === "unresolved") return 10;
   if (issue.disagreements.length >= 2) return 9;
   if (issue.disagreements.length === 1) return 7;
-  if (issue.status === "fact_dependent") return 5;
-  if (issue.status === "supported") return 3;
+  if (hasRelatedBlockingIssue(issue)) return 7;
+  if (issue.status === "fact_dependent") return 6;
+
+  if (issue.status === "supported") {
+    return independentAnalysisCount(issue) >= 2 ? 2 : 6;
+  }
+
   return 1;
 }
 
@@ -320,7 +391,7 @@ function RadarChart({ metrics }: { metrics: RadarMetric[] }) {
             key={metric.label}
             className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2"
           >
-            <span className="text-xs text-white/48">
+            <span className="text-xs text-white/68">
               {metric.label}
             </span>
 
@@ -348,11 +419,21 @@ export default function CrosscheckRiskProfile({
         issue.status === "verified"
     );
 
-    const modelSupported = assessed.filter(
+    const crossModelSupported = assessed.filter(
       (issue) =>
         issue.status === "supported" &&
-        issue.authority_validation?.verdict !== "verified"
+        issue.authority_validation?.verdict !== "verified" &&
+        independentAnalysisCount(issue) >= 2
     );
+
+    const singleModelSupported = assessed.filter(
+      (issue) =>
+        issue.status === "supported" &&
+        issue.authority_validation?.verdict !== "verified" &&
+        independentAnalysisCount(issue) < 2
+    );
+
+    const blockingDependencies = assessed.filter(hasRelatedBlockingIssue);
 
     const factDependent = assessed.filter(
       (issue) => issue.status === "fact_dependent"
@@ -399,17 +480,23 @@ export default function CrosscheckRiskProfile({
       ])
     );
 
-    const controversyIssues = assessed.filter(
-      (issue) =>
-        issue.status === "unresolved" ||
-        issue.status === "fact_dependent" ||
-        issue.disagreements.length > 0
+    const controversyIssues = dedupeIssues(
+      assessed.filter(
+        (issue) =>
+          issue.status === "unresolved" ||
+          issue.status === "fact_dependent" ||
+          issue.disagreements.length > 0 ||
+          hasRelatedBlockingIssue(issue)
+      )
     );
 
-    const convergedIssues = assessed.filter(
-      (issue) =>
-        issue.status === "verified" ||
-        issue.status === "supported"
+    const convergedIssues = dedupeIssues(
+      assessed.filter(
+        (issue) =>
+          (issue.status === "verified" ||
+            issue.status === "supported") &&
+          !hasRelatedBlockingIssue(issue)
+      )
     );
 
     const metrics: RadarMetric[] = [
@@ -467,6 +554,14 @@ export default function CrosscheckRiskProfile({
         `${unresolved.length} controlling issue${
           unresolved.length === 1 ? "" : "s"
         } remain unresolved after the current CrossCheck.`;
+    } else if (blockingDependencies.length > 0) {
+      outcomeTitle = "Convergence with unresolved dependencies";
+      outcomeText =
+        `The primary analyses largely converge, but ${
+          blockingDependencies.length
+        } supported issue${
+          blockingDependencies.length === 1 ? " remains" : " remain"
+        } linked to a controlling issue that must be resolved before reliance.`;
     } else if (factDependent.length > 0) {
       outcomeTitle = "Convergence with factual dependencies";
       outcomeText =
@@ -476,29 +571,37 @@ export default function CrosscheckRiskProfile({
           factDependent.length === 1 ? "" : "s"
         } depend on facts that still require confirmation.`;
     } else if (
+      authorityVerified.length === 0 &&
+      (crossModelSupported.length > 0 || singleModelSupported.length > 0)
+    ) {
+      outcomeTitle =
+        "Strong model convergence; authority verification incomplete";
+
+      outcomeText =
+        `No unresolved material conflicts were identified across ${assessed.length} controlling issues. ` +
+        `${crossModelSupported.length} issue${
+          crossModelSupported.length === 1 ? " has" : "s have"
+        } support from multiple independent analyses; ` +
+        `${singleModelSupported.length} issue${
+          singleModelSupported.length === 1 ? " is" : "s are"
+        } currently supported by only one analysis. None has yet reached separate authority-verified status.`;
+    } else if (
       convergedIssues.length === assessed.length &&
       assessed.length > 0
     ) {
       outcomeTitle = "Strong analytical convergence";
-
-      if (modelSupported.length > 0) {
-        outcomeText =
-          `No unresolved material conflicts were identified across ${assessed.length} controlling issues. ` +
-          `${authorityVerified.length} ${
-            authorityVerified.length === 1 ? "issue is" : "issues are"
-          } authority-verified; ${modelSupported.length} ${
-            modelSupported.length === 1 ? "issue remains" : "issues remain"
-          } supported by CrossCheck convergence without separate authority verification.`;
-      } else {
-        outcomeText =
-          `No unresolved material conflicts were identified across ${assessed.length} controlling issues.`;
-      }
+      outcomeText =
+        `No unresolved material conflicts were identified across ${assessed.length} controlling issues. ` +
+        `${authorityVerified.length} are authority-verified and ` +
+        `${crossModelSupported.length} have support from multiple independent analyses.`;
     }
 
     return {
       assessed,
       authorityVerified,
-      modelSupported,
+      crossModelSupported,
+      singleModelSupported,
+      blockingDependencies,
       factDependent,
       unresolved,
       uncertaintyDrivers,
@@ -513,9 +616,9 @@ export default function CrosscheckRiskProfile({
   if (!issues.length || !profile.assessed.length) return null;
 
   return (
-    <section className="rounded-3xl border border-white/12 bg-[#111827] p-4 shadow-[0_18px_50px_rgba(0,0,0,0.22)] sm:p-5">
+    <section className="rounded-3xl border border-sky-300/20 bg-gradient-to-br from-[#1A2A44] via-[#16263E] to-[#122036] p-4 shadow-[0_24px_70px_rgba(0,0,0,0.30)] sm:p-6">
       <div>
-        <div className="text-xs font-medium uppercase tracking-[0.18em] text-sky-200/55">
+        <div className="text-xs font-medium uppercase tracking-[0.18em] text-sky-200/80">
           CrossCheck intelligence
         </div>
 
@@ -529,8 +632,8 @@ export default function CrosscheckRiskProfile({
         </p>
       </div>
 
-      <div className="mt-5 rounded-2xl border border-sky-400/15 bg-sky-400/[0.055] px-4 py-4">
-        <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-sky-200/50">
+      <div className="mt-5 rounded-2xl border border-sky-300/25 bg-[#1E3A5A] px-5 py-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+        <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-sky-100/75">
           CrossCheck outcome
         </div>
 
@@ -538,12 +641,12 @@ export default function CrosscheckRiskProfile({
           {profile.outcomeTitle}
         </div>
 
-        <div className="mt-2 max-w-4xl text-sm leading-6 text-white/58">
+        <div className="mt-2 max-w-4xl text-sm leading-6 text-white/78">
           {profile.outcomeText}
         </div>
       </div>
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
         <MetricCard
           label="Independent analyses"
           value={providerCount > 0 ? String(providerCount) : "—"}
@@ -557,26 +660,36 @@ export default function CrosscheckRiskProfile({
         <MetricCard
           label="Authority verified"
           value={String(profile.authorityVerified.length)}
+          tone="verified"
         />
 
         <MetricCard
-          label="Model supported"
-          value={String(profile.modelSupported.length)}
+          label="Cross-model supported"
+          value={String(profile.crossModelSupported.length)}
+          tone="supported"
+        />
+
+        <MetricCard
+          label="Single-model only"
+          value={String(profile.singleModelSupported.length)}
+          tone="single"
         />
 
         <MetricCard
           label="Fact-dependent"
           value={String(profile.factDependent.length)}
+          tone="warning"
         />
 
         <MetricCard
           label="Unresolved"
           value={String(profile.unresolved.length)}
+          tone="danger"
         />
       </div>
 
       <div className="mt-5 grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">
-        <div className="rounded-2xl border border-white/10 bg-[#0F172A] p-3 sm:p-4">
+        <div className="rounded-2xl border border-sky-200/15 bg-[#172A45] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] sm:p-5">
           <div className="mb-2 text-sm font-medium text-white/82">
             Residual uncertainty radar
           </div>
@@ -591,7 +704,7 @@ export default function CrosscheckRiskProfile({
         </div>
 
         <div className="space-y-4">
-          <div className="rounded-2xl border border-emerald-400/15 bg-emerald-400/[0.06] p-4">
+          <div className="rounded-2xl border border-emerald-300/25 bg-[#173C3B] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
             <div className="text-sm font-medium text-emerald-100/90">
               Where the analyses converge
             </div>
@@ -621,7 +734,7 @@ export default function CrosscheckRiskProfile({
             ) : null}
           </div>
 
-          <div className="rounded-2xl border border-amber-400/15 bg-amber-400/[0.05] p-4">
+          <div className="rounded-2xl border border-amber-300/25 bg-[#3A301C] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
             <div className="text-sm font-medium text-amber-100/90">
               Where controversy remains
             </div>
@@ -638,14 +751,14 @@ export default function CrosscheckRiskProfile({
                 ))
               ) : (
                 <div className="text-sm leading-6 text-white/46">
-                  No material fact-dependent or unresolved controlling issue
-                  remains in the current CrossCheck ledger.
+                  No material fact-dependent, unresolved, or inherited
+                  blocking dependency remains in the current CrossCheck ledger.
                 </div>
               )}
             </div>
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+          <div className="rounded-2xl border border-sky-200/15 bg-[#1B2C46] p-4">
             <div className="text-sm font-medium text-white/82">
               What could change the result
             </div>
@@ -761,10 +874,12 @@ export default function CrosscheckRiskProfile({
       </details>
 
       <div className="mt-4 border-t border-white/10 pt-4 text-xs leading-5 text-white/35">
-        Supported means the CrossCheck found materially aligned analytical
-        positions. Verified indicates stronger authority confirmation where
-        available. Neither status is an automatic legal conclusion, approval,
-        or substitute for professional judgment.
+        Cross-model supported means at least two independent analyses materially
+        align on the issue. Single-model support means the position survived the
+        CrossCheck but was not independently corroborated by another analysis.
+        Authority verified indicates stronger independent authority confirmation.
+        None of these statuses is an automatic legal conclusion, approval, or
+        substitute for professional judgment.
       </div>
     </section>
   );
@@ -773,17 +888,36 @@ export default function CrosscheckRiskProfile({
 function MetricCard({
   label,
   value,
+  tone = "neutral",
 }: {
   label: string;
   value: string;
+  tone?: "neutral" | "verified" | "supported" | "single" | "warning" | "danger";
 }) {
+  const toneClasses = {
+    neutral:
+      "border-white/15 bg-[#1B2B45]",
+    verified:
+      "border-emerald-300/25 bg-[#1B3A3A]",
+    supported:
+      "border-sky-300/25 bg-[#1B3552]",
+    single:
+      "border-violet-300/20 bg-[#2B2E50]",
+    warning:
+      "border-amber-300/25 bg-[#3A301C]",
+    danger:
+      "border-red-300/25 bg-[#40242A]",
+  }[tone];
+
   return (
-    <div className="rounded-2xl border border-white/10 bg-[#0F172A] px-3 py-3">
-      <div className="text-[11px] uppercase tracking-[0.14em] text-white/34">
+    <div
+      className={`rounded-2xl border px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] ${toneClasses}`}
+    >
+      <div className="text-[11px] uppercase tracking-[0.14em] text-white/58">
         {label}
       </div>
 
-      <div className="mt-1 text-xl font-semibold text-white/86">
+      <div className="mt-1 text-2xl font-semibold text-white/95">
         {value}
       </div>
     </div>
@@ -811,28 +945,21 @@ function SmallMetric({
 }
 
 function IssueRow({ issue }: { issue: IssueResolution }) {
-  const uniqueProviders = Array.from(
-    new Set(
-      issue.provider_positions
-        .map((position) => position.provider?.trim())
-        .filter(Boolean)
-    )
-  );
+  const count = independentAnalysisCount(issue);
+  const blockers = blockingIssueNames(issue);
 
   return (
-    <div className="flex items-start justify-between gap-3 rounded-xl border border-white/8 bg-black/10 px-3 py-2.5">
+    <div className="flex items-start justify-between gap-3 rounded-xl border border-white/12 bg-white/[0.055] px-3 py-3">
       <div>
-        <div className="text-sm leading-5 text-white/72">
-          {issue.issue_label || issue.issue_statement}
+        <div className="text-sm font-medium leading-5 text-white/88">
+          {cleanIssueTitle(issue)}
         </div>
 
-        <div className="mt-1 text-[11px] text-white/35">
-          {issue.provider_positions.length} independent position
-          {issue.provider_positions.length === 1 ? "" : "s"}
+        <div className="mt-1 text-[11px] text-white/52">
+          {count} independent analysis
+          {count === 1 ? "" : "es"}
 
-          {uniqueProviders.length
-            ? ` · ${uniqueProviders.join(", ")}`
-            : ""}
+          {count >= 2 ? " aligned" : " only"}
 
           {issue.missing_facts.length
             ? ` · ${issue.missing_facts.length} missing fact${
@@ -840,6 +967,12 @@ function IssueRow({ issue }: { issue: IssueResolution }) {
               }`
             : ""}
         </div>
+
+        {blockers.length ? (
+          <div className="mt-2 text-xs leading-5 text-amber-100/80">
+            Depends on unresolved controlling issue: {blockers.join(", ")}
+          </div>
+        ) : null}
       </div>
 
       <span
