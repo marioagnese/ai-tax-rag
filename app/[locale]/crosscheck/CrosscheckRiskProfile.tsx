@@ -52,6 +52,7 @@ type Props = {
 };
 
 type RadarMetric = {
+  shortLabel: string;
   label: string;
   value: number;
 };
@@ -63,23 +64,6 @@ function clampScore(value: number) {
 function average(values: number[]) {
   if (!values.length) return 1;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
-function resolutionRisk(issue: IssueResolution) {
-  switch (issue.status) {
-    case "verified":
-      return 1;
-    case "supported":
-      return 3;
-    case "fact_dependent":
-      return 6;
-    case "rejected":
-      return 8;
-    case "unresolved":
-      return 10;
-    default:
-      return 5;
-  }
 }
 
 function divergenceRisk(issue: IssueResolution) {
@@ -100,8 +84,9 @@ function authorityRisk(issue: IssueResolution) {
   if (verdict === "contradicted") return 10;
 
   if (issue.status === "verified") return 2;
-  if (issue.status === "supported") return 4;
-  if (issue.status === "unresolved") return 8;
+  if (issue.status === "supported") return 6;
+  if (issue.status === "fact_dependent") return 7;
+  if (issue.status === "unresolved") return 9;
 
   return 5;
 }
@@ -127,7 +112,7 @@ function controversyRisk(issue: IssueResolution) {
   if (issue.disagreements.length > 0) return 8;
   if (issue.status === "fact_dependent") return 6;
   if (issue.status === "rejected") return 7;
-  if (issue.status === "supported") return 3;
+  if (issue.status === "supported") return 2;
   return 1;
 }
 
@@ -190,15 +175,16 @@ function statusClasses(status: IssueResolution["status"]) {
 }
 
 function RadarChart({ metrics }: { metrics: RadarMetric[] }) {
-  const size = 360;
+  const size = 440;
   const center = size / 2;
-  const radius = 112;
-  const labelRadius = 150;
+  const radius = 118;
+  const labelRadius = 160;
   const levels = [2, 4, 6, 8, 10];
 
   const point = (index: number, value: number, r = radius) => {
     const angle =
       -Math.PI / 2 + (index * Math.PI * 2) / metrics.length;
+
     const scaled = r * (value / 10);
 
     return {
@@ -215,110 +201,135 @@ function RadarChart({ metrics }: { metrics: RadarMetric[] }) {
     .join(" ");
 
   return (
-    <div className="flex justify-center overflow-hidden">
-      <svg
-        viewBox={`0 0 ${size} ${size}`}
-        className="h-auto w-full max-w-[420px]"
-        role="img"
-        aria-label="CrossCheck risk radar"
-      >
-        {levels.map((level) => {
-          const ring = metrics
-            .map((_, index) => {
-              const p = point(index, level);
-              return `${p.x},${p.y}`;
-            })
-            .join(" ");
+    <div>
+      <div className="flex justify-center">
+        <svg
+          viewBox={`0 0 ${size} ${size}`}
+          className="h-auto w-full max-w-[460px]"
+          role="img"
+          aria-label="CrossCheck residual uncertainty radar"
+        >
+          {levels.map((level) => {
+            const ring = metrics
+              .map((_, index) => {
+                const p = point(index, level);
+                return `${p.x},${p.y}`;
+              })
+              .join(" ");
 
-          return (
-            <polygon
-              key={level}
-              points={ring}
-              fill="none"
-              stroke="rgba(255,255,255,0.10)"
-              strokeWidth="1"
-            />
-          );
-        })}
-
-        {metrics.map((_, index) => {
-          const p = point(index, 10);
-          return (
-            <line
-              key={index}
-              x1={center}
-              y1={center}
-              x2={p.x}
-              y2={p.y}
-              stroke="rgba(255,255,255,0.08)"
-              strokeWidth="1"
-            />
-          );
-        })}
-
-        <polygon
-          points={polygon}
-          fill="rgba(96,165,250,0.18)"
-          stroke="rgba(147,197,253,0.95)"
-          strokeWidth="2.5"
-        />
-
-        {metrics.map((metric, index) => {
-          const p = point(index, metric.value);
-          const angle =
-            -Math.PI / 2 + (index * Math.PI * 2) / metrics.length;
-
-          const lx = center + Math.cos(angle) * labelRadius;
-          const ly = center + Math.sin(angle) * labelRadius;
-
-          const anchor =
-            Math.cos(angle) > 0.3
-              ? "start"
-              : Math.cos(angle) < -0.3
-              ? "end"
-              : "middle";
-
-          return (
-            <g key={metric.label}>
-              <circle
-                cx={p.x}
-                cy={p.y}
-                r="4"
-                fill="rgb(191,219,254)"
+            return (
+              <polygon
+                key={level}
+                points={ring}
+                fill="none"
+                stroke="rgba(255,255,255,0.10)"
+                strokeWidth="1"
               />
+            );
+          })}
 
-              <text
-                x={lx}
-                y={ly}
-                textAnchor={anchor}
-                dominantBaseline="middle"
-                fill="rgba(255,255,255,0.72)"
-                fontSize="10"
-              >
-                {metric.label}
-              </text>
+          {metrics.map((_, index) => {
+            const p = point(index, 10);
 
-              <text
-                x={lx}
-                y={ly + 13}
-                textAnchor={anchor}
-                dominantBaseline="middle"
-                fill="rgba(255,255,255,0.42)"
-                fontSize="9"
-              >
-                {metric.value}/10
-              </text>
-            </g>
-          );
-        })}
+            return (
+              <line
+                key={index}
+                x1={center}
+                y1={center}
+                x2={p.x}
+                y2={p.y}
+                stroke="rgba(255,255,255,0.08)"
+                strokeWidth="1"
+              />
+            );
+          })}
 
-        <circle
-          cx={center}
-          cy={center}
-          r="3"
-          fill="rgba(255,255,255,0.40)"
-        />
-      </svg>
+          <polygon
+            points={polygon}
+            fill="rgba(96,165,250,0.18)"
+            stroke="rgba(147,197,253,0.95)"
+            strokeWidth="2.5"
+          />
+
+          {metrics.map((metric, index) => {
+            const p = point(index, metric.value);
+
+            const angle =
+              -Math.PI / 2 + (index * Math.PI * 2) / metrics.length;
+
+            const lx = center + Math.cos(angle) * labelRadius;
+            const ly = center + Math.sin(angle) * labelRadius;
+
+            const anchor =
+              Math.cos(angle) > 0.25
+                ? "start"
+                : Math.cos(angle) < -0.25
+                ? "end"
+                : "middle";
+
+            return (
+              <g key={metric.label}>
+                <circle
+                  cx={p.x}
+                  cy={p.y}
+                  r="4"
+                  fill="rgb(191,219,254)"
+                />
+
+                <text
+                  x={lx}
+                  y={ly}
+                  textAnchor={anchor}
+                  dominantBaseline="middle"
+                  fill="rgba(255,255,255,0.72)"
+                  fontSize="11"
+                >
+                  {metric.shortLabel}
+                </text>
+
+                <text
+                  x={lx}
+                  y={ly + 15}
+                  textAnchor={anchor}
+                  dominantBaseline="middle"
+                  fill="rgba(255,255,255,0.42)"
+                  fontSize="9"
+                >
+                  {metric.value}/10
+                </text>
+              </g>
+            );
+          })}
+
+          <circle
+            cx={center}
+            cy={center}
+            r="3"
+            fill="rgba(255,255,255,0.40)"
+          />
+        </svg>
+      </div>
+
+      <div className="mt-1 text-center text-[11px] text-white/34">
+        Center = lower residual uncertainty · Outer edge = higher residual uncertainty
+      </div>
+
+      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        {metrics.map((metric) => (
+          <div
+            key={metric.label}
+            className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2"
+          >
+            <span className="text-xs text-white/48">
+              {metric.label}
+            </span>
+
+            <span className="text-xs font-medium text-white/72">
+              {metric.value}/10
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -331,15 +342,22 @@ export default function CrosscheckRiskProfile({
     const controlling = issues.filter((issue) => issue.controlling);
     const assessed = controlling.length ? controlling : issues;
 
-    const verified = assessed.filter(
-      (issue) => issue.status === "verified"
+    const authorityVerified = assessed.filter(
+      (issue) =>
+        issue.authority_validation?.verdict === "verified" ||
+        issue.status === "verified"
     );
-    const supported = assessed.filter(
-      (issue) => issue.status === "supported"
+
+    const modelSupported = assessed.filter(
+      (issue) =>
+        issue.status === "supported" &&
+        issue.authority_validation?.verdict !== "verified"
     );
+
     const factDependent = assessed.filter(
       (issue) => issue.status === "fact_dependent"
     );
+
     const unresolved = assessed.filter(
       (issue) => issue.status === "unresolved"
     );
@@ -350,6 +368,35 @@ export default function CrosscheckRiskProfile({
           issue.missing_facts.map((fact) => fact.trim()).filter(Boolean)
         )
       )
+    );
+
+    const authorityConcerns = assessed
+      .filter(
+        (issue) =>
+          issue.authority_validation?.verdict === "insufficient" ||
+          issue.authority_validation?.verdict === "contradicted" ||
+          issue.authority_validation?.verdict === "fact_dependent"
+      )
+      .map((issue) => {
+        const label = issue.issue_label || issue.issue_statement;
+        const verdict = issue.authority_validation?.verdict;
+
+        if (verdict === "contradicted") {
+          return `${label}: available authority conflicts with the current position.`;
+        }
+
+        if (verdict === "fact_dependent") {
+          return `${label}: authority outcome depends on facts that still require confirmation.`;
+        }
+
+        return `${label}: available authority was insufficient to independently verify the position.`;
+      });
+
+    const uncertaintyDrivers = Array.from(
+      new Set([
+        ...missingFacts,
+        ...authorityConcerns,
+      ])
     );
 
     const controversyIssues = assessed.filter(
@@ -367,42 +414,42 @@ export default function CrosscheckRiskProfile({
 
     const metrics: RadarMetric[] = [
       {
-        label: "Resolution risk",
-        value: clampScore(
-          average(assessed.map(resolutionRisk))
-        ),
-      },
-      {
-        label: "Model divergence",
+        shortLabel: "Divergence",
+        label: "Analytical divergence",
         value: clampScore(
           average(assessed.map(divergenceRisk))
         ),
       },
       {
+        shortLabel: "Authority",
         label: "Authority risk",
         value: clampScore(
           average(assessed.map(authorityRisk))
         ),
       },
       {
+        shortLabel: "Facts",
         label: "Fact uncertainty",
         value: clampScore(
           average(assessed.map(factRisk))
         ),
       },
       {
-        label: "Controversy",
+        shortLabel: "Controversy",
+        label: "Legal controversy",
         value: clampScore(
           average(assessed.map(controversyRisk))
         ),
       },
       {
+        shortLabel: "Confidence",
         label: "Confidence risk",
         value: clampScore(
           average(assessed.map(confidenceRisk))
         ),
       },
       {
+        shortLabel: "Research",
         label: "Research residual",
         value: clampScore(
           average(assessed.map(researchResidualRisk))
@@ -410,21 +457,56 @@ export default function CrosscheckRiskProfile({
       },
     ];
 
-    const overallDiagnostic = clampScore(
-      average(metrics.map((metric) => metric.value))
-    );
+    let outcomeTitle = "Mixed analytical outcome";
+    let outcomeText =
+      "The CrossCheck identified both converged and unresolved elements that should be reviewed in context.";
+
+    if (unresolved.length > 0) {
+      outcomeTitle = "Material controversy remains";
+      outcomeText =
+        `${unresolved.length} controlling issue${
+          unresolved.length === 1 ? "" : "s"
+        } remain unresolved after the current CrossCheck.`;
+    } else if (factDependent.length > 0) {
+      outcomeTitle = "Convergence with factual dependencies";
+      outcomeText =
+        `No material legal conflict remains unresolved, but ${
+          factDependent.length
+        } controlling issue${
+          factDependent.length === 1 ? "" : "s"
+        } depend on facts that still require confirmation.`;
+    } else if (
+      convergedIssues.length === assessed.length &&
+      assessed.length > 0
+    ) {
+      outcomeTitle = "Strong analytical convergence";
+
+      if (modelSupported.length > 0) {
+        outcomeText =
+          `No unresolved material conflicts were identified across ${assessed.length} controlling issues. ` +
+          `${authorityVerified.length} ${
+            authorityVerified.length === 1 ? "issue is" : "issues are"
+          } authority-verified; ${modelSupported.length} ${
+            modelSupported.length === 1 ? "issue remains" : "issues remain"
+          } supported by CrossCheck convergence without separate authority verification.`;
+      } else {
+        outcomeText =
+          `No unresolved material conflicts were identified across ${assessed.length} controlling issues.`;
+      }
+    }
 
     return {
       assessed,
-      verified,
-      supported,
+      authorityVerified,
+      modelSupported,
       factDependent,
       unresolved,
-      missingFacts,
+      uncertaintyDrivers,
       controversyIssues,
       convergedIssues,
       metrics,
-      overallDiagnostic,
+      outcomeTitle,
+      outcomeText,
     };
   }, [issues]);
 
@@ -432,56 +514,61 @@ export default function CrosscheckRiskProfile({
 
   return (
     <section className="rounded-3xl border border-white/12 bg-[#111827] p-4 shadow-[0_18px_50px_rgba(0,0,0,0.22)] sm:p-5">
-      <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="text-xs font-medium uppercase tracking-[0.18em] text-sky-200/55">
-            CrossCheck intelligence
-          </div>
-
-          <h2 className="mt-1 text-lg font-semibold text-white/92">
-            CrossCheck Risk Profile
-          </h2>
-
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-white/48">
-            A diagnostic view of where the independent analyses converge,
-            where uncertainty remains, and what is driving that uncertainty.
-            Higher radar values indicate greater residual analytical risk.
-          </p>
+      <div>
+        <div className="text-xs font-medium uppercase tracking-[0.18em] text-sky-200/55">
+          CrossCheck intelligence
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-[#0F172A] px-4 py-3 text-right">
-          <div className="text-[11px] uppercase tracking-[0.16em] text-white/36">
-            Diagnostic risk
-          </div>
-          <div className="mt-1 text-2xl font-semibold text-white/90">
-            {profile.overallDiagnostic}
-            <span className="text-sm font-normal text-white/35"> / 10</span>
-          </div>
-          <div className="mt-1 text-[11px] text-white/36">
-            Not a probability or legal conclusion
-          </div>
+        <h2 className="mt-1 text-lg font-semibold text-white/92">
+          CrossCheck Risk Profile
+        </h2>
+
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-white/48">
+          A structured view of where the independent analyses converge,
+          where genuine uncertainty remains, and what is driving that uncertainty.
+        </p>
+      </div>
+
+      <div className="mt-5 rounded-2xl border border-sky-400/15 bg-sky-400/[0.055] px-4 py-4">
+        <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-sky-200/50">
+          CrossCheck outcome
+        </div>
+
+        <div className="mt-1 text-lg font-semibold text-white/90">
+          {profile.outcomeTitle}
+        </div>
+
+        <div className="mt-2 max-w-4xl text-sm leading-6 text-white/58">
+          {profile.outcomeText}
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
         <MetricCard
           label="Independent analyses"
           value={providerCount > 0 ? String(providerCount) : "—"}
         />
+
         <MetricCard
           label="Controlling issues"
           value={String(profile.assessed.length)}
         />
+
         <MetricCard
-          label="Verified / supported"
-          value={String(
-            profile.verified.length + profile.supported.length
-          )}
+          label="Authority verified"
+          value={String(profile.authorityVerified.length)}
         />
+
+        <MetricCard
+          label="Model supported"
+          value={String(profile.modelSupported.length)}
+        />
+
         <MetricCard
           label="Fact-dependent"
           value={String(profile.factDependent.length)}
         />
+
         <MetricCard
           label="Unresolved"
           value={String(profile.unresolved.length)}
@@ -495,9 +582,9 @@ export default function CrosscheckRiskProfile({
           </div>
 
           <div className="mb-2 text-xs leading-5 text-white/38">
-            Scores are deterministically derived from the existing
-            CrossCheck issue ledger. They are not generated as a separate
-            AI opinion.
+            The radar is derived deterministically from the existing
+            CrossCheck issue ledger. It does not create a separate legal
+            conclusion or probability estimate.
           </div>
 
           <RadarChart metrics={profile.metrics} />
@@ -509,23 +596,39 @@ export default function CrosscheckRiskProfile({
               Where the analyses converge
             </div>
 
+            <div className="mt-1 text-xs leading-5 text-white/38">
+              Issues where the CrossCheck found materially aligned or verified
+              positions after consolidation and review.
+            </div>
+
             <div className="mt-3 space-y-2">
               {profile.convergedIssues.length ? (
-                profile.convergedIssues.slice(0, 5).map((issue) => (
+                profile.convergedIssues.slice(0, 6).map((issue) => (
                   <IssueRow key={issue.issue_id} issue={issue} />
                 ))
               ) : (
                 <div className="text-sm leading-6 text-white/46">
-                  No controlling issue has yet reached verified or supported
-                  status.
+                  No controlling issue has yet reached verified or supported status.
                 </div>
               )}
             </div>
+
+            {profile.convergedIssues.length > 6 ? (
+              <div className="mt-3 text-xs text-white/36">
+                + {profile.convergedIssues.length - 6} additional converged issue
+                {profile.convergedIssues.length - 6 === 1 ? "" : "s"} in the ledger below.
+              </div>
+            ) : null}
           </div>
 
           <div className="rounded-2xl border border-amber-400/15 bg-amber-400/[0.05] p-4">
             <div className="text-sm font-medium text-amber-100/90">
               Where controversy remains
+            </div>
+
+            <div className="mt-1 text-xs leading-5 text-white/38">
+              Genuine unresolved disagreement, fact dependency, or surviving
+              competing positions.
             </div>
 
             <div className="mt-3 space-y-2">
@@ -544,25 +647,30 @@ export default function CrosscheckRiskProfile({
 
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
             <div className="text-sm font-medium text-white/82">
-              What could reduce uncertainty
+              What could change the result
             </div>
 
-            {profile.missingFacts.length ? (
+            <div className="mt-1 text-xs leading-5 text-white/38">
+              Missing facts or authority limitations that could materially affect
+              the current analysis.
+            </div>
+
+            {profile.uncertaintyDrivers.length ? (
               <ul className="mt-3 space-y-2">
-                {profile.missingFacts.slice(0, 8).map((fact, index) => (
+                {profile.uncertaintyDrivers.slice(0, 8).map((item, index) => (
                   <li
-                    key={`${fact}-${index}`}
+                    key={`${item}-${index}`}
                     className="flex items-start gap-2 text-sm leading-6 text-white/65"
                   >
                     <span className="mt-[9px] h-1.5 w-1.5 shrink-0 rounded-full bg-sky-300/70" />
-                    <span>{fact}</span>
+                    <span>{item}</span>
                   </li>
                 ))}
               </ul>
             ) : (
               <div className="mt-3 text-sm leading-6 text-white/46">
-                The current issue ledger does not identify additional missing
-                facts required to resolve the analysis.
+                The current CrossCheck ledger does not identify a missing fact
+                or authority limitation expected to materially change the result.
               </div>
             )}
           </div>
@@ -606,17 +714,20 @@ export default function CrosscheckRiskProfile({
 
               <div className="mt-3 grid gap-2 sm:grid-cols-3">
                 <SmallMetric
-                  label="Provider positions"
+                  label="Independent positions"
                   value={String(issue.provider_positions.length)}
                 />
+
                 <SmallMetric
                   label="Confidence"
                   value={issue.confidence}
                 />
+
                 <SmallMetric
                   label="Authority"
                   value={
-                    issue.authority_validation?.verdict || "not separately validated"
+                    issue.authority_validation?.verdict ||
+                    "not separately validated"
                   }
                 />
               </div>
@@ -626,6 +737,7 @@ export default function CrosscheckRiskProfile({
                   <div className="text-[11px] uppercase tracking-[0.14em] text-white/34">
                     Remaining disagreement
                   </div>
+
                   <div className="mt-1 text-sm leading-6 text-white/62">
                     {issue.disagreements.join(" · ")}
                   </div>
@@ -637,6 +749,7 @@ export default function CrosscheckRiskProfile({
                   <div className="text-[11px] uppercase tracking-[0.14em] text-white/34">
                     Missing facts
                   </div>
+
                   <div className="mt-1 text-sm leading-6 text-white/62">
                     {issue.missing_facts.join(" · ")}
                   </div>
@@ -648,9 +761,10 @@ export default function CrosscheckRiskProfile({
       </details>
 
       <div className="mt-4 border-t border-white/10 pt-4 text-xs leading-5 text-white/35">
-        This profile visualizes the CrossCheck analysis already performed.
-        It does not independently determine the legally correct position and
-        does not replace professional judgment.
+        Supported means the CrossCheck found materially aligned analytical
+        positions. Verified indicates stronger authority confirmation where
+        available. Neither status is an automatic legal conclusion, approval,
+        or substitute for professional judgment.
       </div>
     </section>
   );
@@ -668,6 +782,7 @@ function MetricCard({
       <div className="text-[11px] uppercase tracking-[0.14em] text-white/34">
         {label}
       </div>
+
       <div className="mt-1 text-xl font-semibold text-white/86">
         {value}
       </div>
@@ -687,6 +802,7 @@ function SmallMetric({
       <div className="text-[10px] uppercase tracking-[0.12em] text-white/30">
         {label}
       </div>
+
       <div className="mt-0.5 text-xs capitalize text-white/66">
         {value}
       </div>
@@ -695,6 +811,14 @@ function SmallMetric({
 }
 
 function IssueRow({ issue }: { issue: IssueResolution }) {
+  const uniqueProviders = Array.from(
+    new Set(
+      issue.provider_positions
+        .map((position) => position.provider?.trim())
+        .filter(Boolean)
+    )
+  );
+
   return (
     <div className="flex items-start justify-between gap-3 rounded-xl border border-white/8 bg-black/10 px-3 py-2.5">
       <div>
@@ -703,8 +827,13 @@ function IssueRow({ issue }: { issue: IssueResolution }) {
         </div>
 
         <div className="mt-1 text-[11px] text-white/35">
-          {issue.provider_positions.length} provider position
+          {issue.provider_positions.length} independent position
           {issue.provider_positions.length === 1 ? "" : "s"}
+
+          {uniqueProviders.length
+            ? ` · ${uniqueProviders.join(", ")}`
+            : ""}
+
           {issue.missing_facts.length
             ? ` · ${issue.missing_facts.length} missing fact${
                 issue.missing_facts.length === 1 ? "" : "s"
