@@ -413,6 +413,12 @@ export default function CrosscheckRiskProfile({
     const controlling = issues.filter((issue) => issue.controlling);
     const assessed = controlling.length ? controlling : issues;
 
+    const ledgerAnalysisCount = new Set(
+      assessed.flatMap((issue) =>
+        issue.provider_positions.map(analysisIdentity)
+      )
+    ).size;
+
     const authorityVerified = assessed.filter(
       (issue) =>
         issue.authority_validation?.verdict === "verified" ||
@@ -598,6 +604,7 @@ export default function CrosscheckRiskProfile({
 
     return {
       assessed,
+      ledgerAnalysisCount,
       authorityVerified,
       crossModelSupported,
       singleModelSupported,
@@ -649,7 +656,13 @@ export default function CrosscheckRiskProfile({
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
         <MetricCard
           label="Independent analyses"
-          value={providerCount > 0 ? String(providerCount) : "—"}
+          value={String(
+            profile.ledgerAnalysisCount > 0
+              ? profile.ledgerAnalysisCount
+              : providerCount > 0
+              ? providerCount
+              : "—"
+          )}
         />
 
         <MetricCard
@@ -956,9 +969,7 @@ function IssueRow({ issue }: { issue: IssueResolution }) {
         </div>
 
         <div className="mt-1 text-[11px] text-white/52">
-          {count} independent analysis
-          {count === 1 ? "" : "es"}
-
+          {count} independent {count === 1 ? "analysis" : "analyses"}
           {count >= 2 ? " aligned" : " only"}
 
           {issue.missing_facts.length
