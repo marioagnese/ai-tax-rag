@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import LanguageToggle from "../components/LanguageToggle";
+import CrosscheckRiskProfile from "./CrosscheckRiskProfile";
 import {
   ArrowRight,
   ArrowUp,
@@ -53,6 +54,7 @@ type CrosscheckResponse = {
     followups?: string[];
     disagreements?: string[];
     confidence?: "low" | "medium" | "high";
+    issue_resolutions?: CrosscheckIssueResolution[];
   };
   providers?: Array<{
     provider: string;
@@ -100,6 +102,58 @@ type SavedAnalysis = {
   disagreements?: string[];
   thread?: AnalysisTurn[];
   documents?: SavedDocument[];
+};
+
+type CrosscheckIssueResolution = {
+  issue_id: string;
+  issue_label: string;
+  issue_statement: string;
+  provider_positions: Array<{
+    provider: string;
+    model: string;
+    position: string;
+    confidence?: "low" | "medium" | "high";
+  }>;
+  status: "verified" | "supported" | "fact_dependent" | "unresolved" | "rejected";
+  resolved_position?: string;
+  reasoning: string;
+  controlling: boolean;
+  missing_facts: string[];
+  disagreements: string[];
+  rejected_positions: string[];
+  confidence: "low" | "medium" | "high";
+  authority_validation?: {
+    verdict: "verified" | "contradicted" | "fact_dependent" | "insufficient";
+    reasoning: string;
+    citations: Array<{
+      cite: string;
+      score: number;
+      country?: string | null;
+      jurisdiction?: string | null;
+      law_code?: string | null;
+      article?: string | null;
+      section?: string | null;
+      source_type?: string | null;
+      citation_label?: string | null;
+      source_url?: string | null;
+      page_start?: number | null;
+      page_end?: number | null;
+    }>;
+  };
+  external_research?: {
+    attempted: boolean;
+    verdict: "supports_one" | "fact_dependent" | "unresolved";
+    selected_position?: string;
+    reasoning: string;
+    confidence: "low" | "medium" | "high";
+    source_quality: "primary" | "official_secondary" | "mixed" | "weak";
+    sources: Array<{
+      title: string;
+      url: string;
+      publisher?: string;
+      source_type?: string;
+    }>;
+  };
 };
 
 type ProviderOutput = NonNullable<CrosscheckResponse["providers"]>[number];
@@ -892,6 +946,7 @@ export default function CrosscheckV2Page() {
   const [caveats, setCaveats] = useState<string[]>([]);
   const [followups, setFollowups] = useState<string[]>([]);
   const [disagreements, setDisagreements] = useState<string[]>([]);
+  const [issueResolutions, setIssueResolutions] = useState<CrosscheckIssueResolution[]>([]);
   const [providers, setProviders] = useState<ProviderOutput[]>([]);
   const DEFAULT_PROMPT = "Does a U.S. company purchasing goods FOB from Brazil create PE or other taxable-presence risk in Brazil?";
 const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
@@ -1084,6 +1139,7 @@ const [runtimeMs, setRuntimeMs] = useState<number | null>(null);
     setCaveats([]);
     setFollowups([]);
     setDisagreements([]);
+    setIssueResolutions([]);
     setProviders([]);
     setRuntimeMs(null);
     setAttemptedCount(0);
@@ -1348,9 +1404,30 @@ async function persistRun(args: {
         });
       }
 
-      const data = (await res.json()) as CrosscheckResponse;
+      const responseText = await res.text();
+
+      let data: CrosscheckResponse | null = null;
+
+      if (responseText.trim()) {
+        try {
+          data = JSON.parse(responseText) as CrosscheckResponse;
+        } catch {
+          data = null;
+        }
+      }
 
       if (!res.ok || !data?.ok) {
+        if (res.status === 504) {
+          throw new Error(
+            "The CrossCheck analysis exceeded the local development gateway time limit. The production analysis may still complete normally."
+          );
+        }
+
+        if (!data) {
+          throw new Error(
+            `CrossCheck request failed with HTTP ${res.status}.`
+          );
+        }
         const providerErrors = (data?.providers || [])
           .map((p) => p.error)
           .filter(Boolean)
@@ -1374,6 +1451,18 @@ async function persistRun(args: {
       setCaveats(data?.consensus?.caveats || []);
       setFollowups(data?.consensus?.followups || []);
       setDisagreements(data?.consensus?.disagreements || []);
+
+      const nextIssueResolutions =
+        data?.consensus?.issue_resolutions || [];
+
+      // A refine/follow-up/finalize response may return a new memo without
+      // repeating the issue-level CrossCheck ledger. Preserve the most recent
+      // valid ledger in that case so CrossCheck Intelligence remains attached
+      // to the analysis and final deliverable.
+      if (nextIssueResolutions.length > 0 || !preserveExistingResult) {
+        setIssueResolutions(nextIssueResolutions);
+      }
+
       setProviders(data?.providers || []);
       setRuntimeMs(
         typeof data?.meta?.runtime_ms === "number" ? data.meta.runtime_ms : null
@@ -2376,6 +2465,13 @@ async function persistRun(args: {
                           </>
                         )}
                       </div>
+
+                      {!loading && issueResolutions.length > 0 ? (
+                        <CrosscheckRiskProfile
+                          issues={issueResolutions}
+                          providerCount={successCount}
+                        />
+                      ) : null}
 
                       {!isFinalAnswer ? (
                         <>
