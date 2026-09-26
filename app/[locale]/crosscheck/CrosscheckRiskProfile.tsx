@@ -49,6 +49,7 @@ type IssueResolution = {
 type Props = {
   issues: IssueResolution[];
   providerCount?: number;
+  preview?: boolean;
 };
 
 type RadarMetric = {
@@ -408,6 +409,7 @@ function RadarChart({ metrics }: { metrics: RadarMetric[] }) {
 export default function CrosscheckRiskProfile({
   issues,
   providerCount = 0,
+  preview = false,
 }: Props) {
   const profile = useMemo(() => {
     const controlling = issues.filter((issue) => issue.controlling);
@@ -622,6 +624,9 @@ export default function CrosscheckRiskProfile({
 
   if (!issues.length || !profile.assessed.length) return null;
 
+  const convergedDisplayLimit = preview ? 4 : 6;
+  const uncertaintyDisplayLimit = preview ? 4 : 8;
+
   return (
     <section className="rounded-3xl border border-sky-300/20 bg-gradient-to-br from-[#1A2A44] via-[#16263E] to-[#122036] p-4 shadow-[0_24px_70px_rgba(0,0,0,0.30)] sm:p-6">
       <div>
@@ -729,7 +734,7 @@ export default function CrosscheckRiskProfile({
 
             <div className="mt-3 space-y-2">
               {profile.convergedIssues.length ? (
-                profile.convergedIssues.slice(0, 6).map((issue) => (
+                profile.convergedIssues.slice(0, convergedDisplayLimit).map((issue) => (
                   <IssueRow key={issue.issue_id} issue={issue} />
                 ))
               ) : (
@@ -739,10 +744,10 @@ export default function CrosscheckRiskProfile({
               )}
             </div>
 
-            {profile.convergedIssues.length > 6 ? (
+            {profile.convergedIssues.length > convergedDisplayLimit ? (
               <div className="mt-3 text-xs text-white/36">
-                + {profile.convergedIssues.length - 6} additional converged issue
-                {profile.convergedIssues.length - 6 === 1 ? "" : "s"} in the ledger below.
+                + {profile.convergedIssues.length - convergedDisplayLimit} additional converged issue
+                {profile.convergedIssues.length - convergedDisplayLimit === 1 ? "" : "s"} in the ledger below.
               </div>
             ) : null}
           </div>
@@ -783,7 +788,7 @@ export default function CrosscheckRiskProfile({
 
             {profile.uncertaintyDrivers.length ? (
               <ul className="mt-3 space-y-2">
-                {profile.uncertaintyDrivers.slice(0, 8).map((item, index) => (
+                {profile.uncertaintyDrivers.slice(0, uncertaintyDisplayLimit).map((item, index) => (
                   <li
                     key={`${item}-${index}`}
                     className="flex items-start gap-2 text-sm leading-6 text-white/65"
@@ -803,7 +808,13 @@ export default function CrosscheckRiskProfile({
         </div>
       </div>
 
-      <details className="mt-5 rounded-2xl border border-white/10 bg-[#0F172A]">
+      <details
+        className={
+          preview
+            ? "hidden"
+            : "mt-5 rounded-2xl border border-white/10 bg-[#0F172A]"
+        }
+      >
         <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium text-white/76 marker:content-none">
           View issue-by-issue CrossCheck ledger
         </summary>

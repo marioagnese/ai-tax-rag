@@ -3,6 +3,8 @@
 import Image from "next/image";
 import Link from "next/link";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
+import CrosscheckRiskProfile from "../crosscheck/CrosscheckRiskProfile";
+import type { IssueResolution as CrosscheckIssueResolution } from "../../../src/core/crosscheck/types";
 import { trackEvent } from "../../../src/lib/analytics/ga";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -30,6 +32,7 @@ type AnalyzeResponse = {
     confidence?: "low" | "medium" | "high";
     caveats?: string[];
     missingFacts?: string[];
+    issue_resolutions?: CrosscheckIssueResolution[];
   };
   meta?: {
     attempted?: number;
@@ -48,10 +51,10 @@ const COPY = {
       signIn: "Sign in",
     },
     back: "TaxAiPro",
-    eyebrow: "One complimentary consensus preview",
+    eyebrow: "TaxAiPro 2.0 · Free CrossCheck Preview",
     title: "Ask your tax question.",
     subtitle:
-      "TaxAiPro will challenge multiple AI models and prepare one conservative consensus. No registration required.",
+      "See where independent AI tax analyses agree, where uncertainty remains, and which conclusions still need authority verification. No registration required.",
     placeholder:
       "Example: Does a U.S. company purchasing goods FOB from Brazil create PE or other taxable-presence risk in Brazil?",
     examples: [
@@ -70,7 +73,7 @@ const COPY = {
     missingFacts: "Facts that should be confirmed",
     unlockTitle: "Continue in the full TaxAiPro Workbench",
     unlockBody:
-      "Create a free account to access complete CrossCheck analysis, individual model outputs, follow-up questions, history, document upload, and professional memo generation.",
+      "Create a free account to unlock the complete CrossCheck ledger, individual model positions, follow-up analysis, saved history, document upload, and professional memo generation.",
     signup: "Create free account",
     signin: "Sign in",
     notice:
@@ -88,10 +91,10 @@ const COPY = {
       signIn: "Ingresar",
     },
     back: "TaxAiPro",
-    eyebrow: "Una vista previa de consenso gratuita",
+    eyebrow: "TaxAiPro 2.0 · Vista previa CrossCheck gratuita",
     title: "Haz tu pregunta tributaria.",
     subtitle:
-      "TaxAiPro comparará múltiples modelos de IA y preparará un consenso conservador. No se requiere registro.",
+      "Vea dónde coinciden los análisis fiscales independientes de IA, dónde persiste la incertidumbre y qué conclusiones aún requieren verificación de autoridad. No se requiere registro.",
     placeholder:
       "Ejemplo: ¿Una empresa estadounidense que compra bienes FOB de Brasil crea riesgo de establecimiento permanente u otra presencia fiscal en Brasil?",
     examples: [
@@ -110,7 +113,7 @@ const COPY = {
     missingFacts: "Hechos que deben confirmarse",
     unlockTitle: "Continúa en el TaxAiPro Workbench completo",
     unlockBody:
-      "Crea una cuenta gratuita para acceder a CrossCheck completo, respuestas individuales, preguntas de seguimiento, historial, carga de documentos y memorandos profesionales.",
+      "Crea una cuenta gratuita para desbloquear el registro completo de CrossCheck, posiciones individuales de los modelos, análisis de seguimiento, historial, documentos y memorandos profesionales.",
     signup: "Crear cuenta gratuita",
     signin: "Ingresar",
     notice:
@@ -128,10 +131,10 @@ const COPY = {
       signIn: "Entrar",
     },
     back: "TaxAiPro",
-    eyebrow: "Uma prévia gratuita de consenso",
+    eyebrow: "TaxAiPro 2.0 · Prévia CrossCheck gratuita",
     title: "Faça sua pergunta tributária.",
     subtitle:
-      "O TaxAiPro desafiará vários modelos de IA e preparará um consenso conservador. Nenhum cadastro é necessário.",
+      "Veja onde análises tributárias independentes de IA convergem, onde ainda existe incerteza e quais conclusões ainda precisam de validação por autoridade. Nenhum cadastro é necessário.",
     placeholder:
       "Exemplo: Uma empresa dos EUA que compra mercadorias FOB do Brasil cria risco de estabelecimento permanente ou outra presença tributável no Brasil?",
     examples: [
@@ -150,7 +153,7 @@ const COPY = {
     missingFacts: "Fatos que devem ser confirmados",
     unlockTitle: "Continue no TaxAiPro Workbench completo",
     unlockBody:
-      "Crie uma conta gratuita para acessar CrossCheck completo, respostas individuais, perguntas de acompanhamento, histórico, documentos e memorandos profissionais.",
+      "Crie uma conta gratuita para desbloquear o ledger completo do CrossCheck, posições individuais dos modelos, análises de acompanhamento, histórico, documentos e memorandos profissionais.",
     signup: "Criar conta gratuita",
     signin: "Entrar",
     notice:
@@ -537,7 +540,7 @@ export default function PublicAnalyzePage() {
         ) : null}
 
         {result?.ok && result.consensus ? (
-          <section className="mx-auto mt-8 max-w-4xl">
+          <section className="mx-auto mt-8 max-w-5xl">
             <div className="rounded-[28px] border border-cyan-300/18 bg-[#0a1626] p-5 shadow-2xl shadow-black/25 sm:p-7">
               <div className="flex flex-col gap-4 border-b border-white/8 pb-5 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -591,6 +594,16 @@ export default function PublicAnalyzePage() {
                 items={result.consensus.missingFacts}
               />
 </div>
+
+            {result.consensus.issue_resolutions?.length ? (
+              <div className="mt-6">
+                <CrosscheckRiskProfile
+                  issues={result.consensus.issue_resolutions}
+                  providerCount={result.meta?.succeeded || 0}
+                  preview
+                />
+              </div>
+            ) : null}
 
             <div className="mt-6 rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_90%_0%,rgba(34,211,238,0.12),transparent_35%),#0a1626] p-6 sm:p-8">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-cyan-300/10 text-cyan-200">

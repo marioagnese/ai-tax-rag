@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { runCrosscheck } from "../../../../src/core/crosscheck/orchestrator";
+import type { IssueResolution } from "../../../../src/core/crosscheck/types";
 import {
   assertPublicPreviewAvailable,
   type PublicPreviewLimitMeta,
@@ -55,6 +56,58 @@ function publicCaveats(values: unknown) {
         : value
     )
     .slice(0, 2);
+}
+
+function publicIssueResolutions(
+  values: IssueResolution[] | undefined
+): IssueResolution[] {
+  if (!Array.isArray(values)) return [];
+
+  return values
+    .filter((issue) => issue?.controlling)
+    .map((issue) => ({
+      issue_id: issue.issue_id,
+      issue_label: issue.issue_label,
+      issue_statement: issue.issue_statement,
+
+      // Public preview needs model identity/count for convergence scoring,
+      // but not the underlying raw model position text.
+      provider_positions: (issue.provider_positions || []).map((position) => ({
+        provider: position.provider,
+        model: position.model,
+        position: "",
+        confidence: position.confidence,
+      })),
+
+      status: issue.status,
+      reasoning: "",
+      controlling: true,
+
+      // Keep only limited decision-relevant metadata.
+      missing_facts: (issue.missing_facts || []).slice(0, 4),
+      disagreements: (issue.disagreements || []).slice(0, 3),
+      rejected_positions: [],
+      confidence: issue.confidence,
+
+      authority_validation: issue.authority_validation
+        ? {
+            verdict: issue.authority_validation.verdict,
+            reasoning: "",
+            citations: [],
+          }
+        : undefined,
+
+      external_research: issue.external_research
+        ? {
+            attempted: issue.external_research.attempted,
+            verdict: issue.external_research.verdict,
+            reasoning: "",
+            confidence: issue.external_research.confidence,
+            source_quality: issue.external_research.source_quality,
+            sources: [],
+          }
+        : undefined,
+    }));
 }
 
 function extractExecutiveSummary(value: unknown) {
@@ -267,6 +320,9 @@ export async function POST(req: NextRequest) {
           missingFacts: (
             result.consensus?.followups || []
           ).slice(0, 3),
+          issue_resolutions: publicIssueResolutions(
+            result.consensus?.issue_resolutions
+          ),
         },
         meta: {
           attempted,
